@@ -17,6 +17,29 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
+// agentStepCtxKey carries the agent-loop step identity through execution so the
+// read audit can attribute each in-loop tool invocation to its step. It lives
+// here (not in assistant) so ReadOnlyService.record can read it without an
+// import cycle — assistant attaches it and execution reads it.
+type agentStepCtxKey struct{}
+
+// AgentStep is the identity of one tool invocation inside an agent loop:
+// its zero-based position in the run plus the owning conversation.
+type AgentStep struct {
+	StepIndex    int    // zero-based position within the loop run
+	Conversation string // owning conversation id (empty when not persisted)
+}
+
+// WithAgentStep returns a context carrying the agent-loop step identity.
+func WithAgentStep(ctx context.Context, step AgentStep) context.Context {
+	return context.WithValue(ctx, agentStepCtxKey{}, step)
+}
+
+func agentStepFromContext(ctx context.Context) (AgentStep, bool) {
+	step, ok := ctx.Value(agentStepCtxKey{}).(AgentStep)
+	return step, ok
+}
+
 // tracer returns the execution package's instrumentation scope.
 func tracer() trace.Tracer {
 	return otel.Tracer("github.com/gracegaoya/ai-operations-copilot/internal/execution")
@@ -129,6 +152,13 @@ func (s *ReadOnlyService) record(ctx context.Context, user identity.CurrentUser,
 	}
 	if metadata == nil {
 		metadata = map[string]any{}
+	}
+	// Attribute in-loop tool invocations to their agent step for audit.
+	if step, ok := agentStepFromContext(ctx); ok {
+		if step.Conversation != "" {
+			metadata["conversation_turn_id"] = step.Conversation
+		}
+		metadata["agent_step"] = step.StepIndex
 	}
 	return s.audit.Record(ctx, audit.Event{
 		ID:        newAuditID(),

@@ -87,6 +87,10 @@ type Service struct {
 	// execution 在低风险 Runbook 自动执行时使用（ExecuteConfirmedStoredPlan）。
 	// 为 nil 时低风险 Runbook 退化为 confirmation_required。
 	execution ExecutionRunner
+	// agentLoopEnabled opts the service into the autonomous agent loop for
+	// agent-capable planners (EinoPlanner). Default false preserves single-plan
+	// streaming semantics; enable it in production wiring for LLM planners.
+	agentLoopEnabled bool
 }
 
 // ExecutionRunner 自动执行已确认的 plan（低风险 Runbook 路径）。
@@ -194,6 +198,16 @@ func (s *Service) WithRunbookRouter(r *RunbookRouter) *Service {
 // Runbook 退化为 confirmation_required。
 func (s *Service) WithExecutionRunner(e ExecutionRunner) *Service {
 	s.execution = e
+	return s
+}
+
+// WithAgentLoop opts the service into the autonomous agent loop for
+// agent-capable planners (EinoPlanner). When enabled, HandleMessageStream runs
+// the multi-step plan→execute→replan loop; when disabled it preserves the
+// existing single-plan streaming path. Deterministic planners never loop, even
+// when enabled.
+func (s *Service) WithAgentLoop(enabled bool) *Service {
+	s.agentLoopEnabled = enabled
 	return s
 }
 
@@ -324,7 +338,6 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 		hasConversation = true
 	}
 
-	planEvents := s.startPlannerStream(ctx, user, message, history, pageContext)
 	events := make(chan StreamEvent, 16)
 
 	// Wire tool call emitter to forward events to SSE channel. recover 兜底：
@@ -352,6 +365,11 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 			s.progressEmitter = nil
 			s.toolCallEmitter = nil
 		}()
+		if s.agentEnabled() {
+			s.runAgentLoopInStream(ctx, events, user, message, history, pageContext, conv.ID, hasConversation)
+			return
+		}
+		planEvents := s.startPlannerStream(ctx, user, message, history, pageContext)
 		var (
 			resolvedIntent Intent
 			planErr        error
@@ -396,6 +414,71 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 		events <- StreamEvent{Intent: &intentCopy, Response: &resp, Done: true}
 	}()
 	return events, nil
+}
+
+// runAgentLoopInStream drives the autonomous agent loop inside the streaming
+// goroutine (used when the planner is agent-capable). It forwards live LLM
+// deltas/thinking via the loop's streaming hook, emits one StepEvent per
+// executed advisory step, then routes the terminal outcome (done / clarification
+// / write handoff / maxSteps / error) to a final StreamEvent — always exactly
+// one terminal event, preserving the streaming contract.
+func (s *Service) runAgentLoopInStream(ctx context.Context, events chan<- StreamEvent, user identity.CurrentUser, message string, history []Turn, pageContext PageContext, convID string, hasConversation bool) {
+	forward := func(ev StreamEvent) {
+		defer func() { _ = recover() }()
+		events <- ev
+	}
+	execute := func(intent Intent, step int) (StepOutcome, error) {
+		// Attribute each loop step to its conversation + position so read audits
+		// carry agent_step / conversation_turn_id identity.
+		stepCtx := execution.WithAgentStep(ctx, execution.AgentStep{StepIndex: step, Conversation: convID})
+		return s.executeAgentStep(stepCtx, user, message, intent, step)
+	}
+	loop := NewAgentLoop(s.planner, execute, agentMaxSteps()).
+		WithStreaming(func(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) (<-chan StreamEvent, error) {
+			return s.startPlannerStream(ctx, user, message, history, pageContext), nil
+		}, forward)
+
+	run := loop.Run(ctx, user, message, history, pageContext)
+
+	// Emit each executed advisory step for the frontend step timeline.
+	for _, out := range run.Steps {
+		if out.Kind == StepAdvisory {
+			forward(stepEventFromOutcome(out))
+		}
+	}
+	if run.Err != nil {
+		forward(StreamEvent{Err: run.Err, Done: true})
+		return
+	}
+	var resp Response
+	switch run.Reason {
+	case TerminalDone:
+		resp = Response{Type: "answer", Answer: map[string]any{"message": run.FinalAnswer}, Message: run.FinalAnswer}
+	case TerminalClarification:
+		resp = Response{Type: "clarification_needed", Message: run.Clarified}
+	case TerminalHandoff:
+		resp = handoffResponse(run.Handoff)
+	default: // TerminalMaxSteps
+		answer := stepsAnswer(run)
+		resp = Response{Type: "answer", Message: answer, Answer: map[string]any{"message": answer}}
+	}
+	if hasConversation {
+		// Persist the full step-level audit trail: each tool step as a chained
+		// tool_step turn plus the terminal response, so intermediate results are
+		// replayable and reusable across turns.
+		assistantTurnID, perr := s.persistAgentRun(ctx, convID, message, run, resp)
+		if perr != nil {
+			forward(StreamEvent{Err: perr, Done: true})
+			return
+		}
+		resp.ConversationID = convID
+		resp.TurnID = assistantTurnID
+	}
+	intentCopy := Intent{}
+	if len(run.Steps) > 0 {
+		intentCopy = run.Steps[len(run.Steps)-1].Intent
+	}
+	forward(StreamEvent{Intent: &intentCopy, Response: &resp, Done: true})
 }
 
 // startPlannerStream returns a channel of planner stream events. When the

@@ -96,6 +96,11 @@ type Intent struct {
 	Confidence  float64
 	Explanation string
 	Selection   *CapabilitySelection
+	// Done marks a terminal intent that carries no further tool call: the
+	// agent loop should emit a final answer and stop. Answer is the
+	// human-facing completion summary (from the planner's final_answer).
+	Done   bool
+	Answer string
 }
 
 // CapabilitySelection captures why the planner picked a capability and how

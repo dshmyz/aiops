@@ -41,6 +41,45 @@ func TestEinoPlannerClarifiesWhenModelReturnsNoTool(t *testing.T) {
 	}
 }
 
+// TestEinoPlannerParsesFinalAnswer: when the model marks final_answer=true,
+// Plan must return a terminal Done intent carrying the human-facing summary
+// instead of a clarification (the model legitimately leaves tool_name null).
+func TestEinoPlannerParsesFinalAnswer(t *testing.T) {
+	t.Parallel()
+	chat := fakeEinoChatModel{content: `{"tool_name":null,"input":null,"diagnostic":null,"confidence":0.95,"explanation":"answered with alert tool","final_answer":true,"summary":"生产环境当前有 1 条告警：kafka 慢消费者（warning）。"}`}
+	planner := assistant.NewEinoPlanner(&chat)
+
+	intent, err := planner.Plan(context.Background(), user(), "当前有哪些告警？", nil, assistant.PageContext{})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if !intent.Done {
+		t.Fatalf("intent.Done = false, want true (final_answer)")
+	}
+	if intent.ToolName != "" {
+		t.Fatalf("terminal intent should carry no tool_name, got %q", intent.ToolName)
+	}
+	if want := "生产环境当前有 1 条告警：kafka 慢消费者（warning）。"; intent.Answer != want {
+		t.Fatalf("intent.Answer = %q, want %q", intent.Answer, want)
+	}
+}
+
+// TestEinoPlannerFinalAnswerWinsOverConfidenceThreshold: a terminal final_answer
+// is honored even though the planner generally clarifies below 0.7 confidence.
+func TestEinoPlannerFinalAnswerWinsOverConfidenceThreshold(t *testing.T) {
+	t.Parallel()
+	chat := fakeEinoChatModel{content: `{"tool_name":null,"input":null,"diagnostic":null,"confidence":0.5,"explanation":"low but done","final_answer":true,"summary":"已处理完毕"}`}
+	planner := assistant.NewEinoPlanner(&chat)
+
+	intent, err := planner.Plan(context.Background(), user(), "好了，就这些", nil, assistant.PageContext{})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if !intent.Done {
+		t.Fatalf("intent.Done = false, want true despite low confidence")
+	}
+}
+
 func TestEinoPlannerParsesModelJSONDiagnosticIntent(t *testing.T) {
 	t.Parallel()
 	chat := fakeEinoChatModel{content: `{"tool_name":"","input":{},"diagnostic":{"domain":"glusterfs","environment":"prod","resource_type":"volume","resource_name":"data","runbook":"health"},"confidence":0.88,"explanation":"check volume health"}`}

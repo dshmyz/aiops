@@ -1443,6 +1443,11 @@ func (r *Router) serveAssistantStream(writer http.ResponseWriter, request *http.
 			fmt.Fprintf(writer, "event: tool_call\ndata: %s\n\n", data)
 			flusher.Flush()
 		}
+		if event.Step != nil {
+			data, _ := json.Marshal(event.Step)
+			fmt.Fprintf(writer, "event: step\ndata: %s\n\n", data)
+			flusher.Flush()
+		}
 		if event.Delta != "" {
 			data, _ := json.Marshal(map[string]string{"delta": event.Delta})
 			fmt.Fprintf(writer, "data: %s\n\n", data)

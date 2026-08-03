@@ -390,7 +390,11 @@ func TestAssistantDiagnosticIntentReturnsPackage(t *testing.T) {
 }
 
 func TestAssistantResponseIncludesTraceWithSelectionAndToolInvocation(t *testing.T) {
-	t.Parallel()
+	// NOTE: intentionally NOT t.Parallel(). This test mutates the process-global
+	// dynamic-tool registry (registerAssistantDynamicCapacityTool resets it), and
+	// running it in parallel with the other two dynamic-capability tests races
+	// on Reset/Register — the registry can be wiped mid-assertion, surfacing as
+	// "tool_not_registered" / trace=nil. Keep it serial with its siblings.
 	registerAssistantDynamicCapacityTool(t)
 	service, _ := newAssistant(t, assistant.NewCapabilityAwarePlanner(fakePlanner{err: assistant.ErrClarificationNeeded}))
 
