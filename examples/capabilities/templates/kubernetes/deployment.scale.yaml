@@ -1,0 +1,88 @@
+schema_version: 1
+name: k8s.deployment.scale
+status: draft
+domain: kubernetes
+resource_type: deployment
+operation: write
+risk: medium
+
+backend:
+    adapter: http
+    method: PATCH
+    path: /apis/apps/v1/namespaces/{namespace}/deployments/{deployment_name}/scale
+    timeout_ms: 5000
+    base_url: https://kubernetes.default.svc
+    headers:
+        Content-Type: application/merge-patch+json
+    body_template: |
+        {
+          "spec": {
+            "replicas": {{replicas}}
+          }
+        }
+
+input_schema:
+    namespace:
+        type: string
+        required: true
+        description: Kubernetes namespace
+    deployment_name:
+        type: string
+        required: true
+        description: Deployment name to scale
+    replicas:
+        type: integer
+        required: true
+        description: Target replica count
+        validation:
+            min: 0
+            max: 100
+    environment:
+        type: string
+        required: true
+        description: Target environment
+
+output:
+    kind: action
+    severity_path: $.status
+    summary_template: "Deployment {deployment_name} scaled to {replicas} replicas"
+    fields:
+        current_replicas: $.spec.replicas
+        available_replicas: $.status.availableReplicas
+        ready_replicas: $.status.readyReplicas
+
+governance:
+    requires_action_plan: true
+    requires_approval: true  # Scaling affects capacity and cost
+    precheck_tools:
+        - k8s.deployment.status.read
+    rollback:
+        strategy: revert_scale
+        source: "Scale back to previous replica count if new pods fail readiness"
+
+auth:
+    roles:
+        - operator
+        - admin
+    environment_scoped: true
+
+ai:
+    description: |
+        Scale a Kubernetes Deployment to the specified number of replicas.
+        Use for handling traffic spikes, maintenance windows, or cost optimization.
+
+        **Common scenarios**:
+        - Scale up during peak hours
+        - Scale down to 0 for maintenance (be careful with stateful apps)
+        - Scale to 1 for troubleshooting a single instance
+
+    examples:
+        - 把 prod 环境 default namespace 的 api-server deployment 扩容到 5 个副本
+        - scale deployment nginx in namespace web to 3 replicas, environment staging
+        - 将 dev 环境 kube-system 的 coredns 缩容到 1 个副本
+
+    safety_notes:
+        - Scaling to 0 causes complete service outage
+        - Ensure HPA (HorizontalPodAutoscaler) is disabled or it will fight manual scaling
+        - Check resource quotas before scaling up
+        - Monitor pod readiness after scaling

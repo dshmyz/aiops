@@ -1,0 +1,89 @@
+schema_version: 1
+name: metrics.query
+status: draft
+domain: observability
+resource_type: prometheus
+operation: read
+risk: low
+
+backend:
+    adapter: http
+    method: POST
+    path: /api/v1/query
+    timeout_ms: 30000
+    base_url: http://prometheus:9090
+    body_template: |
+        {
+          "query": "{{promql_query}}",
+          "time": "{{timestamp}}",
+          "timeout": "{{query_timeout}}"
+        }
+
+input_schema:
+    promql_query:
+        type: string
+        required: true
+        description: PromQL query expression
+    timestamp:
+        type: string
+        required: false
+        description: Evaluation timestamp (RFC3339 or Unix timestamp)
+        default: "now"
+    query_timeout:
+        type: string
+        required: false
+        default: "30s"
+        description: Query execution timeout
+    environment:
+        type: string
+        required: true
+
+output:
+    kind: observation
+    severity_path: $.status
+    summary_template: "Query returned {result_count} metric series"
+    fields:
+        result_type: $.data.resultType
+        result: $.data.result
+        result_count: $.data.result.length
+
+governance:
+    requires_action_plan: false
+    requires_approval: false  # Read-only metric query
+    precheck_tools: []
+    rollback:
+        strategy: ""
+        source: ""
+
+auth:
+    roles:
+        - viewer
+        - operator
+        - admin
+    environment_scoped: true
+
+ai:
+    description: |
+        Execute a PromQL query against Prometheus to retrieve metrics.
+
+        **Common queries**:
+        - `up{job="api-server"}` — Check if targets are up
+        - `rate(http_requests_total[5m])` — Request rate over 5 minutes
+        - `container_memory_usage_bytes{pod=~"api-.*"}` — Memory usage by pod pattern
+        - `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))` — P99 latency
+
+        **Use cases**:
+        - Investigate alerts and anomalies
+        - Capacity planning and trend analysis
+        - Ad-hoc performance troubleshooting
+
+    examples:
+        - 查询 prod 环境最近 5 分钟 api-server 的 QPS
+        - query memory usage for all pods in namespace default, environment staging
+        - 给我看一下 dev 环境 redis 集群的连接数指标
+
+    safety_notes:
+        - Complex queries with large cardinality may timeout or overload Prometheus
+        - Use recording rules for frequently-run expensive queries
+        - Limit time range and label selectors to reduce query cost
+        - For historical analysis, use range queries (/api/v1/query_range) instead

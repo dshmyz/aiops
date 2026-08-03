@@ -1,0 +1,80 @@
+schema_version: 1
+name: k8s.logs.tail
+status: draft
+domain: kubernetes
+resource_type: pod
+operation: read
+risk: low
+
+backend:
+    adapter: http
+    method: GET
+    path: /api/v1/namespaces/{namespace}/pods/{pod_name}/log?tailLines={tail_lines}&timestamps=true
+    timeout_ms: 15000
+    base_url: https://kubernetes.default.svc
+
+input_schema:
+    namespace:
+        type: string
+        required: true
+        description: Kubernetes namespace
+    pod_name:
+        type: string
+        required: true
+        description: Pod name to fetch logs from
+    tail_lines:
+        type: integer
+        required: false
+        default: 100
+        description: Number of recent lines to fetch
+        validation:
+            min: 1
+            max: 1000
+    container:
+        type: string
+        required: false
+        description: Container name (if pod has multiple containers)
+    environment:
+        type: string
+        required: true
+
+output:
+    kind: observation
+    severity_path: $.status
+    summary_template: "Fetched {tail_lines} log lines from pod {pod_name}"
+    fields:
+        logs: $.logs
+        container: $.container
+
+governance:
+    requires_action_plan: false
+    requires_approval: false  # Read-only, low risk
+    precheck_tools: []
+    rollback:
+        strategy: ""
+        source: ""
+
+auth:
+    roles:
+        - viewer
+        - operator
+        - admin
+    environment_scoped: true
+
+ai:
+    description: |
+        Fetch recent logs from a Kubernetes pod. Use for troubleshooting errors,
+        checking application behavior, or investigating incidents.
+
+        **Tip**: Start with 100 lines, increase if needed. For deep investigation,
+        use a log aggregation system (Loki, Elasticsearch) instead.
+
+    examples:
+        - 查看 prod namespace default 下 pod api-server-5d7c8f9b-x7k2m 的最近 200 行日志
+        - tail logs from pod nginx-ingress-controller in namespace ingress-nginx, last 50 lines
+        - 给我看一下 staging 环境 kube-system 命名空间 coredns pod 的日志
+
+    safety_notes:
+        - Large tail_lines (>1000) may timeout or overwhelm the response
+        - If pod has multiple containers, specify the container name
+        - Logs are ephemeral; use persistent logging for long-term retention
