@@ -277,4 +277,64 @@ describe('ConversationTurnItem', () => {
     expect(wrapper.find('[data-test="tool-answer-view"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="conversation-turn-blocks"]').exists()).toBe(false);
   });
+
+  test('renders live agent-loop steps as an independent block', () => {
+    const turn: ConversationTurn = {
+      ...baseTurn,
+      id: 'turn-steps',
+      role: 'assistant',
+      content: 'prod 集群健康，无异常',
+      response_type: 'answer',
+      steps: [
+        { tool: 'cluster.status.read', step_index: 0, status: 'done', summary: 'cluster.status.read：green' },
+        { tool: 'kafka.cluster.health.read', step_index: 1, status: 'done', summary: 'kafka.cluster.health.read：healthy' },
+      ],
+    };
+
+    const wrapper = mount(ConversationTurnItem, { props: { turn } });
+
+    expect(wrapper.find('[data-test="assistant-steps"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="assistant-steps"]').text()).toContain('已执行 2 个步骤');
+    expect(wrapper.find('[data-test="assistant-step-item-0"]').text()).toContain('cluster.status.read');
+    expect(wrapper.find('[data-test="assistant-step-item-1"]').text()).toContain('kafka.cluster.health.read');
+  });
+
+  test('renders a persisted tool_step turn as its own steps block, not a text bubble', () => {
+    const turn: ConversationTurn = {
+      ...baseTurn,
+      id: 'turn-toolstep',
+      role: 'assistant',
+      response_type: 'tool_step',
+      content: 'cluster.status.read：green',
+      response_payload: {
+        type: 'tool_step',
+        tool: 'cluster.status.read',
+        step_index: 0,
+        summary: 'cluster.status.read：green',
+        input: { environment: 'prod' },
+        result: { status: 'green' },
+      },
+    };
+
+    const wrapper = mount(ConversationTurnItem, { props: { turn } });
+
+    // 步骤区块渲染，且工具名来自 payload
+    expect(wrapper.find('[data-test="assistant-steps"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="assistant-step-item-0"]').text()).toContain('cluster.status.read');
+    // 不回放文字气泡（避免与步骤摘要重复）
+    expect(wrapper.find('[data-test="conversation-turn-content"]').text()).not.toContain('cluster.status.read：green');
+  });
+
+  test('user turn never renders steps block', () => {
+    const turn: ConversationTurn = {
+      ...baseTurn,
+      role: 'user',
+      content: '检查 prod 集群',
+      steps: [{ tool: 'cluster.status.read', step_index: 0, status: 'done' }],
+    };
+
+    const wrapper = mount(ConversationTurnItem, { props: { turn } });
+
+    expect(wrapper.find('[data-test="assistant-steps"]').exists()).toBe(false);
+  });
 });

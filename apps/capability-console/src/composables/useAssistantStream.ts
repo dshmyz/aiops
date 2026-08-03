@@ -1,4 +1,4 @@
-import type { AssistantConsoleResponse, ProgressStage } from '../types';
+import type { AssistantConsoleResponse, AssistantStep, ProgressStage } from '../types';
 
 export interface ToolCallInfo {
   tool: string;
@@ -11,6 +11,7 @@ export interface StreamCallbacks {
   onDelta: (chunk: string) => void;
   onThinking: (chunk: string) => void;
   onToolCall: (info: ToolCallInfo) => void;
+  onStep: (step: AssistantStep) => void;
   onProgress: (stage: ProgressStage) => void;
   onFinal: (response: AssistantConsoleResponse) => void;
   onError: (message: string) => void;
@@ -182,6 +183,12 @@ function processSSEEvent(
 
     if (eventType === 'tool_call') {
       callbacks.onToolCall(parsed as ToolCallInfo);
+      return;
+    }
+
+    if (eventType === 'step') {
+      // 后端 assistant.StepEvent: { tool, step_index, status, summary, input, output }.
+      callbacks.onStep(parsed as AssistantStep);
       return;
     }
 

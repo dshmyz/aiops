@@ -306,6 +306,25 @@ export interface ProgressStage {
   received_at: string;
 }
 
+/**
+ * 智能体循环执行的单步，来自 SSE step 事件（后端 assistant.StepEvent）。
+ * 反映自治 agent 多工具链式执行中的一次只读工具调用（advisory step）。
+ * 前端将其展示为独立"已执行步骤"区块，与最终答复分开。
+ */
+export interface AssistantStep {
+  tool: string;
+  /** 零基步骤序号，用于消歧同一工具的多步调用 */
+  step_index: number;
+  /** 状态：done（当前仅支持完成态，进行中态预留） */
+  status: string;
+  /** 人类可读的结果摘要 */
+  summary?: string;
+  /** 工具输入参数 */
+  input?: Record<string, unknown>;
+  /** 工具原始返回结果 */
+  output?: Record<string, unknown>;
+}
+
 export interface ConversationTurn {
   id: string;
   conversation_id: string;
@@ -327,6 +346,11 @@ export interface ConversationTurn {
   };
   /** 实时工具调用列表，来自 SSE tool_call 事件 */
   tool_calls?: ToolCall[];
+  /**
+   * 自治 agent 循环的多步执行步骤，来自 SSE step 事件。
+   * 每次只读工具调用一条，独立于最终答复展示为"已执行步骤"区块。
+   */
+  steps?: AssistantStep[];
   /**
    * 进度阶段时间线，来自 SSE progress 事件。
    * 前端折叠展示为"进度事件折叠"面板，让用户看到 Agent 当前处于哪个阶段。

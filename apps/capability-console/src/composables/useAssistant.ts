@@ -360,6 +360,20 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
                 }
               }
             },
+            onStep: (step) => {
+              const turn = conversationTurns.value.find((t) => t.id === streamingTurnId);
+              if (turn) {
+                turn.steps = turn.steps || [];
+                // step_index 消歧同一工具的多步调用：按序号去重，重复到达视为更新。
+                const idx = turn.steps.findIndex((s) => s.step_index === step.step_index);
+                if (idx >= 0) {
+                  turn.steps[idx] = step;
+                } else {
+                  turn.steps.push(step);
+                  turn.steps.sort((a, b) => a.step_index - b.step_index);
+                }
+              }
+            },
             onProgress: (stage) => {
               const turn = conversationTurns.value.find((t) => t.id === streamingTurnId);
               if (turn) {

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { ConversationTurn, Block, DiagnosticPackage } from '../types';
+import type { ConversationTurn, Block, DiagnosticPackage, AssistantStep } from '../types';
 import { formatRelativeTime, formatAbsoluteTime, formatResponseType } from '../conversationFormat';
+import AssistantSteps from './AssistantSteps.vue';
 import BlockRenderer from './BlockRenderer.vue';
 import ToolAnswerView from './ToolAnswerView.vue';
 import DiagnosticView from './DiagnosticView.vue';
@@ -36,6 +37,10 @@ const responseTypeDisplay = computed(() =>
   props.turn.response_type ? formatResponseType(props.turn.response_type) : null,
 );
 
+// 回放的 tool_step 持久化 turn：单独以步骤区块呈现，不重复渲染文字气泡
+// （其 content 就是步骤摘要，与 AssistantSteps 的 summary 冗余）。
+const isReplayedToolStep = computed(() => props.turn.response_type === 'tool_step');
+
 // 流式生成中且尚无内容：显示三点 typing 动画
 const showTypingDots = computed(() => Boolean(props.streaming && props.turn.content === ''));
 
@@ -52,6 +57,34 @@ const hasToolCalls = computed(() => Boolean(props.turn.tool_calls && props.turn.
 
 // 进度阶段时间线：当 turn 累积了 progress_stages 时显示
 const hasProgress = computed(() => Boolean(props.turn.progress_stages && props.turn.progress_stages.length > 0));
+
+// 已执行步骤（agent 循环）：优先用实时 SSE 累积的 steps；回放时该 turn 本身是
+// 持久化的 tool_step（response_payload 含 tool/input/result/step_index/summary），
+// 从 payload 重建，确保切换对话/刷新后步骤区块仍然可见。
+const persistedStep = computed<AssistantStep | null>(() => {
+  const payload = props.turn.response_payload;
+  if (!payload || props.turn.response_type !== 'tool_step') {
+    return null;
+  }
+  return {
+    tool: typeof payload.tool === 'string' ? payload.tool : '',
+    step_index: typeof payload.step_index === 'number' ? payload.step_index : 0,
+    status: 'done',
+    summary: typeof payload.summary === 'string' ? payload.summary : undefined,
+    input: isRecord(payload.input) ? payload.input as Record<string, unknown> : undefined,
+    output: isRecord(payload.result) ? payload.result as Record<string, unknown> : undefined,
+  };
+});
+const hasSteps = computed(() =>
+  Boolean(
+    (props.turn.steps && props.turn.steps.length > 0) ||
+    persistedStep.value,
+  ),
+);
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
 
 // 从持久化的 response_payload 读取 blocks（BlockRenderer 渲染 risk_notice 等）
 const turnBlocks = computed<Block[]>(() => {
@@ -132,7 +165,7 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
             <span class="typing-dot"></span>
           </span>
         </template>
-        <template v-else>
+        <template v-else-if="!isReplayedToolStep">
           <MarkdownContent :content="turn.content" :raw="!isAssistant" />
           <span v-if="showStreamingCursor" class="streaming-cursor" aria-hidden="true">▌</span>
         </template>
@@ -213,6 +246,13 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
       <ProgressTimeline
         v-if="isAssistant && hasProgress"
         :stages="turn.progress_stages!"
+        :streaming="streaming"
+      />
+
+      <!-- 已执行步骤区块：智能体自治循环多步执行（实时 SSE 或回放的 tool_step 持久化 turn） -->
+      <AssistantSteps
+        v-if="isAssistant && hasSteps"
+        :steps="turn.steps && turn.steps.length ? turn.steps : [persistedStep!]"
         :streaming="streaming"
       />
 
