@@ -1,0 +1,625 @@
+package assistant
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"strings"
+	"time"
+
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
+	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
+	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
+)
+
+type EinoPlanner struct {
+	chat         model.BaseChatModel
+	parser       schema.MessageParser[einoIntent]
+	systemPrompt func() string // nil → use hardcoded einoPlanningPrompt
+	knowledge    KnowledgeAugmenter
+	audit        *llmAuditRecorder // nil → 不记录 LLM 调用审计（缺口-5 / R1）
+}
+
+// ChatModel 返回底层的 chat model，用于创建 LLMParamExtractor 等。
+func (p *EinoPlanner) ChatModel() model.BaseChatModel {
+	return p.chat
+}
+
+// KnowledgeAugmenter retrieves relevant knowledge and appends it to the system
+// prompt. The assistant package avoids a direct import of the knowledge package by
+// using this minimal interface.
+type KnowledgeAugmenter interface {
+	AugmentPrompt(ctx context.Context, basePrompt, query string) string
+}
+
+func NewEinoPlanner(chat model.BaseChatModel) *EinoPlanner {
+	return &EinoPlanner{
+		chat:   chat,
+		parser: schema.NewMessageJSONParser[einoIntent](nil),
+	}
+}
+
+// NewEinoPlannerWithPromptSource creates an EinoPlanner whose system prompt is
+// dynamically resolved via the provided function. This enables hot-reload from
+// a prompt.Registry: each Plan/PlanStream call invokes promptFn() to get the
+// latest prompt text without restarting the service.
+func NewEinoPlannerWithPromptSource(chat model.BaseChatModel, promptFn func() string) *EinoPlanner {
+	return &EinoPlanner{
+		chat:         chat,
+		parser:       schema.NewMessageJSONParser[einoIntent](nil),
+		systemPrompt: promptFn,
+	}
+}
+
+// WithKnowledge wires a knowledge augmenter that appends retrieved operational
+// context to the system prompt before each call.
+func (p *EinoPlanner) WithKnowledge(aug KnowledgeAugmenter) *EinoPlanner {
+	p.knowledge = aug
+	return p
+}
+
+// WithLLMAudit wires LLM invocation auditing (缺口-5 / R1). audit may be nil
+// (no-op); model is the provider model name captured at construction time.
+func (p *EinoPlanner) WithLLMAudit(auditSvc *audit.Service, model string) *EinoPlanner {
+	p.audit = newLLMAuditRecorder(auditSvc, model, "planner")
+	return p
+}
+
+// currentPrompt returns the active system prompt text. When a prompt source
+// function is configured it is called; otherwise the hardcoded constant is
+// used as fallback.
+func (p *EinoPlanner) currentPrompt(ctx context.Context, message string) string {
+	var base string
+	if p.systemPrompt != nil {
+		if s := p.systemPrompt(); s != "" {
+			base = s
+		}
+	}
+	if base == "" {
+		base = einoPlanningPrompt
+	}
+	if p.knowledge != nil {
+		return p.knowledge.AugmentPrompt(ctx, base, message)
+	}
+	return base
+}
+
+// StreamEvent is one increment of a streaming planner/service response.
+//
+// Delta carries partial LLM output (a fragment of the JSON intent) as it
+// arrives from the model. Thinking carries partial reasoning content (the
+// model's chain-of-thought) when the model supports it (e.g. DeepSeek-R1,
+// QwQ). ToolCall carries tool invocation info (name, input, output) emitted
+// during execution so the frontend can display real-time tool call progress.
+// The terminal event of a stream sets Done=true; on success Intent is
+// populated with the resolved planner intent, and when the event originates
+// from the assistant service HandleMessageStream, Response carries the final
+// operator-facing response. On failure Err is populated instead.
+//
+// Err is not JSON-serializable and is tagged json:"-" so the struct can be
+// safely marshaled by callers (e.g. an HTTP router writing SSE frames).
+type StreamEvent struct {
+	Delta    string         `json:"delta,omitempty"`
+	Thinking string         `json:"thinking,omitempty"`
+	ToolCall *ToolCallEvent `json:"tool_call,omitempty"`
+	Progress *ProgressEvent `json:"progress,omitempty"`
+	Intent   *Intent        `json:"intent,omitempty"`
+	Response *Response      `json:"response,omitempty"`
+	Done     bool           `json:"done"`
+	Err      error          `json:"-"`
+}
+
+// ProgressEvent reports a pipeline stage transition so the frontend can render
+// a "进度事件折叠" panel (planning → tool_executing → formatting). The stage
+// is one of the Progress* constants below. Detail is an optional human-facing
+// hint (e.g. the tool name being executed) and may be empty.
+//
+// The frontend folds these events into a compact progress timeline; the
+// original chain-of-thought is never exposed (per SxDevOps 工程边界). Progress
+// events are best-effort: the emitter is nil for non-streaming callers, so
+// emitting is a no-op there.
+type ProgressEvent struct {
+	Stage  string `json:"stage"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// Pipeline stages reported via ProgressEvent. Stages are emitted in order
+// (planning → tool_executing → formatting) by executeFromIntent and
+// HandleMessageStream. The terminal Done event is the existing StreamEvent
+// {Done: true} and is not duplicated as a progress stage.
+const (
+	// ProgressPlanning: 模型规划中. Emitted before the planner runs (Plan or
+	// PlanStream), signals the LLM is parsing intent.
+	ProgressPlanning = "planning"
+	// ProgressToolExecuting: 工具执行中. Emitted before each tool invocation
+	// (diagnostic / read / write). Detail carries the tool name when known.
+	ProgressToolExecuting = "tool_executing"
+	// ProgressFormatting: 二阶段整形中. Emitted before the formatter runs.
+	// Only fires when a formatter is wired; absent otherwise.
+	ProgressFormatting = "formatting"
+)
+
+// ToolCallEvent represents a single tool invocation during execution.
+// Emitted before and after each tool call so the frontend can show
+// real-time progress (calling → done).
+type ToolCallEvent struct {
+	Tool        string         `json:"tool"`
+	Input       map[string]any `json:"input,omitempty"`
+	RawResponse map[string]any `json:"raw_response,omitempty"`
+	Done        bool           `json:"done"`
+}
+
+// maxHistoryTurns limits how many previous turns are forwarded to the LLM
+// to keep prompts bounded. Set to 10 (5 user + 5 assistant) which is enough
+// to resolve "刚才那个" / "同 environment 再查一个" style references.
+const maxHistoryTurns = 10
+
+// maxHistoryChars bounds the total character count of history messages
+// forwarded to the LLM. Uses a char/4 token estimate (≈4000 tokens for
+// 16000 chars) which is a reasonable budget for a planning prompt. Applied
+// after maxHistoryTurns: whichever limit is hit first truncates.
+const maxHistoryChars = 16_000
+
+// diagnosticBlockChars is a fixed estimate for the [Last Intent] block of a
+// diagnostic intent. Diagnostic fields are short and bounded, so a constant
+// estimate avoids marshaling overhead.
+const diagnosticBlockChars = 150
+
+func (p *EinoPlanner) Plan(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) (Intent, error) {
+	ctx, span := tracer().Start(ctx, "eino_planner.Plan",
+		trace.WithAttributes(
+			attribute.Int("message.length", len(message)),
+			attribute.Int("history.length", len(history)),
+		))
+	defer span.End()
+	if p == nil || p.chat == nil {
+		return Intent{}, errors.New("eino chat model is required")
+	}
+	messages := []*schema.Message{schema.SystemMessage(p.currentPrompt(ctx, message))}
+	messages = append(messages, historyMessages(history)...)
+	messages = append(messages, schema.UserMessage(injectPageContext(message, pageContext)))
+	started := time.Now()
+	response, err := p.chat.Generate(ctx, messages)
+	if err != nil {
+		span.RecordError(err)
+		return Intent{}, err
+	}
+	if p.audit != nil {
+		p.audit.record(ctx, started, response)
+	}
+	return p.parseIntent(ctx, response)
+}
+
+// parseIntent parses an LLM message into an einoIntent and applies the same
+// post-processing as Plan: confidence threshold, diagnostic mapping, and
+// empty tool_name clarification. Shared by Plan and PlanStream so the
+// streaming path produces intents identical to the one-shot path.
+func (p *EinoPlanner) parseIntent(ctx context.Context, response *schema.Message) (Intent, error) {
+	parsed, err := p.parser.Parse(ctx, response)
+	if err != nil {
+		return Intent{}, err
+	}
+	// Check confidence threshold: if below 0.7, request clarification
+	if parsed.Confidence < 0.7 {
+		return Intent{}, ErrClarificationNeeded
+	}
+
+	if parsed.Diagnostic != nil {
+		return Intent{
+			Diagnostic: &diagnostics.Request{
+				Domain:       strings.TrimSpace(parsed.Diagnostic.Domain),
+				Environment:  strings.TrimSpace(parsed.Diagnostic.Environment),
+				ResourceType: strings.TrimSpace(parsed.Diagnostic.ResourceType),
+				ResourceName: strings.TrimSpace(parsed.Diagnostic.ResourceName),
+				Runbook:      strings.TrimSpace(parsed.Diagnostic.Runbook),
+			},
+			Confidence:  parsed.Confidence,
+			Explanation: strings.TrimSpace(parsed.Explanation),
+		}, nil
+	}
+	if strings.TrimSpace(parsed.ToolName) == "" {
+		return Intent{}, ErrClarificationNeeded
+	}
+	if parsed.Input == nil {
+		parsed.Input = map[string]any{}
+	}
+	return Intent{
+		ToolName:    strings.TrimSpace(parsed.ToolName),
+		Input:       parsed.Input,
+		Confidence:  parsed.Confidence,
+		Explanation: strings.TrimSpace(parsed.Explanation),
+	}, nil
+}
+
+// PlanStream is the streaming variant of Plan. It calls chat.Stream and
+// forwards each LLM chunk as a StreamEvent{Delta: ...} on the returned
+// channel. When the stream completes, the accumulated text is parsed with the
+// same JSON parser used by Plan and a terminal event (Done=true) is emitted
+// carrying either the resolved Intent or an error.
+//
+// If chat.Stream is unavailable or returns an error, PlanStream degrades to
+// the one-shot Plan path (chat.Generate) and emits a single Done event. This
+// keeps the streaming contract (always exactly one terminal event) while
+// falling back gracefully when the underlying model does not support
+// streaming or the stream fails to start.
+func (p *EinoPlanner) PlanStream(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) (<-chan StreamEvent, error) {
+	ctx, span := tracer().Start(ctx, "eino_planner.PlanStream",
+		trace.WithAttributes(
+			attribute.Int("message.length", len(message)),
+			attribute.Int("history.length", len(history)),
+		))
+	defer span.End()
+	if p == nil || p.chat == nil {
+		return nil, errors.New("eino chat model is required")
+	}
+
+	messages := []*schema.Message{schema.SystemMessage(p.currentPrompt(ctx, message))}
+	messages = append(messages, historyMessages(history)...)
+	messages = append(messages, schema.UserMessage(injectPageContext(message, pageContext)))
+
+	reader, err := p.chat.Stream(ctx, messages)
+	if err != nil {
+		// 流式降级为一次性: chat.Stream 不可用或出错, 退化为调用 Plan
+		// (chat.Generate), 发送单个 Done 事件. 保持流式契约 (总有且仅有一个
+		// 终止事件), 同时在底层模型不支持流式时优雅降级.
+		span.AddEvent("stream_fallback", trace.WithAttributes(attribute.String("stream.error", err.Error())))
+		return p.planStreamFallback(ctx, message, history, pageContext)
+	}
+
+	events := make(chan StreamEvent, 16)
+	started := time.Now()
+	go func() {
+		defer close(events)
+		defer reader.Close()
+		var builder strings.Builder
+		var lastResponse *schema.Message
+		for {
+			chunk, recvErr := reader.Recv()
+			if recvErr != nil {
+				if errors.Is(recvErr, io.EOF) {
+					break
+				}
+				// Mid-stream error: emit a terminal error event and stop.
+				span.RecordError(recvErr)
+				events <- StreamEvent{Err: recvErr, Done: true}
+				return
+			}
+			if chunk == nil {
+				continue
+			}
+			// Track the last chunk carrying ResponseMeta for usage audit.
+			if chunk.ResponseMeta != nil {
+				lastResponse = chunk
+			}
+			if chunk.ReasoningContent != "" {
+				events <- StreamEvent{Thinking: chunk.ReasoningContent}
+			}
+			if chunk.Content != "" {
+				builder.WriteString(chunk.Content)
+				events <- StreamEvent{Delta: chunk.Content}
+			}
+		}
+		// Stream finished: parse accumulated text and emit the terminal event.
+		intent, planErr := p.parseIntent(ctx, schema.AssistantMessage(builder.String(), nil))
+		if p.audit != nil {
+			p.audit.record(ctx, started, lastResponse)
+		}
+		if planErr != nil {
+			events <- StreamEvent{Err: planErr, Done: true}
+			return
+		}
+		intentCopy := intent
+		events <- StreamEvent{Intent: &intentCopy, Done: true}
+	}()
+	return events, nil
+}
+
+// planStreamFallback is the degraded path used when chat.Stream is unavailable
+// or returns an error. It calls Plan (chat.Generate) one-shot and emits a
+// single terminal event carrying either the resolved Intent or an error.
+func (p *EinoPlanner) planStreamFallback(ctx context.Context, message string, history []Turn, pageContext PageContext) (<-chan StreamEvent, error) {
+	events := make(chan StreamEvent, 1)
+	go func() {
+		defer close(events)
+		intent, err := p.Plan(ctx, identity.CurrentUser{}, message, history, pageContext)
+		if err != nil {
+			events <- StreamEvent{Err: err, Done: true}
+			return
+		}
+		intentCopy := intent
+		events <- StreamEvent{Intent: &intentCopy, Done: true}
+	}()
+	return events, nil
+}
+
+// historyMessages converts prior turns into the LLM SDK's message format.
+//
+// Two-stage truncation bounds token cost:
+//  1. Keep only the most recent maxHistoryTurns turns (hard limit).
+//  2. From those, walk newest-to-oldest accumulating estimated char count;
+//     stop when adding the next turn would exceed maxHistoryChars. At least
+//     one turn is always kept (even if it alone exceeds the budget), so the
+//     most recent reference is never lost.
+//
+// Assistant turns carry a structured [Last Intent] block (when Turn.Intent
+// is populated) so the LLM can resolve references like "同 environment" /
+// "再查一个" deterministically instead of guessing from prose.
+//
+// Turns with empty content are skipped.
+func historyMessages(history []Turn) []*schema.Message {
+	if len(history) > maxHistoryTurns {
+		history = history[len(history)-maxHistoryTurns:]
+	}
+
+	// Walk newest-to-oldest, accumulating char estimates. Keep at least one.
+	var selected []Turn
+	totalChars := 0
+	for i := len(history) - 1; i >= 0; i-- {
+		turn := history[i]
+		if strings.TrimSpace(turn.Content) == "" {
+			continue
+		}
+		turnChars := estimateTurnChars(turn)
+		if totalChars+turnChars > maxHistoryChars && len(selected) > 0 {
+			break
+		}
+		selected = append([]Turn{turn}, selected...)
+		totalChars += turnChars
+	}
+
+	messages := make([]*schema.Message, 0, len(selected))
+	for _, turn := range selected {
+		content := strings.TrimSpace(turn.Content)
+		switch turn.Role {
+		case "system_summary":
+			// Inject the rolling conversation summary as a system message so
+			// the LLM retains early-turn context without verbatim history.
+			messages = append(messages, schema.SystemMessage("[对话摘要]\n"+content))
+		case "user":
+			messages = append(messages, schema.UserMessage(content))
+		case "assistant":
+			messages = append(messages, schema.AssistantMessage(formatAssistantTurn(content, turn.Intent), nil))
+		}
+	}
+	return messages
+}
+
+// formatAssistantTurn appends a [Last Intent] block to the assistant message
+// when the turn has a structured Intent. This lets the LLM resolve references
+// like "同 environment" / "再查一个" deterministically instead of guessing
+// from the user's prose.
+//
+// Falls back to the original content when:
+//   - intent is nil
+//   - intent has neither ToolName nor Diagnostic
+//   - intent.Input cannot be JSON-marshaled (e.g. contains a channel)
+func formatAssistantTurn(content string, intent *Intent) string {
+	if intent == nil {
+		return content
+	}
+	if intent.Diagnostic != nil {
+		return content + "\n\n[Last Intent]\ndiagnostic: domain=" + intent.Diagnostic.Domain +
+			", environment=" + intent.Diagnostic.Environment +
+			", resource_type=" + intent.Diagnostic.ResourceType +
+			", resource_name=" + intent.Diagnostic.ResourceName
+	}
+	if intent.ToolName == "" {
+		return content
+	}
+	inputJSON, err := json.Marshal(intent.Input)
+	if err != nil {
+		return content
+	}
+	return content + "\n\n[Last Intent]\ntool_name: " + intent.ToolName + "\ninput: " + string(inputJSON)
+}
+
+// estimateTurnChars estimates the character footprint of a turn in the LLM
+// prompt, including the [Last Intent] block for assistant turns with Intent.
+// Used for token budget truncation; not a precise token count.
+func estimateTurnChars(turn Turn) int {
+	content := strings.TrimSpace(turn.Content)
+	if turn.Intent == nil {
+		return len(content)
+	}
+	if turn.Intent.Diagnostic != nil {
+		return len(content) + diagnosticBlockChars
+	}
+	if turn.Intent.ToolName == "" {
+		return len(content)
+	}
+	inputJSON, err := json.Marshal(turn.Intent.Input)
+	if err != nil {
+		return len(content) + 50 // fallback estimate for marshaling failure
+	}
+	// Template: "\n\n[Last Intent]\ntool_name: \ninput: "
+	return len(content) + 40 + len(turn.Intent.ToolName) + len(inputJSON)
+}
+
+type einoIntent struct {
+	ToolName    string          `json:"tool_name"`
+	Input       map[string]any  `json:"input"`
+	Diagnostic  *einoDiagnostic `json:"diagnostic"`
+	Confidence  float64         `json:"confidence"`
+	Explanation string          `json:"explanation"`
+}
+
+type einoDiagnostic struct {
+	Domain       string `json:"domain"`
+	Environment  string `json:"environment"`
+	ResourceType string `json:"resource_type"`
+	ResourceName string `json:"resource_name"`
+	Runbook      string `json:"runbook"`
+}
+
+const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划器。
+
+## 核心职责
+分析用户消息，返回严格的JSON格式意图规划。你只能提出候选意图，Go后端会执行静态工具注册、策略、确认、执行和审计规则。
+
+## 输出格式
+只返回JSON，不要包含任何其他文本：
+{
+  "tool_name": string | null,      // 工具名称，如 "cluster.status.read"、"topic.retention.set"
+  "input": object | null,          // 工具输入参数，键值对形式
+  "diagnostic": object | null,     // 诊断请求对象，仅用于健康/容量/延迟检查
+  "confidence": number,            // 置信度，0.0-1.0
+  "explanation": string            // 简短的中文解释
+}
+
+## 字段说明
+
+### tool_name（工具名称）
+- 字符串或null
+- 当用户请求普通工具操作时填写
+- 可选值示例："cluster.status.read"、"topic.retention.set"、"consumer.group.list"、"alert.query"、"event.query"、"task.query"
+- 当用户请求诊断检查时设为null
+
+### input（输入参数）
+- 对象或null
+- 包含工具执行所需的参数
+- 参数应从用户消息中提取
+- 示例：{"cluster_name": "prod-cluster-01", "environment": "prod"}
+
+### diagnostic（诊断对象）
+- 对象或null
+- 仅用于GlusterFS、MinIO或Kafka的健康、容量或消费者延迟检查
+- 结构：
+  {
+    "domain": "glusterfs" | "minio" | "kafka",
+    "environment": "prod" | "staging" | "dev",
+    "resource_type": "volume" | "bucket" | "consumer_group",
+    "resource_name": string,
+    "runbook": "health" | "capacity" | "consumer_lag"
+  }
+- 普通工具意图时必须设为null
+
+### confidence（置信度）
+- 浮点数，范围0.0-1.0
+- 0.9以上：明确的意图
+- 0.7-0.9：较明确的意图
+- 0.5-0.7：需要进一步澄清
+- 0.5以下：应返回clarification_needed
+
+### explanation（解释）
+- 简短的中文字符串
+- 解释为什么做出这个意图判断
+- 示例："用户想查看生产集群状态"
+
+## 参数提取规则
+1. 从用户消息中直接提取明确的参数值
+2. 使用历史对话中的信息补充缺失参数
+3. 对于指代词（"刚才那个"、"同environment"等），从历史对话中查找对应值
+4. 默认环境为"prod"，除非用户明确指定其他环境
+
+## confidence阈值和处理逻辑
+- confidence >= 0.7：正常返回意图
+- confidence < 0.7：返回clarification_needed类型
+- tool_name为空且diagnostic为空：返回clarification_needed类型
+
+## 多轮对话利用指南
+1. 优先查看历史对话中的[Last Intent]块
+2. 当用户说"同environment"时，使用历史对话中的environment值
+3. 当用户说"再查一个"时，使用历史对话中的tool_name
+4. 当用户说"刚才那个"时，引用历史对话中的资源名称
+
+## Few-shot示例
+
+### 示例1：普通工具调用
+用户："查看生产集群状态"
+输出：
+{
+  "tool_name": "cluster.status.read",
+  "input": {"environment": "prod"},
+  "diagnostic": null,
+  "confidence": 0.95,
+  "explanation": "用户想查看生产环境集群状态"
+}
+
+### 示例2：诊断请求
+用户："检查kafka消费者的延迟情况"
+输出：
+{
+  "tool_name": null,
+  "input": null,
+  "diagnostic": {
+    "domain": "kafka",
+    "environment": "prod",
+    "resource_type": "consumer_group",
+    "resource_name": "*",
+    "runbook": "consumer_lag"
+  },
+  "confidence": 0.9,
+  "explanation": "用户想检查Kafka消费者延迟"
+}
+
+### 示例3：需要澄清
+用户："帮我看一下"
+输出：
+{
+  "tool_name": null,
+  "input": null,
+  "diagnostic": null,
+  "confidence": 0.3,
+  "explanation": "用户请求不明确，需要澄清具体要查看什么"
+}
+
+### 示例4：利用历史对话
+历史：[Last Intent] tool_name: cluster.status.read, input: {"environment": "prod", "cluster_name": "cluster-01"}
+用户："同environment再查topic状态"
+输出：
+{
+  "tool_name": "topic.status.read",
+  "input": {"environment": "prod"},
+  "diagnostic": null,
+  "confidence": 0.85,
+  "explanation": "用户想在相同环境下查看topic状态"
+}
+
+### 示例5：告警查询
+用户："当前有哪些告警？"
+输出：
+{
+  "tool_name": "alert.query",
+  "input": {"environment": "prod"},
+  "diagnostic": null,
+  "confidence": 0.9,
+  "explanation": "用户想查看生产环境当前告警"
+}
+
+## 重要约束
+1. 只能提出候选意图，不能执行任何操作
+2. Go后端会执行所有验证、策略和执行逻辑
+3. 必须返回严格的JSON格式
+4. 不要包含任何非JSON内容`
+
+// injectPageContext prepends a page-context hint to the user message so the
+// LLM planner can use it to fill in missing fields (environment, domain,
+// resource) when the message itself does not mention them. The hint is a
+// compact single-line prefix; message tokens still take precedence because
+// the LLM sees both the hint and the original message. When pageContext is
+// empty, the message is returned unchanged (backward compatible).
+func injectPageContext(message string, pageContext PageContext) string {
+	parts := make([]string, 0, 4)
+	if pageContext.Environment != "" {
+		parts = append(parts, "environment="+pageContext.Environment)
+	}
+	if pageContext.Domain != "" {
+		parts = append(parts, "domain="+pageContext.Domain)
+	}
+	if pageContext.ResourceType != "" {
+		parts = append(parts, "resource_type="+pageContext.ResourceType)
+	}
+	if pageContext.ResourceName != "" {
+		parts = append(parts, "resource_name="+pageContext.ResourceName)
+	}
+	if len(parts) == 0 {
+		return message
+	}
+	return "[页面上下文 " + strings.Join(parts, ", ") + "] " + message
+}

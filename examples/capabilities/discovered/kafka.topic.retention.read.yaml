@@ -1,0 +1,46 @@
+schema_version: 1
+name: kafka.topic.retention.read
+status: needs_review
+domain: kafka
+resource_type: topic
+operation: read
+risk: low
+backend:
+    adapter: http
+    method: GET
+    path: /api/kafka/{cluster}/topics/{topic}/retention
+    timeout_ms: 3000
+    base_url: http://127.0.0.1:19090
+input_schema:
+    cluster:
+        type: string
+        required: true
+    environment:
+        type: string
+        required: true
+    topic:
+        type: string
+        required: true
+output:
+    kind: observation
+    severity_path: $.status
+    summary_template: Topic {topic} retention is {retention_hours}h
+    fields:
+        retention_hours: $.data.retention_hours
+governance:
+    requires_action_plan: false
+    requires_approval: false
+    precheck_tools: []
+    rollback:
+        strategy: ""
+        source: ""
+auth:
+    roles:
+        - viewer
+        - operator
+        - admin
+    environment_scoped: true
+ai:
+    description: Read Kafka topic retention configuration from the demo middleware backend.
+    examples:
+        - 查询 prod k1 orders topic 的 kafka retention

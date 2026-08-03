@@ -1,0 +1,65 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: copilot
+      MYSQL_ROOT_PASSWORD: copilot-root-password
+      MYSQL_USER: copilot
+      MYSQL_PASSWORD: copilot-password
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pcopilot-root-password"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  copilot-api:
+    # NOTE: requires Dockerfile in project root (not yet created).
+    build: .
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      COPILOT_DATABASE_DRIVER: mysql
+      COPILOT_DATABASE_DSN: "copilot:copilot-password@tcp(mysql:3306)/copilot?parseTime=true"
+      COPILOT_JWT_HMAC_SECRET: "${COPILOT_JWT_HMAC_SECRET:-dev-secret}"
+      COPILOT_CAPABILITIES_DIR: /capabilities
+    ports:
+      - "18080:18080"
+    volumes:
+      - ./examples/capabilities:/capabilities:ro
+
+  capability-console:
+    # NOTE: requires Dockerfile in apps/capability-console (not yet created).
+    build: ./apps/capability-console
+    depends_on:
+      copilot-api:
+        condition: service_started
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://copilot-api:18080
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    ports:
+      - "4318:4318"
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    command: ["--config=/etc/otelcol/config.yaml"]
+
+  mock-middleware:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./examples:/app
+    command: ["node", "mock-middleware-api.js"]
+    ports:
+      - "19090:19090"
+
+volumes:
+  mysql-data:

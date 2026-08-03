@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+copilot-api
+
+# Local databases
+*.db
+*.db.bak
+*.db.bak.*
+
+# Environment files (may contain credentials)
+.env
+.env.*
+!.env.example
+
+# Vite
+.vite/
+dist/
+
+# OS
+.DS_Store

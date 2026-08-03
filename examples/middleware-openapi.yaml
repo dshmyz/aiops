@@ -1,0 +1,82 @@
+openapi: 3.0.3
+info:
+  title: Demo Middleware Admin API
+  version: 0.1.0
+paths:
+  /api/minio/{cluster}/buckets/{bucket}/capacity:
+    get:
+      tags:
+        - minio
+      summary: MinIO bucket capacity
+      parameters:
+        - name: cluster
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: bucket
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Bucket capacity observation
+  /api/glusterfs/{cluster}/volumes/{volume}/status:
+    get:
+      tags:
+        - glusterfs
+      summary: GlusterFS volume status
+      parameters:
+        - name: cluster
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: volume
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Volume status observation
+  /api/kafka/{cluster}/consumer-groups/{group}/lag:
+    get:
+      tags:
+        - kafka
+      summary: Kafka consumer group lag
+      parameters:
+        - name: cluster
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Consumer lag observation
+  /api/kafka/{cluster}/topics/{topic}/retention:
+    post:
+      tags:
+        - kafka
+      summary: Update Kafka topic retention
+      parameters:
+        - name: cluster
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Retention update accepted
+

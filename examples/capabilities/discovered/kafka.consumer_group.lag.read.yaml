@@ -1,0 +1,47 @@
+schema_version: 1
+name: kafka.consumer_group.lag.read
+status: needs_review
+domain: kafka
+resource_type: consumer_group
+operation: read
+risk: low
+backend:
+    adapter: http
+    method: GET
+    path: /api/kafka/{cluster}/consumer-groups/{group}/lag
+    timeout_ms: 3000
+    base_url: http://127.0.0.1:19090
+input_schema:
+    cluster:
+        type: string
+        required: true
+    environment:
+        type: string
+        required: true
+    group:
+        type: string
+        required: true
+output:
+    kind: observation
+    severity_path: $.status
+    summary_template: Consumer group {group} lag is {lag}
+    fields:
+        lag: $.data.lag
+        members: $.data.members
+governance:
+    requires_action_plan: false
+    requires_approval: false
+    precheck_tools: []
+    rollback:
+        strategy: ""
+        source: ""
+auth:
+    roles:
+        - viewer
+        - operator
+        - admin
+    environment_scoped: true
+ai:
+    description: Read Kafka consumer group lag from the demo middleware backend.
+    examples:
+        - 查询 prod k1 payments consumer_group 的 kafka 延迟

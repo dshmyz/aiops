@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>深色科技风 - 评审页 Mockup</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", monospace;
+    background: #0a0e14;
+    color: #e6edf3;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* === Layout === */
+  .app {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    height: 100vh;
+  }
+
+  /* === Sidebar === */
+  .sidebar {
+    background: #070a0e;
+    border-right: 1px solid #1c2330;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 0;
+    gap: 4px;
+  }
+  .sidebar-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #5c6a7a;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .sidebar-icon:hover { background: rgba(56, 189, 248, 0.08); color: #7cb0d4; }
+  .sidebar-icon.active {
+    background: rgba(56, 189, 248, 0.12);
+    color: #38bdf8;
+    box-shadow: inset 2px 0 0 #38bdf8;
+  }
+  .sidebar-spacer { flex: 1; }
+
+  /* === Main === */
+  .main {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* === Topbar === */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    border-bottom: 1px solid #1c2330;
+    background: rgba(10, 14, 20, 0.8);
+    backdrop-filter: blur(8px);
+  }
+  .topbar-left { display: flex; align-items: center; gap: 16px; }
+  .topbar-title { display: flex; flex-direction: column; }
+  .topbar-title h1 {
+    font-size: 15px;
+    font-weight: 600;
+    background: linear-gradient(135deg, #38bdf8 0%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.01em;
+  }
+  .topbar-title p { font-size: 11px; color: #5c6a7a; margin-top: 2px; }
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+  .btn {
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+  }
+  .btn-ghost {
+    background: transparent;
+    border-color: #2a3441;
+    color: #94a3b8;
+  }
+  .btn-ghost:hover { border-color: #3d4f63; color: #cbd5e1; }
+  .btn-primary {
+    background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
+    color: #fff;
+    border: none;
+    box-shadow: 0 2px 8px rgba(56, 189, 248, 0.25);
+  }
+  .btn-primary:hover { box-shadow: 0 4px 12px rgba(56, 189, 248, 0.35); }
+  .theme-toggle {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    border: 1px solid #2a3441;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+
+  /* === Stepper === */
+  .stepper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px 24px;
+    gap: 0;
+    border-bottom: 1px solid #1c2330;
+  }
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 18px;
+    border-radius: 10px;
+    cursor: pointer;
+    color: #5c6a7a;
+    transition: all 0.15s;
+  }
+  .step:hover { color: #94a3b8; }
+  .step.active {
+    background: rgba(56, 189, 248, 0.08);
+    color: #38bdf8;
+  }
+  .step.active .step-num {
+    background: linear-gradient(135deg, #38bdf8, #6366f1);
+    color: #fff;
+    border-color: transparent;
+  }
+  .step.done { color: #10b981; }
+  .step.done .step-num {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border-color: rgba(16, 185, 129, 0.3);
+  }
+  .step-num {
+    width: 26px; height: 26px;
+    border-radius: 8px;
+    border: 1px solid #2a3441;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .step-label { display: flex; flex-direction: column; }
+  .step-label strong { font-size: 13px; font-weight: 500; }
+  .step-label span { font-size: 10px; opacity: 0.7; margin-top: 1px; }
+  .step-connector {
+    width: 32px; height: 1px;
+    background: #2a3441;
+    margin: 0 4px;
+  }
+
+  /* === Content === */
+  .content {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    overflow: hidden;
+  }
+
+  /* === Left Panel === */
+  .left-panel {
+    border-right: 1px solid #1c2330;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid #1c2330;
+  }
+  .panel-head h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #cbd5e1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-head h2 span {
+    font-size: 11px;
+    font-weight: 400;
+    color: #5c6a7a;
+  }
+
+  .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #1c2330;
+  }
+  .kpi {
+    padding: 10px 12px;
+    background: #0d131a;
+    border: 1px solid #1c2330;
+    border-radius: 10px;
+  }
+  .kpi span {
+    font-size: 10px;
+    color: #5c6a7a;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .kpi strong {
+    display: block;
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 4px;
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .kpi.published strong { color: #10b981; }
+  .kpi.review strong { color: #f59e0b; }
+  .kpi.invalid strong { color: #ef4444; }
+  .kpi.publishable strong { color: #38bdf8; }
+
+  .filters {
+    padding: 12px 16px;
+    border-bottom: 1px solid #1c2330;
+    display: flex;
+    gap: 8px;
+  }
+  .filter-input {
+    flex: 1;
+    padding: 8px 10px;
+    background: #0d131a;
+    border: 1px solid #2a3441;
+    border-radius: 8px;
+    color: #e6edf3;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .filter-input:focus { border-color: #38bdf8; }
+  .filter-select {
+    padding: 8px 10px;
+    background: #0d131a;
+    border: 1px solid #2a3441;
+    border-radius: 8px;
+    color: #94a3b8;
+    font-size: 12px;
+    outline: none;
+  }
+
+  .cap-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .cap-item {
+    padding: 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    margin-bottom: 4px;
+    border: 1px solid transparent;
+    transition: all 0.12s;
+  }
+  .cap-item:hover {
+    background: #0d131a;
+    border-color: #2a3441;
+  }
+  .cap-item.active {
+    background: rgba(56, 189, 248, 0.06);
+    border-color: rgba(56, 189, 248, 0.2);
+  }
+  .cap-item-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .cap-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: #cbd5e1;
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .cap-item.active .cap-name { color: #38bdf8; }
+  .cap-badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 500;
+  }
+  .badge-published { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+  .badge-draft { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+  .cap-meta {
+    font-size: 11px;
+    color: #5c6a7a;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .method-pill {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .method-get { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+  .method-post { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+
+  /* === Right Panel === */
+  .right-panel {
+    overflow-y: auto;
+    padding: 24px 28px;
+  }
+  .editor-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .editor-title h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f1f5f9;
+    margin-bottom: 4px;
+  }
+  .editor-title p { font-size: 12px; color: #5c6a7a; }
+  .editor-actions { display: flex; gap: 8px; }
+
+  .card {
+    background: #0d131a;
+    border: 1px solid #1c2330;
+    border-radius: 12px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .card-head {
+    padding: 14px 16px;
+    border-bottom: 1px solid #1c2330;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .card-head h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #cbd5e1;
+  }
+  .card-head span { font-size: 11px; color: #5c6a7a; }
+  .card-body { padding: 16px; }
+
+  .checklist {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .check-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #0a0e14;
+    border: 1px solid #1c2330;
+    border-radius: 8px;
+  }
+  .check-item.fail { border-color: rgba(239, 68, 68, 0.2); }
+  .check-icon {
+    width: 18px; height: 18px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .check-icon.ok { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+  .check-icon.fail { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+  .check-text { flex: 1; }
+  .check-text strong {
+    font-size: 12px;
+    font-weight: 500;
+    color: #cbd5e1;
+    display: block;
+  }
+  .check-text small {
+    font-size: 11px;
+    color: #5c6a7a;
+    margin-top: 2px;
+    display: block;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .form-field { display: flex; flex-direction: column; gap: 6px; }
+  .form-field.wide { grid-column: 1 / -1; }
+  .form-field label {
+    font-size: 11px;
+    color: #94a3b8;
+    font-weight: 500;
+  }
+  .form-field input,
+  .form-field select {
+    padding: 9px 12px;
+    background: #0a0e14;
+    border: 1px solid #2a3441;
+    border-radius: 8px;
+    color: #e6edf3;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.15s;
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .form-field input:focus,
+  .form-field select:focus { border-color: #38bdf8; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a3441; border-radius: 3px; }
+  ::-::-webkit-scrollbar-thumb:hover { background: #3d4f63; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-icon" style="font-size: 20px; margin-bottom: 12px;">⚡</div>
+      <div class="sidebar-icon">🤖</div>
+      <div class="sidebar-icon active">⚙️</div>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-icon">⌘</div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main">
+      <!-- Topbar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="topbar-title">
+            <h1>AI Capability Studio</h1>
+            <p>Translate middleware APIs into AI-powered tools</p>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <button class="theme-toggle">🌙</button>
+          <button class="btn btn-ghost">刷新</button>
+          <button class="btn btn-primary">+ 新建草稿</button>
+        </div>
+      </header>
+
+      <!-- Stepper -->
+      <nav class="stepper">
+        <div class="step done">
+          <div class="step-num">✓</div>
+          <div class="step-label"><strong>接入 API</strong><span>Swagger 导入</span></div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step done">
+          <div class="step-num">✓</div>
+          <div class="step-label"><strong>选择能力</strong><span>筛选接口</span></div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step active">
+          <div class="step-num">3</div>
+          <div class="step-label"><strong>评审发布</strong><span>补参数发布</span></div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-label"><strong>AI 试问</strong><span>验证调用</span></div>
+        </div>
+      </nav>
+
+      <!-- Content -->
+      <div class="content">
+        <!-- Left: Capability List -->
+        <aside class="left-panel">
+          <div class="panel-head">
+            <h2>能力清单 <span>3 / 3 项</span></h2>
+          </div>
+          <div class="kpi-strip">
+            <div class="kpi published"><span>AI 可用</span><strong>1</strong></div>
+            <div class="kpi review"><span>待评审</span><strong>2</strong></div>
+            <div class="kpi invalid"><span>校验失败</span><strong>1</strong></div>
+            <div class="kpi publishable"><span>可发布</span><strong>1</strong></div>
+          </div>
+          <div class="filters">
+            <input class="filter-input" placeholder="搜索能力..." />
+            <select class="filter-select">
+              <option>全部</option>
+              <option>草稿</option>
+              <option>已发布</option>
+            </select>
+          </div>
+          <div class="cap-list">
+            <div class="cap-item active">
+              <div class="cap-item-head">
+                <span class="cap-name">minio.bucket.capacity.read</span>
+                <span class="cap-badge badge-draft">草稿</span>
+              </div>
+              <div class="cap-meta">
+                <span class="method-pill method-get">GET</span>
+                /api/minio/{...}/capacity
+              </div>
+            </div>
+            <div class="cap-item">
+              <div class="cap-item-head">
+                <span class="cap-name">kafka.topic.retention.set</span>
+                <span class="cap-badge badge-draft">草稿</span>
+              </div>
+              <div class="cap-meta">
+                <span class="method-pill method-post">POST</span>
+                /api/kafka/{...}/retention
+              </div>
+            </div>
+            <div class="cap-item">
+              <div class="cap-item-head">
+                <span class="cap-name">glusterfs.volume.health.read</span>
+                <span class="cap-badge badge-published">已发布</span>
+              </div>
+              <div class="cap-meta">
+                <span class="method-pill method-get">GET</span>
+                /api/glusterfs/{...}/health
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Right: Editor -->
+        <section class="right-panel">
+          <div class="editor-head">
+            <div class="editor-title">
+              <h2>评审发布</h2>
+              <p>minio.bucket.capacity.read · 下一步：发布给 AI</p>
+            </div>
+            <div class="editor-actions">
+              <button class="btn btn-ghost">保存草稿</button>
+              <button class="btn btn-primary">发布当前能力</button>
+            </div>
+          </div>
+
+          <!-- Publish Checklist -->
+          <div class="card">
+            <div class="card-head">
+              <h3>发布检查</h3>
+              <span style="color: #f59e0b;">需要处理</span>
+            </div>
+            <div class="card-body">
+              <div class="checklist">
+                <div class="check-item">
+                  <div class="check-icon ok">✓</div>
+                  <div class="check-text">
+                    <strong>读取类能力</strong>
+                    <small>operation = read</small>
+                  </div>
+                </div>
+                <div class="check-item">
+                  <div class="check-icon ok">✓</div>
+                  <div class="check-text">
+                    <strong>GET 请求</strong>
+                    <small>backend.method = GET</small>
+                  </div>
+                </div>
+                <div class="check-item">
+                  <div class="check-icon ok">✓</div>
+                  <div class="check-text">
+                    <strong>后端地址</strong>
+                    <small>https://middleware.example.com</small>
+                  </div>
+                </div>
+                <div class="check-item">
+                  <div class="check-icon ok">✓</div>
+                  <div class="check-text">
+                    <strong>校验通过</strong>
+                    <small>Capability schema 已通过校验</small>
+                  </div>
+                </div>
+                <div class="check-item fail">
+                  <div class="check-icon fail">✕</div>
+                  <div class="check-text">
+                    <strong>同名发布</strong>
+                    <small>已有同名发布能力，请先下线旧版本</small>
+                  </div>
+                </div>
+              </div>
+              <button class="btn btn-primary" style="width: 100%; justify-content: center; opacity: 0.5;">发布当前 Capability</button>
+            </div>
+          </div>
+
+          <!-- Basic Info -->
+          <div class="card">
+            <div class="card-head">
+              <h3>识别结果</h3>
+              <span>草稿 / 读取</span>
+            </div>
+            <div class="card-body">
+              <div class="form-grid">
+                <div class="form-field">
+                  <label>名称</label>
+                  <input value="minio.bucket.capacity.read" />
+                </div>
+                <div class="form-field">
+                  <label>领域</label>
+                  <input value="minio" />
+                </div>
+                <div class="form-field">
+                  <label>资源类型</label>
+                  <input value="bucket" />
+                </div>
+                <div class="form-field">
+                  <label>操作类型</label>
+                  <select><option>读取</option><option>写入</option></select>
+                </div>
+                <div class="form-field wide">
+                  <label>后端路径</label>
+                  <input value="GET /api/minio/{cluster}/buckets/{bucket}/capacity" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
