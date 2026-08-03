@@ -8,15 +8,18 @@
 - ✅ **评分评论** — 用户评价和使用反馈
 - ✅ **下载统计** — 跟踪能力的流行度和使用趋势
 - ✅ **权限控制** — 私有/团队/公开三级可见性
-- ✅ **依赖管理** — 声明能力依赖关系（开发中）
+- ✅ **依赖管理** — 声明能力依赖关系并解析执行顺序
+- ✅ **CI 校验** — 提交时 `capability-validator` 自动校验 schema、扫描密钥、dry-run
 - ✅ **使用分析** — 执行成功率、耗时、环境分布
 
 ## API 端点
 
+所有 marketplace 路由挂在 `/v1/marketplace/capabilities` 下。读操作对 viewer/operator/admin 开放；**发布需要 admin**（发布的能力会成为可执行的基础设施）。发布时的 `owner` 取自认证主体，绝不来自请求体。
+
 ### 1. 发布能力
 
 ```bash
-POST /api/marketplace/capabilities
+POST /v1/marketplace/capabilities
 Authorization: Bearer <token>
 Content-Type: application/json
 
@@ -25,10 +28,11 @@ Content-Type: application/json
   "version": "1.0.0",
   "visibility": "public",
   "tags": ["kubernetes", "operations"],
-  "category": "Infrastructure",
-  "changelog": "Initial release"
+  "category": "Infrastructure"
 }
 ```
+
+发布前会先 `capabilities.Validate` 校验 YAML——市场绝不发放运行时加载器会拒绝的能力。
 
 **响应**:
 
@@ -38,9 +42,7 @@ Content-Type: application/json
     "id": "uuid-1",
     "name": "k8s.pod.restart",
     "domain": "kubernetes",
-    "visibility": "public",
-    "download_count": 0,
-    "rating_count": 0
+    "visibility": "public"
   },
   "version": {
     "id": "uuid-2",
@@ -53,7 +55,7 @@ Content-Type: application/json
 ### 2. 搜索能力
 
 ```bash
-GET /api/marketplace/capabilities?query=restart&domain=kubernetes&sort_by=downloads
+GET /v1/marketplace/capabilities?query=restart&domain=kubernetes&sort_by=downloads
 ```
 
 **查询参数**:
@@ -66,9 +68,12 @@ GET /api/marketplace/capabilities?query=restart&domain=kubernetes&sort_by=downlo
 | `risk_level` | string | 过滤风险等级（low、medium、high） |
 | `min_rating` | float | 最低评分（0.0 - 5.0） |
 | `visibility` | string | 可见性（private、team、public） |
+| `status` | string | 状态（published、deprecated） |
 | `sort_by` | string | 排序方式（downloads、rating、created_at、usage） |
-| `limit` | int | 每页结果数（默认 20） |
+| `limit` | int | 每页结果数（默认 20，上限 100） |
 | `offset` | int | 偏移量 |
+
+`sort_by` 只接受固定的字面量集合，不会发生 SQL 注入；LIKE 通配符会转义。
 
 **响应**:
 
@@ -82,56 +87,33 @@ GET /api/marketplace/capabilities?query=restart&domain=kubernetes&sort_by=downlo
       "description": "Restart a Kubernetes pod...",
       "tags": ["kubernetes", "operations"],
       "download_count": 42,
-      "usage_count": 150,
       "avg_rating": 4.5,
       "rating_count": 8
     }
   ],
   "total": 1,
-  "limit": 20,
-  "offset": 0
+  "next_offset": null
 }
 ```
+
+有更多页时 `next_offset` 为下一页的偏移量。
 
 ### 3. 查看能力详情
 
 ```bash
-GET /api/marketplace/capabilities/:id
+GET /v1/marketplace/capabilities/{id}
 ```
 
 ### 4. 查看所有版本
 
 ```bash
-GET /api/marketplace/capabilities/:id/versions
-```
-
-**响应**:
-
-```json
-{
-  "versions": [
-    {
-      "id": "uuid-3",
-      "version": "1.1.0",
-      "status": "published",
-      "changelog": "Added support for StatefulSets",
-      "published_at": "2026-08-03T10:00:00Z"
-    },
-    {
-      "id": "uuid-2",
-      "version": "1.0.0",
-      "status": "published",
-      "changelog": "Initial release",
-      "published_at": "2026-08-01T08:00:00Z"
-    }
-  ]
-}
+GET /v1/marketplace/capabilities/{id}/versions
 ```
 
 ### 5. 下载能力
 
 ```bash
-GET /api/marketplace/capabilities/:id/download/:version_id
+GET /v1/marketplace/capabilities/{id}/download/{version_id}
 Authorization: Bearer <token>
 ```
 
@@ -139,18 +121,18 @@ Authorization: Bearer <token>
 
 ```json
 {
-  "yaml_content": "schema_version: 1\nname: k8s.pod.restart\n...",
   "version": "1.0.0",
-  "download_url": "/api/marketplace/capabilities/uuid-1/download/uuid-2"
+  "yaml_content": "schema_version: 1\nname: k8s.pod.restart\n...",
+  "yaml_hash": "sha256:<hex>"
 }
 ```
 
-下载会自动记录到 `capability_downloads` 表。
+下载会自动记录到 `capability_downloads` 表；该记录是 best-effort——统计写入失败不会拒绝返回 YAML。
 
 ### 6. 评分
 
 ```bash
-POST /api/marketplace/capabilities/:id/ratings
+POST /v1/marketplace/capabilities/{id}/ratings
 Authorization: Bearer <token>
 Content-Type: application/json
 
@@ -162,18 +144,18 @@ Content-Type: application/json
 }
 ```
 
-同一用户对同一能力的多次评分会更新之前的评分。
+`rating` 必须在 1–5。同一用户对同一能力的多次评分会更新之前的评分。
 
 ### 7. 查看评分
 
 ```bash
-GET /api/marketplace/capabilities/:id/ratings?limit=10&offset=0
+GET /v1/marketplace/capabilities/{id}/ratings?limit=10&offset=0
 ```
 
 ### 8. 使用统计
 
 ```bash
-GET /api/marketplace/capabilities/:id/stats
+GET /v1/marketplace/capabilities/{id}/stats
 ```
 
 **响应**:
@@ -184,16 +166,12 @@ GET /api/marketplace/capabilities/:id/stats
   "total_downloads": 42,
   "total_executions": 150,
   "success_rate": 0.94,
-  "avg_execution_time": 3200,
-  "executions_by_env": {
+  "avg_duration_ms": 3200,
+  "by_environment": {
     "prod": 80,
     "staging": 50,
     "dev": 20
-  },
-  "executions_last_30d": [
-    {"date": "2026-08-03", "count": 12, "success": 11},
-    {"date": "2026-08-02", "count": 8, "success": 8}
-  ]
+  }
 }
 ```
 
@@ -218,17 +196,8 @@ GET /api/marketplace/capabilities/:id/stats
 
 旧版本仍然保留，用户可以选择使用特定版本。
 
-### 版本弃用
-
-```bash
-PATCH /api/marketplace/capabilities/:id/versions/:version_id
-Content-Type: application/json
-
-{
-  "status": "deprecated",
-  "deprecation_reason": "Security vulnerability fixed in 1.1.0"
-}
-```
+> 服务层已提供 `Deprecate` 用于把能力标记为 `deprecated`，但当前 HTTP 路由尚未暴露该端点；
+> 如需通过 API 弃用，可在 `serveMarketplace` 中补一条 `PATCH /v1/marketplace/capabilities/{id}` 路由。
 
 ## 权限和可见性
 
@@ -240,19 +209,14 @@ Content-Type: application/json
 | `team` | 团队 | 同一 organization_id 的成员 |
 | `public` | 公开 | 所有人 |
 
-### JWT 权限
+### 角色权限
 
-发布能力需要 JWT 中包含：
+| 操作 | 所需角色 |
+|------|---------|
+| 搜索 / 查看 / 下载 / 评分 | viewer、operator、admin |
+| 发布能力 | admin（仅此） |
 
-```json
-{
-  "sub": "user-123",
-  "roles": ["operator", "admin"],
-  "organization_id": "my-company"
-}
-```
-
-- `owner_id` 自动从 JWT `sub` 提取
+- `owner` 自动从认证主体提取，忽略请求体中的 `owner` 字段
 - `organization_id` 用于团队可见性控制
 
 ### 下载权限
@@ -286,40 +250,44 @@ Content-Type: application/json
 3. 其他组织下载并在自己环境部署
 4. 通过评分和 issue 反馈改进
 
-## 依赖管理（开发中）
+## 依赖管理
+
+依赖在能力 YAML 里声明（`depends_on`），由运行时解析器在执行前构建执行顺序。
 
 ### 声明依赖
 
-能力可以依赖其他能力:
-
 ```yaml
-dependencies:
-  - name: service.health.check
-    type: required
-    version: ">=1.0.0 <2.0.0"
-    execution_order: 1
-  - name: lb.backend.connections.count
-    type: optional
-    version: "^1.2.0"
-    execution_order: 2
+# "重启服务" 依赖 "流量切走"：先 drain 流量，服务重启后再恢复流量
+name: service.restart
+operation: write
+depends_on:
+  - capability: service.traffic.drain
+    type: required        # required | optional | suggested（默认 required）
+    phase: pre            # pre（默认）| post
+    input_mapping:        # 把本能力输入映射到依赖能力输入
+      lb_name: '{lb_name}'
+      backend_id: '{host}'
+  - capability: service.health.check
+    type: suggested
+    phase: post
 ```
 
 ### 依赖解析
 
-系统自动：
+`internal/capabilities` 的 `DependencyResolver.Resolve(name, input)` 使用带环检测的 DFS 拓扑排序：
 
-1. 检查依赖的能力是否已安装
-2. 验证版本约束
-3. 按 `execution_order` 顺序执行
-4. 如果 required 依赖缺失，阻止能力执行
+1. `pre` 依赖先于本能力执行，`post` 依赖后执行
+2. `required` 依赖失败 → 阻止整个执行链；`optional`/`suggested` 失败 → 降级跳过
+3. 菱形依赖只调度一次（去重）；无法满足的必需依赖报错
+4. 依赖输入通过 `input_mapping` 映射；未映射的同名输入自动透传；`environment` 始终透传
 
-### 循环依赖检测
+### 校验与环检测
 
-数据库约束防止循环依赖:
+- `capabilities.Validate` 校验单个能力的依赖规格（无自依赖、无重复、type/phase 合法）
+- `capabilities.ValidateDependencies` 校验全图：未注册的必需依赖、published 依赖非 published、以及 0/1/2 着色环检测（`a -> b -> a`）
+- 加载器 `LoadPublished` 在启动时即校验全图，环或缺失依赖会拒绝启动
 
-```sql
-CHECK (capability_id != depends_on_capability_id)
-```
+> 数据库并不用 CHECK 约束防环（那只能防自环）；环在加载期由 `ValidateDependencies` 检测。
 
 ## 最佳实践
 
@@ -386,10 +354,11 @@ Bug fixes and improvements.
 
 ## 路线图
 
+- [x] **CI/CD 集成** — `capability-validator` 在 `capability-validation.yml` 中校验每个提交
+- [x] **依赖解析器** — `DependencyResolver` 拓扑排序 + 环检测
 - [ ] **CLI 工具** — `copilot-cli capability search/install/publish`
 - [ ] **Web UI** — 可视化浏览和管理能力
-- [ ] **依赖解析器** — 自动安装依赖，版本冲突检测
-- [ ] **CI/CD 集成** — GitHub Actions 自动发布能力
+- [ ] **弃用 API** — 暴露 `PATCH /v1/marketplace/capabilities/{id}` 路由
 - [ ] **社区市场** — 公开的能力分享平台
 - [ ] **语义搜索** — 向量检索，自然语言查询（"我想重启 Kafka"）
 

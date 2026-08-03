@@ -20,3 +20,7 @@ dist/
 
 # OS
 .DS_Store
+
+# Capability validator generated reports
+.capability-validation.json
+validation-report.md

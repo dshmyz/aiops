@@ -141,6 +141,7 @@ type Router struct {
 	alertWebhook       AlertWebhookService
 	alertQuery         AlertQueryService
 	alertWebhookSecret string
+	marketplace        MarketplaceService
 	devTokens          bool
 }
 
@@ -406,6 +407,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if request.Method == http.MethodGet && request.URL.Path == "/v1/assistant/feedback" {
 		r.serveFeedback(writer, request)
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/v1/marketplace/capabilities") {
+		r.serveMarketplace(writer, request)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/capabilities") {
