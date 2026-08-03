@@ -2,7 +2,9 @@
 node_modules/
 
 # Build artifacts
-copilot-api
+# /copilot-api anchors the ignore to the repo-root binary; an unanchored
+# pattern ("copilot-api") would also ignore the cmd/copilot-api/ source dir.
+/copilot-api
 
 # Local databases
 *.db
