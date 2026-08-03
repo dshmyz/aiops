@@ -38,6 +38,11 @@ const (
 	maxReadResponseBytes       = 10 * 1024
 	maxCapabilityResponseBytes = 1024 * 1024
 	readTimeout                = 5 * time.Second
+	// assistantRequestTimeout bounds a single synchronous /v1/assistant/messages
+	// call. The generic readTimeout (5s) is far too short for the planner to
+	// round-trip an external reasoning model (e.g. mimo), so the one-shot
+	// assistant path gets a longer budget.
+	assistantRequestTimeout = 60 * time.Second
 )
 
 type ReadService interface {
@@ -1291,7 +1296,7 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 	if pc.Environment == "" && body.Environment != "" && body.Environment != "none" {
 		pc.Environment = body.Environment
 	}
-	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	ctx, cancel := context.WithTimeout(request.Context(), assistantRequestTimeout)
 	defer cancel()
 	response, err := r.assistant.HandleMessage(ctx, user, body.Message, body.ConversationID, pc)
 	if err != nil {

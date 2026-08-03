@@ -17,7 +17,14 @@ const (
 	envOpenAIAPIKey      = "COPILOT_OPENAI_API_KEY"
 	envOpenAIModel       = "COPILOT_OPENAI_MODEL"
 	envOpenAIBaseURL     = "COPILOT_OPENAI_BASE_URL"
+	envOpenAITimeout     = "COPILOT_OPENAI_TIMEOUT"
 	envPromptsDir        = "COPILOT_PROMPTS_DIR"
+
+	// defaultChatTimeout is the per-LLM-call timeout used for the eino-openai
+	// chat model unless overridden by COPILOT_OPENAI_TIMEOUT. Reasoning models
+	// (e.g. mimo) can need longer than the historical 5s to formulate a plan, so
+	// the value is configurable in the environment.
+	defaultChatTimeout = 5 * time.Second
 )
 
 // NewPlannerFromEnv builds the assistant planner from environment configuration.
@@ -42,11 +49,17 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 	}
 	temperature := float32(0)
 	maxCompletionTokens := 256
+	timeout := defaultChatTimeout
+	if v := strings.TrimSpace(env[envOpenAITimeout]); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			timeout = d
+		}
+	}
 	chat, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:              apiKey,
 		BaseURL:             strings.TrimSpace(env[envOpenAIBaseURL]),
 		Model:               modelName,
-		Timeout:             5 * time.Second,
+		Timeout:             timeout,
 		Temperature:         &temperature,
 		MaxCompletionTokens: &maxCompletionTokens,
 		ResponseFormat: &einoopenai.ChatCompletionResponseFormat{
