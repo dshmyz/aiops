@@ -389,6 +389,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		r.serveAlertWebhook(writer, request)
 		return
 	}
+	if request.Method == http.MethodPost && request.URL.Path == "/v1/alerts/alertmanager" {
+		r.serveAlertmanagerWebhook(writer, request)
+		return
+	}
 	if request.Method == http.MethodPost && request.URL.Path == "/v1/assistant/messages" {
 		r.serveAssistant(writer, request)
 		return

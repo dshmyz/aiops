@@ -21,6 +21,7 @@ const maxMarketplaceBodyBytes = 256 * 1024
 type MarketplaceService interface {
 	Publish(ctx context.Context, req marketplace.PublishRequest) (*marketplace.Registry, *marketplace.Version, error)
 	Search(ctx context.Context, req marketplace.SearchRequest) ([]marketplace.Registry, int, error)
+	SemanticSearch(ctx context.Context, query string, topK, limit int) ([]marketplace.Registry, error)
 	Get(ctx context.Context, id string) (*marketplace.Registry, error)
 	ListVersions(ctx context.Context, capabilityID string) ([]marketplace.Version, error)
 	GetVersion(ctx context.Context, capabilityID, versionID string) (*marketplace.Version, error)
@@ -131,6 +132,27 @@ func (r *Router) serveMarketplaceSearch(ctx context.Context, writer http.Respons
 		return // error already written
 	}
 	query := request.URL.Query()
+
+	// 语义搜索：natural-language 查询，走向量/子串知识检索。语义检索不分页、
+	// 只回 topN，命中已按相似度排序，所以不含关键词场景。
+	if query.Get("semantic") == "true" {
+		items, err := r.marketplace.SemanticSearch(ctx, query.Get("query"), limit*2, limit)
+		if err != nil {
+			if errors.Is(err, marketplace.ErrSemanticUnavailable) {
+				writeError(writer, http.StatusServiceUnavailable, "semantic search is not configured")
+				return
+			}
+			writeMarketplaceError(writer, err)
+			return
+		}
+		writeCapabilityJSON(writer, map[string]any{
+			"capabilities": items,
+			"total":        len(items),
+			"semantic":     true,
+		})
+		return
+	}
+
 	req := marketplace.SearchRequest{
 		Query:      query.Get("query"),
 		Domain:     query.Get("domain"),

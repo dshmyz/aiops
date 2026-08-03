@@ -25,6 +25,18 @@ func (m *MemoryStore) Add(_ context.Context, doc EmbeddedDocument) error {
 	return nil
 }
 
+// Remove deletes a document by ID, matching the Remover identifier used by
+// indexers that re-index documents with a stable ID.
+func (m *MemoryStore) Remove(_ context.Context, id string) error {
+	for i, d := range m.docs {
+		if d.ID == id {
+			m.docs = append(m.docs[:i], m.docs[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
 func (m *MemoryStore) List(_ context.Context) ([]Document, error) {
 	out := make([]Document, len(m.docs))
 	for i, d := range m.docs {
@@ -111,6 +123,15 @@ func (s *SQLStore) Add(ctx context.Context, doc EmbeddedDocument) error {
 	)
 	if err != nil {
 		return fmt.Errorf("insert knowledge document: %w", err)
+	}
+	return nil
+}
+
+// Remove deletes a document by ID. Re-indexing a stable-ID document (e.g. a
+// marketplace capability) first removes any prior row so Add does not duplicate.
+func (s *SQLStore) Remove(ctx context.Context, id string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM copilot_knowledge_documents WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("remove knowledge document: %w", err)
 	}
 	return nil
 }

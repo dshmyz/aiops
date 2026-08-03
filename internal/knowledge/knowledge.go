@@ -51,3 +51,10 @@ type VectorRetrieverStore interface {
 	// most similar (cosine) to the provided query embedding vector.
 	RetrieveByVector(ctx context.Context, queryEmbedding []float32, topK int) ([]Document, error)
 }
+
+// Remover is an optional interface that stores can implement to delete a
+// document by ID. Used by indexers that need to re-index (upsert) a document
+// with a stable ID (e.g. ability semantic indexing) without duplicating rows.
+type Remover interface {
+	Remove(ctx context.Context, id string) error
+}

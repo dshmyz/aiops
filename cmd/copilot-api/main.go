@@ -289,7 +289,14 @@ func main() {
 	// service probes the dialect so ratings use the right upsert on MySQL vs
 	// SQLite; both engines get their tables from migrations/015 (MySQL) and
 	// internal/store/db.go (SQLite).
-	options = append(options, httpapi.WithMarketplace(marketplace.NewService(db)))
+	marketplaceSvc := marketplace.NewService(db)
+	if knowledgeManager != nil {
+		// 知识库可用时给能力市场开启语义检索：能力发布时按 AI 描述建索引，
+		// 支持"我想重启 Kafka"这类自然语言查询。embedder 可能为 nil（此时
+		// SemanticSearch 退化为子串检索，离线也可用）。
+		marketplaceSvc.EnableSemantic(knowledgeManager.Store(), knowledgeManager.Embedder())
+	}
+	options = append(options, httpapi.WithMarketplace(marketplaceSvc))
 	if promptRegistry != nil {
 		options = append(options, httpapi.WithPromptRegistry(promptRegistry))
 	}
@@ -819,12 +826,12 @@ func (r eventReadRunner) Read(ctx context.Context, tool tools.Tool, input map[st
 	events := make([]map[string]any, 0, len(page.Events))
 	for _, e := range page.Events {
 		events = append(events, map[string]any{
-			"id":          e.ID,
-			"tool_name":   e.ToolName,
-			"action":      e.Action,
-			"decision":    e.Decision,
-			"subject":     e.Subject,
-			"created_at":  e.CreatedAt,
+			"id":         e.ID,
+			"tool_name":  e.ToolName,
+			"action":     e.Action,
+			"decision":   e.Decision,
+			"subject":    e.Subject,
+			"created_at": e.CreatedAt,
 		})
 	}
 	return map[string]any{

@@ -98,6 +98,39 @@ GET /v1/marketplace/capabilities?query=restart&domain=kubernetes&sort_by=downloa
 
 有更多页时 `next_offset` 为下一页的偏移量。
 
+### 2.1 语义搜索（自然语言查询）
+
+除了关键词匹配，市场还支持**语义搜索**：用自然语言描述要的操作，即使能力名里没有这些词也能召回。
+
+```bash
+GET /v1/marketplace/capabilities?semantic=true&query=我想重启%20Kafka
+```
+
+当 `semantic=true` 时，查询文本会被嵌入成向量并在能力索引里按余弦相似度检索——`kafka.broker.restart` 这类描述里写了 "restart Kafka broker" 的能力会命中，尽管查询词与能力名并不字面匹配。
+
+**响应**:
+
+```json
+{
+  "capabilities": [
+    {
+      "id": "uuid-1",
+      "name": "kafka.broker.restart",
+      "domain": "kubernetes"
+    }
+  ],
+  "total": 1,
+  "semantic": true
+}
+```
+
+语义索引如何构建：
+
+- **发布时自动索引**：每次 `POST /v1/marketplace/capabilities` 成功发布后，能力名、domain、operation、`ai.description` 与示例会被建成一条 knowledge 文档（ID 前缀 `capability:`）并嵌入；重复发布同一能力会替换旧文档而非叠加。
+- **弃用时移除**：`Deprecate` 把该能力的文档从索引中删除，避免自然语言检索命中已下线的基础设施。
+- **启用条件**：需在 `cmd/copilot-api` 里配置知识库与 embedding（见 `configuration.md` 的 `COPILOT_KNOWLEDGE_EMBEDDER_*`）。未配置时 `semantic=true` 返回 `503`，普通关键词搜索不受影响。
+- 语义检索不分页，只回按相似度排序的前 `limit` 条；只返回 `published` 且未弃用的能力。
+
 ### 3. 查看能力详情
 
 ```bash
@@ -360,7 +393,7 @@ Bug fixes and improvements.
 - [ ] **Web UI** — 可视化浏览和管理能力
 - [ ] **弃用 API** — 暴露 `PATCH /v1/marketplace/capabilities/{id}` 路由
 - [ ] **社区市场** — 公开的能力分享平台
-- [ ] **语义搜索** — 向量检索，自然语言查询（"我想重启 Kafka"）
+- [x] **语义搜索** — 向量检索，自然语言查询（"我想重启 Kafka"）
 
 ---
 

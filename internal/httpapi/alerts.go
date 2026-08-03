@@ -56,6 +56,55 @@ func (r *Router) serveAlertWebhook(writer http.ResponseWriter, request *http.Req
 	})
 }
 
+// serveAlertmanagerWebhook 处理 POST /v1/alerts/alertmanager。与 /v1/alerts/webhook
+// 同一条已建好的管线（HMAC 门控、归一化、去重、审计），区别只在本路由接受
+// Prometheus Alertmanager 原生 webhook 载荷：一条推送里通常带多条 alerts[]，
+// 每条映射成一个 WebhookPayload 后逐条 Ingest。单条失败不阻断整批，返回时
+// acknowledged 表示成功落库的条数。
+func (r *Router) serveAlertmanagerWebhook(writer http.ResponseWriter, request *http.Request) {
+	if r.alertWebhook == nil {
+		writeError(writer, http.StatusServiceUnavailable, "alert webhook is not configured")
+		return
+	}
+	if !r.verifyAlertWebhookSignature(request) {
+		writeError(writer, http.StatusUnauthorized, "invalid webhook signature")
+		return
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxAlertWebhookBodyBytes))
+	var body alert.AlertmanagerPayload
+	if err := decoder.Decode(&body); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	payloads := alert.MapAlertmanager(body)
+	if len(payloads) == 0 {
+		writeError(writer, http.StatusBadRequest, "payload contains no alerts")
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	defer cancel()
+
+	acknowledged := 0
+	results := make([]map[string]any, 0, len(payloads))
+	for _, p := range payloads {
+		result, err := r.alertWebhook.Ingest(ctx, p)
+		if err != nil {
+			// 单条失败不阻断整批，让其余 alerts 仍能落库。
+			continue
+		}
+		acknowledged++
+		results = append(results, map[string]any{
+			"id":      result.Alert.ID,
+			"status":  result.Alert.Status,
+			"created": result.Created,
+		})
+	}
+	writeCappedJSON(writer, map[string]any{
+		"acknowledged": acknowledged,
+		"alerts":       results,
+	})
+}
+
 // verifyAlertWebhookSignature 校验 X-Webhook-Signature: HMAC-SHA256(body,
 // secret) 的 hex 摘要，用 hmac.Equal 做常量时间比较。校验前用 LimitReader
 // 预读 body 拒绝超限载荷，并把 body 重置以便后续 Decode 复用同一份字节。

@@ -10,7 +10,7 @@ Go backend foundation for an AI-assisted middleware operations console.
 - External MCP integration: `COPILOT_MCP_SERVERS` startup registration + `/v1/mcp/servers` hot CRUD/reload + health checks.
 - Assistant endpoints: `POST /v1/assistant/messages` (one-shot) and `POST /v1/assistant/stream` (SSE: delta/thinking/tool_call/progress/response), multiturn conversations (`/v1/assistant/conversations*`), and page-context support.
 - Write governance: immutable action plans, dry-run preview (`risk_notice` block), inline confirm, **low-risk Runbook auto-execution** returning `execution_result` with the runbook slug + informational blocks, post-execution verification, and a `/v1/executions` query API.
-- Alert layer: `/v1/alerts/webhook` (HMAC-SHA256), `copilot_alerts` table, `alert.query` tool.
+- Alert layer: `/v1/alerts/webhook` and `/v1/alerts/alertmanager` (both HMAC-SHA256; the latter ingests Prometheus Alertmanager's native payload), `copilot_alerts` table, `alert.query` tool.
 - Audit layer: `/v1/audit-events` (filters + keyset + `final_result_only`) + `/v1/audit-events/search` natural-language query; scheduled tasks `/v1/scheduled-tasks*`; prompt registry `/v1/admin/prompts*`; knowledge base; feedback; rate limiting; auth modes (jwt / cas / both).
 - Vue 3 capability console in `apps/capability-console`.
 - JWT projection uses only `sub`, `roles`, `allowed_environments`, and request ID.

@@ -31,6 +31,10 @@ func (f *fakeMarketplaceService) Search(_ context.Context, _ marketplace.SearchR
 	return []marketplace.Registry{{ID: "reg-1", Name: "k8s.pod.restart"}}, f.searchTotal, nil
 }
 
+func (f *fakeMarketplaceService) SemanticSearch(_ context.Context, _ string, _, _ int) ([]marketplace.Registry, error) {
+	return nil, marketplace.ErrSemanticUnavailable
+}
+
 func (f *fakeMarketplaceService) Get(_ context.Context, id string) (*marketplace.Registry, error) {
 	return &marketplace.Registry{ID: id, Name: "k8s.pod.restart"}, nil
 }
@@ -179,5 +183,22 @@ func TestMarketplaceUnconfiguredReturns503(t *testing.T) {
 
 	if res.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", res.Code)
+	}
+}
+
+// TestMarketplaceSemanticUnconfiguredReturns503: semantic=true requires a
+// semantic service; when the service reports semantic search is unavailable,
+// the read route returns a clear 503 rather than a keyword fallback.
+func TestMarketplaceSemanticUnconfiguredReturns503(t *testing.T) {
+	t.Parallel()
+	svc := &fakeMarketplaceService{}
+	router := marketplaceRouter(t, svc)
+
+	req := signedRequest(t, "/v1/marketplace/capabilities?semantic=true&query=restart%20kafka", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", res.Code, res.Body.String())
 	}
 }
