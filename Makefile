@@ -66,12 +66,11 @@ dev-up:
 		nohup node examples/mock-middleware-api.js > $(DEV_PID_DIR)/mock.log 2>&1 < /dev/null & echo $$! > $(DEV_PID_DIR)/mock.pid; \
 		echo "mock middleware API started on http://127.0.0.1:19090 (pid $$(cat $(DEV_PID_DIR)/mock.pid))"; fi
 	@if [ -f $(DEV_PID_DIR)/api.pid ] && kill -0 $$(cat $(DEV_PID_DIR)/api.pid) 2>/dev/null; then echo "copilot-api already running"; else \
-		COPILOT_DATABASE_DRIVER=sqlite COPILOT_CAPABILITIES_DIR=./examples/capabilities \
-		COPILOT_JWT_HMAC_SECRET=dev-secret COPILOT_DEV_EXPOSE_CONFIRMATION_TOKEN=1 \
+		if [ -f .env ]; then set -a; . ./.env; set +a; else echo "WARN: no ./.env — copy .env.example to .env or set env vars manually"; fi; \
 		nohup go run ./cmd/copilot-api > $(DEV_PID_DIR)/api.log 2>&1 < /dev/null & echo $$! > $(DEV_PID_DIR)/api.pid; \
 		echo "copilot-api starting on http://127.0.0.1:18080 (pid $$(cat $(DEV_PID_DIR)/api.pid))"; fi
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
-		curl --noproxy '*' -sf -o /dev/null http://127.0.0.1:18080/v1/capabilities -H "Authorization: Bearer $(DEV_ADMIN_TOKEN)" && break; \
+		curl --noproxy '*' -sf -o /dev/null http://127.0.0.1:18080/v1/capabilities -H "Authorization: Bearer $(shell awk -F= '/^VITE_DEV_ADMIN_TOKEN=/{print $$2}' .env 2>/dev/null)" && break; \
 		echo "waiting for copilot-api... ($$i)"; sleep 1; done
 	@if [ -f $(DEV_PID_DIR)/web.pid ] && kill -0 $$(cat $(DEV_PID_DIR)/web.pid) 2>/dev/null; then echo "console already running"; else \
 		cd apps/capability-console && nohup npm run dev -- --port 5173 > $(DEV_PID_DIR)/web.log 2>&1 < /dev/null & echo $$! > $(DEV_PID_DIR)/web.pid; \
