@@ -64,6 +64,9 @@ func Validate(capability Capability) error {
 			return fmt.Errorf("path variable %q is missing from input_schema", name)
 		}
 	}
+	if err := validateDependencySpecs(capability); err != nil {
+		return err
+	}
 	if capability.Operation == tools.Read {
 		if capability.Backend.Method != http.MethodGet {
 			return errors.New("read capability backend method must be GET")

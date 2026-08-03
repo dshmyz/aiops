@@ -1,6 +1,6 @@
 schema_version: 1
 name: mysql.slow_query.analyze
-status: draft
+status: needs_review
 domain: database
 resource_type: mysql
 operation: read
@@ -12,42 +12,22 @@ backend:
     path: /api/mysql/{instance}/slow-queries
     timeout_ms: 10000
     base_url: http://db-management-api:8080
-    query_params:
-        from: "{{time_window_start}}"
-        to: "{{time_window_end}}"
-        min_duration_ms: "{{min_duration_ms}}"
-        limit: "{{limit}}"
 
 input_schema:
     instance:
         type: string
         required: true
-        description: MySQL instance identifier
     time_window_start:
         type: string
-        required: false
-        description: Start time (ISO 8601 or relative like "-1h")
-        default: "-1h"
     time_window_end:
         type: string
-        required: false
-        description: End time (ISO 8601 or "now")
-        default: "now"
     min_duration_ms:
         type: integer
-        required: false
-        default: 1000
-        description: Minimum query duration in milliseconds
-        validation:
-            min: 100
+        min: 100
     limit:
         type: integer
-        required: false
-        default: 50
-        description: Max number of slow queries to return
-        validation:
-            min: 1
-            max: 500
+        min: 1
+        max: 500
     environment:
         type: string
         required: true
@@ -63,7 +43,7 @@ output:
 
 governance:
     requires_action_plan: false
-    requires_approval: false  # Read-only analysis
+    requires_approval: false
     precheck_tools: []
     rollback:
         strategy: ""
@@ -78,22 +58,20 @@ auth:
 
 ai:
     description: |
-        Analyze slow query logs from a MySQL instance to identify performance bottlenecks.
+        Analyze slow query logs from a MySQL instance to identify performance
+        bottlenecks. Returns query patterns, execution times, tables scanned, and
+        optimization suggestions.
 
-        **Returns**: Query patterns, execution times, tables scanned, and optimization suggestions.
+        Use cases: investigate sudden performance degradation, identify missing
+        indexes before an optimization sprint, monitor query performance after a
+        deployment.
 
-        **Use cases**:
-        - Investigate sudden performance degradation
-        - Identify missing indexes before optimization sprint
-        - Monitor query performance after deployment
+        Note: large time windows may return many results - start with the recent
+        1-2 hours. Combine with EXPLAIN for optimization recommendations. The slow
+        query log must be enabled on the instance. This reads the slow_log table or
+        file and does not affect query performance.
 
     examples:
         - 分析 prod 环境 mysql-master-01 实例最近 1 小时超过 2 秒的慢查询
         - analyze slow queries on mysql instance db-staging, last 6 hours, min duration 500ms
         - 给我看一下 dev 环境 mysql-local 实例昨天的慢查询 top 20
-
-    safety_notes:
-        - Large time windows may return many results; start with recent 1-2 hours
-        - Combine with EXPLAIN analysis for optimization recommendations
-        - Slow query log must be enabled on the MySQL instance
-        - This reads from slow_log table or file; does not impact query performance

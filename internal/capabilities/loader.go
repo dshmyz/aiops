@@ -51,5 +51,10 @@ func LoadPublished(root string) ([]Capability, error) {
 		seen[capability.Name] = path
 		loaded = append(loaded, capability)
 	}
+	// Dependency edges cross files, so the graph can only be checked once every
+	// capability in the directory is loaded.
+	if err := ValidateDependencies(loaded); err != nil {
+		return nil, fmt.Errorf("validate capability dependencies: %w", err)
+	}
 	return loaded, nil
 }

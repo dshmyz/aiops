@@ -1,6 +1,6 @@
 schema_version: 1
 name: service.traffic.drain
-status: draft
+status: needs_review
 domain: networking
 resource_type: load_balancer
 operation: write
@@ -12,34 +12,20 @@ backend:
     path: /api/loadbalancer/{lb_name}/backends/{backend_id}/drain
     timeout_ms: 60000
     base_url: http://lb-management-api:8080
-    body_template: |
-        {
-          "drain_timeout_seconds": {{drain_timeout}},
-          "wait_for_connections": {{wait_for_connections}}
-        }
 
 input_schema:
     lb_name:
         type: string
         required: true
-        description: Load balancer name or ID
     backend_id:
         type: string
         required: true
-        description: Backend server ID to drain (e.g. IP:port or instance ID)
     drain_timeout:
         type: integer
-        required: false
-        default: 300
-        description: Maximum seconds to wait for connections to drain
-        validation:
-            min: 30
-            max: 3600
+        min: 30
+        max: 3600
     wait_for_connections:
         type: boolean
-        required: false
-        default: true
-        description: Wait for active connections to close gracefully
     environment:
         type: string
         required: true
@@ -56,10 +42,10 @@ output:
 
 governance:
     requires_action_plan: true
-    requires_approval: true  # High risk: affects traffic routing
+    requires_approval: true
     precheck_tools:
-        - service.health.check  # Verify other backends are healthy before draining
-        - lb.backend.connections.count  # Check active connection count
+        - service.health.check
+        - lb.backend.connections.count
     rollback:
         strategy: restore_backend
         source: "Add backend back to load balancer pool if drain was premature"
@@ -72,28 +58,21 @@ auth:
 
 ai:
     description: |
-        Drain traffic from a backend server in a load balancer pool.
-        New connections are rejected, existing connections drain gracefully.
+        Drain traffic from a backend server in a load balancer pool: new connections
+        are rejected and existing connections drain gracefully. Use for safe instance
+        shutdown during maintenance, rolling-deployment preparation, or removing an
+        unhealthy backend before repair.
 
-        **Use cases**:
-        - Safe instance shutdown for maintenance
-        - Rolling deployment preparation
-        - Remove unhealthy backend before repair
+        Workflow: 1) load balancer stops sending new requests, 2) existing connections
+        complete naturally, 3) after drain_timeout or all connections close, the backend
+        is removed from the pool.
 
-        **Workflow**:
-        1. Load balancer stops sending new requests to this backend
-        2. Existing connections are allowed to complete naturally
-        3. After drain_timeout or all connections close, backend is removed from pool
+        Caution: verify at least N-1 healthy backends remain before draining; long-lived
+        connections (WebSocket, SSE) may delay drain completion; set drain_timeout
+        conservatively; monitor capacity after drain; remember to restore the backend.
+        For zero-downtime deploys drain one backend at a time.
 
     examples:
         - 把 prod 环境负载均衡器 api-lb 的后端 10.0.1.5:8080 流量切走
         - drain backend 192.168.1.10:80 from load balancer nginx-lb in staging, timeout 600 seconds
         - 将 dev 环境 lb-test 的 backend-01 从流量池中移除
-
-    safety_notes:
-        - CRITICAL: Verify at least N-1 healthy backends remain before draining
-        - Long-lived connections (WebSocket, SSE) may delay drain completion
-        - Set drain_timeout conservatively (default 5min = 300s)
-        - Monitor load balancer capacity after drain to avoid overload
-        - After maintenance, remember to restore the backend to the pool
-        - For zero-downtime deploys, drain one backend at a time

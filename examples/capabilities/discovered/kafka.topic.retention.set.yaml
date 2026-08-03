@@ -21,6 +21,8 @@ input_schema:
     retention_hours:
         type: integer
         required: true
+        min: 1
+        max: 8760
     topic:
         type: string
         required: true
@@ -43,8 +45,11 @@ auth:
         - admin
     environment_scoped: true
 ai:
-    description: ""
-    examples: []
+    description: Set the retention window (in hours) for a Kafka topic. Use when
+        messages must be kept or purged for compliance, cost, or capacity reasons.
+    examples:
+        - set prod kafka orders topic retention to 72 hours
+        - 配置 prod kafka orders topic 保留 48 小时
 verify:
     read_capability: kafka.topic.retention.read
     input_mapping:

@@ -9,6 +9,19 @@ const (
 	StatusDeprecated  = "deprecated"
 )
 
+// Dependency types. Required is the default when a DependencySpec omits Type.
+const (
+	DependencyRequired  = "required"
+	DependencyOptional  = "optional"
+	DependencySuggested = "suggested"
+)
+
+// Dependency phases. Pre is the default when a DependencySpec omits Phase.
+const (
+	DependencyPhasePre  = "pre"
+	DependencyPhasePost = "post"
+)
+
 type Capability struct {
 	SchemaVersion int                   `yaml:"schema_version" json:"schema_version"`
 	Name          string                `yaml:"name" json:"name"`
@@ -24,6 +37,26 @@ type Capability struct {
 	Auth          AuthSpec              `yaml:"auth" json:"auth"`
 	AI            AISpec                `yaml:"ai" json:"ai"`
 	Verify        *VerifySpec           `yaml:"verify,omitempty" json:"verify,omitempty"`
+	DependsOn     []DependencySpec      `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+}
+
+// DependencySpec declares that this capability requires another capability to
+// run first. The resolver walks these edges to build an execution order, so a
+// "restart service" capability can declare that traffic must be drained before
+// it runs and restored afterwards.
+type DependencySpec struct {
+	// Capability is the name of the capability this one depends on.
+	Capability string `yaml:"capability" json:"capability"`
+	// Type is one of DependencyRequired, DependencyOptional, DependencySuggested.
+	// Required dependencies abort the chain on failure; optional ones only warn.
+	Type string `yaml:"type,omitempty" json:"type,omitempty"`
+	// Phase controls when the dependency runs relative to this capability:
+	// DependencyPhasePre (default) or DependencyPhasePost.
+	Phase string `yaml:"phase,omitempty" json:"phase,omitempty"`
+	// InputMapping maps this capability's input names to the dependency's
+	// input names, mirroring VerifySpec.InputMapping. Unmapped inputs with
+	// matching names are passed through.
+	InputMapping map[string]string `yaml:"input_mapping,omitempty" json:"input_mapping,omitempty"`
 }
 
 // VerifySpec declares an optional post-execution read capability that the

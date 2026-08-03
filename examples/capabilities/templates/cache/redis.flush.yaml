@@ -1,6 +1,6 @@
 schema_version: 1
 name: redis.cache.flush
-status: draft
+status: needs_review
 domain: cache
 resource_type: redis
 operation: write
@@ -12,27 +12,17 @@ backend:
     path: /api/redis/{cluster}/flush
     timeout_ms: 30000
     base_url: http://redis-management-api:8080
-    body_template: |
-        {
-          "database": {{database}},
-          "pattern": "{{pattern}}"
-        }
 
 input_schema:
     cluster:
         type: string
         required: true
-        description: Redis cluster identifier
     database:
         type: integer
-        required: false
-        default: 0
-        description: Redis database number (0-15)
+        min: 0
+        max: 15
     pattern:
         type: string
-        required: false
-        default: "*"
-        description: Key pattern to flush (e.g. "user:session:*")
     environment:
         type: string
         required: true
@@ -47,41 +37,34 @@ output:
 
 governance:
     requires_action_plan: true
-    requires_approval: true  # HIGH RISK: data loss
+    requires_approval: true
     precheck_tools:
-        - redis.keys.count  # Count matching keys before flush
+        - redis.keys.count
     rollback:
         strategy: none
-        source: "Cache flush is irreversible. Ensure pattern is correct before execution."
+        source: "Cache flush is irreversible. Ensure the pattern is correct before execution."
 
 auth:
     roles:
-        - admin  # Only admins can flush cache
+        - admin
     environment_scoped: true
 
 ai:
     description: |
-        Flush (delete) Redis keys matching a pattern. **DANGEROUS OPERATION**.
+        Flush (delete) Redis keys matching a pattern. Dangerous operation.
 
-        **Use cases**:
-        - Clear expired session data after migration
-        - Invalidate corrupted cache entries
-        - Emergency cache clear during incident
+        Use cases: clear expired session data after migration, invalidate corrupted
+        cache entries, emergency cache clear during an incident.
 
-        **⚠️ WARNING**:
-        - Pattern "*" deletes ALL keys in the database
-        - This operation is irreversible
-        - Always verify the pattern with redis.keys.count first
-        - Consider using targeted DEL instead for small key sets
+        Warning: pattern "*" deletes ALL keys in the database; this is irreversible.
+        Always verify the pattern with redis.keys.count first; consider targeted DEL
+        for small key sets. Never use "*" in production without explicit approval.
+        Check key count first - if >10k keys consider an async job. Coordinate with
+        the application team before flushing shared caches, and monitor application
+        error rate after (cold cache raises DB load). For large-scale flush use
+        SCAN + DEL rather than KEYS + DEL to avoid blocking.
 
     examples:
-        - 清空 prod 环境 redis 集群 cache-01 database 0 里所有以 user:session: 开头的 key
-        - flush keys matching "temp:*" in redis cluster cache-staging, database 1
-        - 删除 dev 环境 redis-local 集群里的所有 rate_limit:api:* key
-
-    safety_notes:
-        - NEVER use pattern "*" in production without explicit approval
-        - Check key count before flush (if >10k keys, consider async job)
-        - Coordinate with application team before flushing shared caches
-        - Monitor application error rate after flush (cold cache = more DB load)
-        - For large-scale flush, use SCAN + DEL instead of KEYS + DEL to avoid blocking
+        - "清空 prod 环境 redis 集群 cache-01 database 0 里所有以 user:session: 开头的 key"
+        - 'flush keys matching "temp:*" in redis cluster cache-staging, database 1'
+        - "删除 dev 环境 redis-local 集群里的所有 rate_limit:api:* key"
