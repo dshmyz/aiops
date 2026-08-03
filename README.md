@@ -57,6 +57,20 @@ COPILOT_OPENAI_BASE_URL='https://api.openai.com/v1'
 If `COPILOT_ASSISTANT_PROVIDER` is unset, the service uses the deterministic
 planner.
 
+### Autonomous agent loop
+
+With an LLM planner (`eino-openai`), the assistant can run an **autonomous agent
+loop**: plan → execute a read-only tool → feed the result back → replan, up to
+`COPILOT_ASSISTANT_MAX_STEPS` (default 8). It emits an SSE `step` event per
+executed tool so the console renders an independent "steps performed" timeline,
+and persists each intermediate tool result as a `tool_step` conversation turn
+(full step-level audit, chained via `parent_turn_id`).
+
+Security boundary: the loop only **reads** autonomously. Writes always stop at
+plan creation + `confirmation_required` for human approval — the loop never
+auto-executes a write, and low-risk Runbook auto-execution is disabled inside
+the loop. See [docs/assistant.md](docs/assistant.md) for details.
+
 ## Middleware Diagnostics
 
 The assistant can return a structured diagnostic package for middleware health
