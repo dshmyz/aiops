@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
+	"github.com/cloudwego/eino/components/model"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/prompt"
 )
@@ -18,6 +20,8 @@ const (
 	envOpenAIModel       = "COPILOT_OPENAI_MODEL"
 	envOpenAIBaseURL     = "COPILOT_OPENAI_BASE_URL"
 	envOpenAITimeout     = "COPILOT_OPENAI_TIMEOUT"
+	envOpenAIRetry       = "COPILOT_OPENAI_RETRY"
+	envOpenAIRetryBackoff = "COPILOT_OPENAI_RETRY_BACKOFF"
 	envPromptsDir        = "COPILOT_PROMPTS_DIR"
 
 	// defaultChatTimeout is the per-LLM-call timeout used for the eino-openai
@@ -25,7 +29,40 @@ const (
 	// (e.g. mimo) can need longer than the historical 5s to formulate a plan, so
 	// the value is configurable in the environment.
 	defaultChatTimeout = 5 * time.Second
+	// defaultChatRetry is the default number of one-shot completion attempts
+	// (1 = no retry). COPILOT_OPENAI_RETRY overrides it.
+	defaultChatRetry = 2
+	// defaultChatRetryBackoff is the base backoff between retry attempts;
+	// COPILOT_OPENAI_RETRY_BACKOFF overrides it (Go duration).
+	defaultChatRetryBackoff = 500 * time.Millisecond
 )
+
+// retryAttempts reads COPILOT_OPENAI_RETRY, defaulting to defaultChatRetry.
+func retryAttempts(env map[string]string) int {
+	v := strings.TrimSpace(env[envOpenAIRetry])
+	if v == "" {
+		return defaultChatRetry
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return defaultChatRetry
+	}
+	return n
+}
+
+// retryBackoff reads COPILOT_OPENAI_RETRY_BACKOFF, defaulting to
+// defaultChatRetryBackoff.
+func retryBackoff(env map[string]string) time.Duration {
+	v := strings.TrimSpace(env[envOpenAIRetryBackoff])
+	if v == "" {
+		return defaultChatRetryBackoff
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return defaultChatRetryBackoff
+	}
+	return d
+}
 
 // NewPlannerFromEnv builds the assistant planner from environment configuration.
 // When the provider is eino-openai, it also returns an LLMCompactor that shares
@@ -55,7 +92,11 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 			timeout = d
 		}
 	}
-	chat, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+	// chat is typed as the model interface so it can be swapped for the retry
+	// wrapper below while still being shared by planner/compactor/formatter.
+	var chat model.BaseChatModel
+	var err error
+	chat, err = einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:              apiKey,
 		BaseURL:             strings.TrimSpace(env[envOpenAIBaseURL]),
 		Model:               modelName,
@@ -69,6 +110,10 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("create eino openai chat model: %w", err)
 	}
+	// Retry transient one-shot completions (provider drops the connection or
+	// stalls awaiting headers) so momentary backends don't surface as hard
+	// failures. Attempts defaults to 2; both knobs are configurable via env.
+	chat = withChatRetry(chat, retryAttempts(env), retryBackoff(env))
 	// LLMFormatter 复用同一个 chat model，失败时由 CodeFallbackFormatter 兜底。
 	formatter := NewChainedFormatter(NewLLMFormatter(chat), NewCodeFallbackFormatter())
 	return NewEinoPlanner(chat), NewLLMCompactor(chat), formatter, "eino-openai", nil
