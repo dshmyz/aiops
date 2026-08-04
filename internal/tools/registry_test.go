@@ -6,7 +6,52 @@ import (
 	"testing"
 )
 
+// registerMiddlewareTools loads the middleware capabilities into the dynamic
+// registry, mirroring the production YAML published capabilities (the static
+// allowlist no longer contains them). The schemas intentionally use the same
+// names and field names ("name", "topic", "retention_hours") as the YAMLs.
+func registerMiddlewareTools(t *testing.T) {
+	t.Helper()
+	ResetDynamicToolsForTest()
+	t.Cleanup(ResetDynamicToolsForTest)
+	err := RegisterDynamicTools([]DynamicToolDefinition{
+		{
+			Tool: Tool{Name: GlusterVolumeHealthRead, Operation: Read, Risk: Low, Domain: "glusterfs", ResourceType: "volume"},
+			InputSchema: map[string]DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: Tool{Name: MinIOBucketHealthRead, Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
+			InputSchema: map[string]DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: Tool{Name: KafkaConsumerLagRead, Operation: Read, Risk: Low, Domain: "kafka", ResourceType: "consumer_group"},
+			InputSchema: map[string]DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: Tool{Name: TopicRetentionSet, Operation: Write, Risk: Medium, RollbackDescription: "reset_to_previous", Domain: "kafka", ResourceType: "topic", SupportsDryRun: true},
+			InputSchema: map[string]DynamicInputField{
+				"environment":     {Type: "string", Required: true},
+				"topic":           {Type: "string", Required: true},
+				"retention_hours": {Type: "integer", Required: true, Min: boundOf(1), Max: boundOf(8760)},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register middleware tools: %v", err)
+	}
+}
+
 func TestLookupReturnsOnlyStaticallyRegisteredTools(t *testing.T) {
+	registerMiddlewareTools(t)
 	tool, ok := Lookup(TopicRetentionSet)
 	if !ok {
 		t.Fatalf("registered tool %q was not found", TopicRetentionSet)
@@ -30,8 +75,8 @@ func TestIsStaticIdentifiesBuiltInTools(t *testing.T) {
 	ResetDynamicToolsForTest()
 	t.Cleanup(ResetDynamicToolsForTest)
 
-	if !IsStatic(MinIOBucketHealthRead) {
-		t.Fatalf("IsStatic(%q) = false, want true", MinIOBucketHealthRead)
+	if !IsStatic(ClusterStatusRead) {
+		t.Fatalf("IsStatic(%q) = false, want true", ClusterStatusRead)
 	}
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "minio.bucket.capacity.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
@@ -81,6 +126,7 @@ func TestDynamicInputSchemaReturnsCopy(t *testing.T) {
 }
 
 func TestValidateInputRejectsUnknownWriteParameters(t *testing.T) {
+	registerMiddlewareTools(t)
 	tool, ok := Lookup(TopicRetentionSet)
 	if !ok {
 		t.Fatalf("registered tool %q was not found", TopicRetentionSet)
@@ -98,16 +144,27 @@ func TestValidateInputRejectsUnknownWriteParameters(t *testing.T) {
 }
 
 func TestValidateInputUsesCanonicalRegisteredTool(t *testing.T) {
+	registerMiddlewareTools(t)
+	tool, ok := Lookup(TopicRetentionSet)
+	if !ok {
+		t.Fatalf("registered tool %q was not found", TopicRetentionSet)
+	}
 	forged := Tool{Name: TopicRetentionSet, Operation: Read, Risk: Low}
 	err := ValidateInput(forged, map[string]any{
 		"environment": "prod",
+		"topic":       "orders",
 	})
 	if err == nil {
 		t.Fatal("ValidateInput accepted input valid only for a forged tool definition")
 	}
+	// ensure the canonical (registered) tool still accepts valid input
+	if err := ValidateInput(tool, map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}); err != nil {
+		t.Fatalf("ValidateInput canonical = %v, want nil", err)
+	}
 }
 
 func TestDomainReadToolsAreRegisteredReadOnlyTools(t *testing.T) {
+	registerMiddlewareTools(t)
 	for _, name := range []string{GlusterVolumeHealthRead, MinIOBucketHealthRead, KafkaConsumerLagRead} {
 		tool, ok := Lookup(name)
 		if !ok {
@@ -126,6 +183,7 @@ func TestDomainReadToolsAreRegisteredReadOnlyTools(t *testing.T) {
 }
 
 func TestDomainReadToolsRejectUnknownParameters(t *testing.T) {
+	registerMiddlewareTools(t)
 	tool, ok := Lookup(GlusterVolumeHealthRead)
 	if !ok {
 		t.Fatalf("tool %q was not registered", GlusterVolumeHealthRead)

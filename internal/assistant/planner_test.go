@@ -25,10 +25,14 @@ func TestDeterministicPlannerParsesChineseClusterStatus(t *testing.T) {
 	}
 }
 
+// TestDeterministicPlannerParsesTopicRetentionWrite 验证中间件写意图经
+// CapabilityAwarePlanner（生产链路）解析到已发布的动态写能力 topic.retention.set。
+// 该工具不再硬编码在静态 allowlist 中，改为由 YAML published 能力注册。
 func TestDeterministicPlannerParsesTopicRetentionWrite(t *testing.T) {
-	t.Parallel()
+	registerMiddlewareWriteTool(t)
+	planner := assistant.NewCapabilityAwarePlanner(assistant.DeterministicPlanner{})
 
-	intent, err := assistant.DeterministicPlanner{}.Plan(context.Background(), user(), "把 prod 的 orders topic retention 改成 72 小时", nil, assistant.PageContext{})
+	intent, err := planner.Plan(context.Background(), user(), "把 prod 的 orders topic retention 改成 72 小时", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -81,9 +85,10 @@ func TestDeterministicPlannerIncludesSelectionSummary(t *testing.T) {
 }
 
 func TestDeterministicPlannerIncludesSelectionForTopicRetention(t *testing.T) {
-	t.Parallel()
+	registerMiddlewareWriteTool(t)
+	planner := assistant.NewCapabilityAwarePlanner(assistant.DeterministicPlanner{})
 
-	intent, err := assistant.DeterministicPlanner{}.Plan(context.Background(), user(), "把 prod 的 orders topic retention 改成 72 小时", nil, assistant.PageContext{})
+	intent, err := planner.Plan(context.Background(), user(), "把 prod 的 orders topic retention 改成 72 小时", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -110,6 +115,36 @@ func user() identity.CurrentUser {
 		RequestID:           "request-1",
 	}
 }
+
+// registerMiddlewareWriteTool loads the topic.retention.set write capability
+// into the dynamic registry, mirroring the published YAML. The placeholder
+// environment is required by validateDynamicInputSchema.
+func registerMiddlewareWriteTool(t *testing.T) {
+	t.Helper()
+	tools.ResetDynamicToolsForTest()
+	t.Cleanup(tools.ResetDynamicToolsForTest)
+	err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
+		Tool: tools.Tool{
+			Name:                tools.TopicRetentionSet,
+			Operation:           tools.Write,
+			Risk:                tools.Medium,
+			RollbackDescription: "reset_to_previous",
+			Domain:              "kafka",
+			ResourceType:        "topic",
+			SupportsDryRun:      true,
+		},
+		InputSchema: map[string]tools.DynamicInputField{
+			"environment":     {Type: "string", Required: true},
+			"topic":           {Type: "string", Required: true},
+			"retention_hours": {Type: "integer", Required: true, Min: ptr(1), Max: ptr(8760)},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("register middleware write tool: %v", err)
+	}
+}
+
+func ptr(value float64) *float64 { return &value }
 
 // --- PageContext（缺口-3：页面上下文带入）测试 ---
 
@@ -337,14 +372,14 @@ func TestDeterministicPlannerSystemPosturePageContextEnvironment(t *testing.T) {
 	}
 }
 
-// TestDeterministicPlannerTopicRetentionChinese 锁定中文写操作在**静态**层的
-// 解析结果。生产链路上 CapabilityAwarePlanner 会把它改派给同域动态能力
-// （kafka.topic.retention.write，见 intent_routing_test.go），但那条改派的前提
-// 是这一层先把 topic 和小时数解析出来——中文量词"保留 72 小时"一旦解析失败，
-// 这里会退化成澄清，上层也就没有可改派的意图了。
+// TestDeterministicPlannerTopicRetentionChinese 锁定中文写操作在生产链路
+// （CapabilityAwarePlanner）上的解析结果。中间件写工具已外置为动态能力
+// topic.retention.set，不再由静态层返回；该测试验证动态解析器能从中文量词
+// "保留 72 小时"解析出小时数并路由到写能力。
 func TestDeterministicPlannerTopicRetentionChinese(t *testing.T) {
-	det := assistant.DeterministicPlanner{}
-	intent, err := det.Plan(context.Background(), identity.CurrentUser{}, "配置 prod kafka m1 orders topic 保留 72 小时", nil, assistant.PageContext{})
+	registerMiddlewareWriteTool(t)
+	planner := assistant.NewCapabilityAwarePlanner(assistant.DeterministicPlanner{})
+	intent, err := planner.Plan(context.Background(), user(), "配置 prod kafka m1 orders topic 保留 72 小时", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("Plan returned %v", err)
 	}

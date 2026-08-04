@@ -310,28 +310,32 @@ func TestCapabilityReadRunnerDoesNotShadowStaticDomainToolFromBypassedLoader(t *
 		called = true
 		return map[string]any{"tool": tool.Name}, nil
 	})
+	// ClusterStatusRead is a platform meta-tool still owned by the static
+	// allowlist (middleware tools were externalized as dynamic capabilities, but
+	// the platform meta-reads stay static). A capability that happens to share a
+	// static tool's name must never shadow it: the read runner delegates to the
+	// static chain instead of the HTTP adapter.
 	runner := capabilities.NewCapabilityReadRunner(next, []capabilities.Capability{{
 		SchemaVersion: 1,
-		Name:          tools.MinIOBucketHealthRead,
+		Name:          tools.ClusterStatusRead,
 		Status:        capabilities.StatusPublished,
-		Domain:        "minio",
-		ResourceType:  "bucket",
+		Domain:        "system",
+		ResourceType:  "posture",
 		Operation:     tools.Read,
 		Risk:          tools.Low,
 		Backend: capabilities.BackendSpec{
 			Adapter:   "http",
 			BaseURL:   "https://backend.example.com",
 			Method:    http.MethodGet,
-			Path:      "/api/minio/buckets/{name}/health",
+			Path:      "/api/status",
 			TimeoutMS: 3000,
 		},
 		InputSchema: map[string]capabilities.InputField{
 			"environment": {Type: "string", Required: true},
-			"name":        {Type: "string", Required: true},
 		},
 		Output: capabilities.OutputSpec{
 			Kind:            "observation",
-			SummaryTemplate: "health",
+			SummaryTemplate: "posture",
 		},
 		Auth: capabilities.AuthSpec{
 			Roles:             []string{"viewer"},
@@ -339,11 +343,11 @@ func TestCapabilityReadRunnerDoesNotShadowStaticDomainToolFromBypassedLoader(t *
 		},
 	}}, nil)
 
-	result, err := runner.Read(context.Background(), tools.Tool{Name: tools.MinIOBucketHealthRead}, map[string]any{"environment": "prod", "name": "archive"})
+	result, err := runner.Read(context.Background(), tools.Tool{Name: tools.ClusterStatusRead}, map[string]any{"environment": "prod"})
 	if err != nil {
 		t.Fatalf("Read returned %v", err)
 	}
-	if !called || result["tool"] != tools.MinIOBucketHealthRead {
+	if !called || result["tool"] != tools.ClusterStatusRead {
 		t.Fatalf("result = %+v, called = %v; want static domain delegation", result, called)
 	}
 }

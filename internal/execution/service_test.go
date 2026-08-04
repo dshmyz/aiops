@@ -404,6 +404,7 @@ var fixedTime = time.Date(2026, time.July, 21, 8, 0, 0, 0, time.UTC)
 
 func confirmedWritePlan(t *testing.T) (context.Context, *execution.Service, plans.Plan, *recordingExecutor, *store.MemoryActionPlanStore) {
 	t.Helper()
+	ensureMiddlewareWriteTool(t)
 	ctx := context.Background()
 	repository := store.NewMemoryActionPlanStore()
 	now := time.Now().UTC()
@@ -454,6 +455,44 @@ func tool(t *testing.T, name string) tools.Tool {
 		t.Fatalf("unknown test tool %q", name)
 	}
 	return value
+}
+
+// ensureMiddlewareWriteTool loads topic.retention.set into the dynamic registry
+// and grants it operator/admin role permissions, mirroring the published YAML
+// capability. It is idempotent and mutex-guarded so the parallel confirmed-write
+// tests can all rely on the tool without racing on RegisterDynamicTools'
+// duplicate rejection or missing policy grants.
+var ensureMiddlewareWriteMu sync.Mutex
+
+func ensureMiddlewareWriteTool(t *testing.T) {
+	t.Helper()
+	ensureMiddlewareWriteMu.Lock()
+	defer ensureMiddlewareWriteMu.Unlock()
+	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+		if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
+			Tool: tools.Tool{
+				Name:                tools.TopicRetentionSet,
+				Operation:           tools.Write,
+				Risk:                tools.Medium,
+				RollbackDescription: "reset_to_previous",
+				Domain:              "kafka",
+				ResourceType:        "topic",
+				SupportsDryRun:      true,
+			},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment":     {Type: "string", Required: true},
+				"topic":           {Type: "string", Required: true},
+				"retention_hours": {Type: "integer", Required: true},
+			},
+		}}); err != nil {
+			t.Fatalf("register middleware write tool: %v", err)
+		}
+	}
+	// Policy grants are additive/idempotent; re-inject so a policy-level reset
+	// elsewhere cannot leave the write un-routable for admin/operator.
+	policy.RegisterDynamicRolePermissions(map[string][]string{
+		tools.TopicRetentionSet: {"operator", "admin"},
+	})
 }
 
 func contains(value, want string) bool { return strings.Contains(value, want) }

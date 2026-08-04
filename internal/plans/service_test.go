@@ -3,6 +3,7 @@ package plans_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,6 +148,7 @@ func TestConfirmPlanReturnsRejectionAuditFailure(t *testing.T) {
 
 func createWritePlan(t *testing.T, ctx context.Context, service *plans.Service) plans.Plan {
 	t.Helper()
+	ensureMiddlewareWriteTool(t)
 	decision := policy.Evaluate(user(), registeredTool(t, tools.TopicRetentionSet), retentionInput())
 	if !decision.Allowed || !decision.RequiresConfirmation {
 		t.Fatalf("test policy decision = %+v", decision)
@@ -180,6 +182,40 @@ func registeredTool(t *testing.T, name string) tools.Tool {
 		t.Fatalf("registered tool %q not found", name)
 	}
 	return tool
+}
+
+// ensureMiddlewareWriteTool loads topic.retention.set into the dynamic registry
+// with operator/admin role permissions, mirroring the published YAML capability.
+// Idempotent and mutex-guarded so parallel plan tests share it safely.
+var ensureMiddlewareWriteMu sync.Mutex
+
+func ensureMiddlewareWriteTool(t *testing.T) {
+	t.Helper()
+	ensureMiddlewareWriteMu.Lock()
+	defer ensureMiddlewareWriteMu.Unlock()
+	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+		if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
+			Tool: tools.Tool{
+				Name:                tools.TopicRetentionSet,
+				Operation:           tools.Write,
+				Risk:                tools.Medium,
+				RollbackDescription: "reset_to_previous",
+				Domain:              "kafka",
+				ResourceType:        "topic",
+				SupportsDryRun:      true,
+			},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment":     {Type: "string", Required: true},
+				"topic":           {Type: "string", Required: true},
+				"retention_hours": {Type: "integer", Required: true},
+			},
+		}}); err != nil {
+			t.Fatalf("register middleware write tool: %v", err)
+		}
+	}
+	policy.RegisterDynamicRolePermissions(map[string][]string{
+		tools.TopicRetentionSet: {"operator", "admin"},
+	})
 }
 
 func retentionInput() map[string]any {

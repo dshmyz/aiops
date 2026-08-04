@@ -946,12 +946,97 @@ func newAssistant(t *testing.T, planner assistant.Planner) (*assistant.Service, 
 	return newAssistantWithStore(t, planner, nil)
 }
 
+// registerMiddlewareToolsForService loads the middleware capabilities into the
+// dynamic tool registry and injects their role permissions, mirroring what main
+// does at startup via the published YAML capabilities. The middleware tools are
+// no longer part of the static allowlist, so service-level tests that route
+// write/read intents through policy must register them the same way production
+// does. Reads are visible to all roles; the retention write maps to
+// operator/admin (its environment risk is handled by the risk check).
+//
+// It is idempotent and mutex-guarded so parallel tests can all call it through
+// newAssistantWithout tripping RegisterDynamicTools' duplicate rejection. It
+// deliberately does NOT reset the registry: resets belong to the serial
+// dynamic-capability tests (registerAssistantDynamicCapacityTool), which run in
+// the sequential phase before the t.Parallel() tests.
+func registerMiddlewareToolsForService(t *testing.T) {
+	t.Helper()
+	ensureMiddlewareForTests(t)
+}
+
+var ensureMiddlewareMu sync.Mutex
+
+func ensureMiddlewareForTests(t *testing.T) {
+	t.Helper()
+	ensureMiddlewareMu.Lock()
+	defer ensureMiddlewareMu.Unlock()
+	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+		if err := tools.RegisterDynamicTools(toolsMiddlewareDefinitions()); err != nil {
+			t.Fatalf("register middleware tools: %v", err)
+		}
+	}
+	// Role permissions are additive/idempotent; re-inject on every call so a
+	// policy-level reset elsewhere cannot leave the middleware tools un-routable.
+	policy.RegisterDynamicRolePermissions(map[string][]string{
+		tools.GlusterVolumeHealthRead: {"viewer", "operator", "admin"},
+		tools.MinIOBucketHealthRead:   {"viewer", "operator", "admin"},
+		tools.KafkaConsumerLagRead:    {"viewer", "operator", "admin"},
+		tools.TopicRetentionSet:       {"operator", "admin"},
+	})
+}
+
+func toolsMiddlewareDefinitions() []tools.DynamicToolDefinition {
+	return []tools.DynamicToolDefinition{
+		{
+			Tool: tools.Tool{Name: tools.GlusterVolumeHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{Name: tools.MinIOBucketHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{Name: tools.KafkaConsumerLagRead, Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{
+				Name:                tools.TopicRetentionSet,
+				Operation:           tools.Write,
+				Risk:                tools.Medium,
+				RollbackDescription: "reset_to_previous",
+				Domain:              "kafka",
+				ResourceType:        "topic",
+				SupportsDryRun:      true,
+			},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment":     {Type: "string", Required: true},
+				"topic":           {Type: "string", Required: true},
+				"retention_hours": {Type: "integer", Required: true, Min: minBound(1), Max: maxBound(8760)},
+			},
+		},
+	}
+}
+
+func minBound(value float64) *float64 { return &value }
+func maxBound(value float64) *float64 { return &value }
+
 // newAssistantWithStore constructs an assistant service with an optional
 // conversation store. When conversations is non-nil the service persists
 // turns and enforces subject isolation; otherwise it falls back to the
 // stateless behavior.
 func newAssistantWithStore(t *testing.T, planner assistant.Planner, conversations store.AssistantConversationStore) (*assistant.Service, *store.MemoryActionPlanStore) {
 	t.Helper()
+	registerMiddlewareToolsForService(t)
 	repository := store.NewMemoryActionPlanStore()
 	readService := execution.NewReadOnlyService(readRunner{}, audit.NewService(repository))
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
@@ -1350,7 +1435,7 @@ func TestClassifyIntent(t *testing.T) {
 		},
 		{
 			name:   "write tool classifies as executive",
-			intent: assistant.Intent{ToolName: tools.TopicRetentionSet, Input: retentionInput()},
+			intent: assistant.Intent{ToolName: tools.TopicRetentionSet, Type: assistant.IntentExecutive, Input: retentionInput()},
 			want:   assistant.IntentExecutive,
 		},
 		{

@@ -9,6 +9,7 @@ import (
 )
 
 func TestEvaluateRejectsRoleWithoutToolPermission(t *testing.T) {
+	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, tools.TopicRetentionSet)
 	d := Evaluate(user("viewer", "prod"), writeTool, validRetentionInput("prod", 72))
 	if d.Reason != PermissionDenied {
@@ -28,7 +29,7 @@ func TestEvaluateRejectsEnvironmentOutsideIdentityProjection(t *testing.T) {
 }
 
 func TestEvaluateViewerDiagnosticReadToolsRespectEnvironmentProjection(t *testing.T) {
-	t.Parallel()
+	registerMiddlewareTools(t)
 
 	for _, test := range []struct {
 		name      string
@@ -59,6 +60,7 @@ func TestEvaluateViewerDiagnosticReadToolsRespectEnvironmentProjection(t *testin
 }
 
 func TestEvaluateRejectsUnsafeProductionParameter(t *testing.T) {
+	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, tools.TopicRetentionSet)
 	d := Evaluate(user("admin", "prod"), writeTool, validRetentionInput("prod", 12))
 	if d.Reason != ParameterDenied {
@@ -67,6 +69,7 @@ func TestEvaluateRejectsUnsafeProductionParameter(t *testing.T) {
 }
 
 func TestEvaluateRejectsProductionWriteAboveRoleRiskLimit(t *testing.T) {
+	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, tools.TopicRetentionSet)
 	d := Evaluate(user("operator", "prod"), writeTool, validRetentionInput("prod", 72))
 	if d.Reason != RiskDenied {
@@ -75,6 +78,7 @@ func TestEvaluateRejectsProductionWriteAboveRoleRiskLimit(t *testing.T) {
 }
 
 func TestEvaluateRequiresConfirmationForAllowedWrite(t *testing.T) {
+	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, tools.TopicRetentionSet)
 	d := Evaluate(user("admin", "prod"), writeTool, validRetentionInput("prod", 72))
 	if !d.Allowed {
@@ -86,6 +90,7 @@ func TestEvaluateRequiresConfirmationForAllowedWrite(t *testing.T) {
 }
 
 func TestEvaluateUsesCanonicalToolMetadata(t *testing.T) {
+	registerMiddlewareTools(t)
 	forgedRead := tools.Tool{Name: tools.TopicRetentionSet, Operation: tools.Read, Risk: tools.Low}
 	d := Evaluate(user("admin", "prod"), forgedRead, validRetentionInput("prod", 72))
 	if !d.Allowed || !d.RequiresConfirmation {
@@ -94,6 +99,7 @@ func TestEvaluateUsesCanonicalToolMetadata(t *testing.T) {
 }
 
 func TestEvaluateAcceptsValidJSONNumberParameter(t *testing.T) {
+	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, tools.TopicRetentionSet)
 	input := validRetentionInput("prod", 72)
 	input["retention_hours"] = json.Number("72")
@@ -182,11 +188,71 @@ func TestEvaluateAppliesProductionFloorToDynamicWriteCapability(t *testing.T) {
 // creeping outside its purpose: it is a production write guardrail, not a
 // general lower bound. Staging retention below 24h is a legitimate setting.
 func TestEvaluateLeavesNonProductionAndReadsToSchemaBounds(t *testing.T) {
+	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, tools.TopicRetentionSet)
 	d := Evaluate(user("admin", "staging"), writeTool, validRetentionInput("staging", 1))
 	if !d.Allowed {
 		t.Fatalf("staging decision = %+v, want allowed", d)
 	}
+}
+
+// registerMiddlewareTools loads the middleware capabilities into the dynamic
+// registry and injects their role permissions, mirroring production: reads are
+// visible to all roles; the retention write requires operator/admin (its
+// environment risk is handled by the risk check, not the role table).
+func registerMiddlewareTools(t *testing.T) {
+	t.Helper()
+	tools.ResetDynamicToolsForTest()
+	t.Cleanup(tools.ResetDynamicToolsForTest)
+	ResetDynamicRolePermissionsForTest()
+	t.Cleanup(ResetDynamicRolePermissionsForTest)
+	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{
+		{
+			Tool: tools.Tool{Name: tools.GlusterVolumeHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{Name: tools.MinIOBucketHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{Name: tools.KafkaConsumerLagRead, Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{
+				Name:                tools.TopicRetentionSet,
+				Operation:           tools.Write,
+				Risk:                tools.Medium,
+				RollbackDescription: "reset_to_previous",
+				Domain:              "kafka",
+				ResourceType:        "topic",
+				SupportsDryRun:      true,
+			},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment":     {Type: "string", Required: true},
+				"topic":           {Type: "string", Required: true},
+				"retention_hours": {Type: "integer", Required: true, Min: bound(1), Max: bound(8760)},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("register middleware tools: %v", err)
+	}
+	RegisterDynamicRolePermissions(map[string][]string{
+		tools.GlusterVolumeHealthRead: {"viewer", "operator", "admin"},
+		tools.MinIOBucketHealthRead:   {"viewer", "operator", "admin"},
+		tools.KafkaConsumerLagRead:    {"viewer", "operator", "admin"},
+		tools.TopicRetentionSet:       {"operator", "admin"},
+	})
 }
 
 func bound(value float64) *float64 {

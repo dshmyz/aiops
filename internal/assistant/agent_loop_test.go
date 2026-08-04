@@ -41,7 +41,11 @@ func readIntent() assistant.Intent {
 }
 
 func writeIntent() assistant.Intent {
-	return assistant.Intent{ToolName: "topic.retention.set", Input: map[string]any{"topic": "x", "retention_hours": 24}}
+	// The executive type is declared explicitly: topic.retention.set is now a
+	// runtime-registered capability, so ClassifyIntent cannot infer write from a
+	// static tools.Lookup in a bare unit test. Marking the type keeps the loop's
+	// write-boundary detection deterministic here.
+	return assistant.Intent{ToolName: "topic.retention.set", Type: assistant.IntentExecutive, Input: map[string]any{"topic": "x", "retention_hours": 24}}
 }
 
 func doneIntent(summary string) assistant.Intent {

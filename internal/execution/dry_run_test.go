@@ -14,6 +14,7 @@ import (
 // 返回摘要、影响资源、将要执行的命令和风险警告，不实际执行写操作。
 func TestDryRunTopicRetentionPreview(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareWriteTool(t)
 	svc := execution.NewDryRunService()
 	svc.Register(tools.TopicRetentionSet, execution.TopicRetentionDryRunHandler)
 
@@ -78,6 +79,7 @@ func TestDryRunNotRegisteredTool(t *testing.T) {
 // handler 无需自己填，DryRunService 在 handler 返回后统一推断。
 func TestDryRunSuggestsStrategyForWriteTool(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareWriteTool(t)
 	svc := execution.NewDryRunService()
 	svc.Register(tools.TopicRetentionSet, execution.TopicRetentionDryRunHandler)
 
@@ -107,6 +109,7 @@ func TestDryRunSuggestsStrategyForWriteTool(t *testing.T) {
 // 但不超过上限（避免对目标系统瞬时压力过大）。
 func TestSuggestStrategyBatchConcurrency(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareWriteTool(t)
 	tool, ok := tools.Lookup(tools.TopicRetentionSet)
 	if !ok {
 		t.Fatalf("lookup %q", tools.TopicRetentionSet)
@@ -127,6 +130,7 @@ func TestSuggestStrategyBatchConcurrency(t *testing.T) {
 // 操作的命令自动放宽超时到 60s，普通命令默认 30s。
 func TestSuggestStrategyLongCommandTimeout(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareWriteTool(t)
 	tool, ok := tools.Lookup(tools.TopicRetentionSet)
 	if !ok {
 		t.Fatalf("lookup %q", tools.TopicRetentionSet)
@@ -156,6 +160,7 @@ func TestSuggestStrategyLongCommandTimeout(t *testing.T) {
 // 透传到策略，便于 operator 确认执行目标。
 func TestSuggestStrategyTargetHostsFromInput(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareWriteTool(t)
 	tool, ok := tools.Lookup(tools.TopicRetentionSet)
 	if !ok {
 		t.Fatalf("lookup %q", tools.TopicRetentionSet)
@@ -171,6 +176,7 @@ func TestSuggestStrategyTargetHostsFromInput(t *testing.T) {
 // 时不被 DryRunService 的默认推断覆盖（handler 知道工具特异策略时优先生效）。
 func TestDryRunHandlerCanOverrideStrategy(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareWriteTool(t)
 	svc := execution.NewDryRunService()
 	custom := execution.SuggestedStrategy{Timeout: 120 * time.Second, Concurrency: 3, RiskLevel: "high"}
 	svc.Register(tools.TopicRetentionSet, func(_ context.Context, _ map[string]any) (execution.DryRunResult, error) {

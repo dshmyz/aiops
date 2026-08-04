@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -603,7 +604,7 @@ func TestAssistantMessagesPreservesTraceInDevTokenResponse(t *testing.T) {
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
 		return time.Date(2026, time.July, 21, 11, 0, 0, 0, time.UTC)
 	}))
-	assistantService := assistant.NewService(assistant.DeterministicPlanner{}, readService, planService, nil)
+	assistantService := assistant.NewService(assistant.NewCapabilityAwarePlanner(assistant.DeterministicPlanner{}), readService, planService, nil)
 	router := httpapi.NewRouter(
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		readService,
@@ -746,7 +747,7 @@ func TestAssistantMessagesRejectsInvalidDiagnosticCandidatesBeforeRead(t *testin
 
 func TestAssistantMessagesViewerWriteDenied(t *testing.T) {
 	t.Parallel()
-	router, _ := testRouter(t, &readRunner{})
+	router, _ := capabilityTestRouter(t, &readRunner{})
 	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
 	res := httptest.NewRecorder()
 
@@ -759,7 +760,7 @@ func TestAssistantMessagesViewerWriteDenied(t *testing.T) {
 
 func TestAssistantMessagesAdminWriteReturnsConfirmationWithoutToken(t *testing.T) {
 	t.Parallel()
-	router, _ := testRouter(t, &readRunner{})
+	router, _ := capabilityTestRouter(t, &readRunner{})
 	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"}, []string{"prod"})
 	res := httptest.NewRecorder()
 
@@ -785,7 +786,7 @@ func TestAssistantMessagesCanExposeConfirmationTokenForDevelopment(t *testing.T)
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
 		return time.Date(2026, time.July, 21, 11, 0, 0, 0, time.UTC)
 	}))
-	assistantService := assistant.NewService(assistant.DeterministicPlanner{}, readService, planService, nil)
+	assistantService := assistant.NewService(assistant.NewCapabilityAwarePlanner(assistant.DeterministicPlanner{}), readService, planService, nil)
 	router := httpapi.NewRouter(
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		readService,
@@ -2438,6 +2439,7 @@ func testRouter(t *testing.T, runner *readRunner) (http.Handler, *store.MemoryAc
 
 func testRouterWithPlans(t *testing.T, runner *readRunner) (http.Handler, *store.MemoryActionPlanStore, *plans.Service) {
 	t.Helper()
+	ensureMiddlewareTools(t)
 	repository := store.NewMemoryActionPlanStore()
 	auditService := audit.NewService(repository)
 	readService := execution.NewReadOnlyService(runner, auditService)
@@ -2456,6 +2458,36 @@ func testRouterWithPlans(t *testing.T, runner *readRunner) (http.Handler, *store
 		httpapi.WithActionPlanConfirmation(planService, executionService),
 		httpapi.WithAuditEvents(auditService),
 	), repository, planService
+}
+
+// capabilityTestRouter builds a router whose assistant uses the full
+// CapabilityAwarePlanner chain, so write intents (e.g. topic.retention.set)
+// route through dynamic capability resolution. The default testRouter uses the
+// plain DeterministicPlanner, which keeps middleware diagnostic reads on the
+// in-process diagnostic path; write intent resolution only exists in the
+// capability-aware chain (mirroring production wiring).
+func capabilityTestRouter(t *testing.T, runner *readRunner) (http.Handler, *store.MemoryActionPlanStore) {
+	t.Helper()
+	ensureMiddlewareTools(t)
+	repository := store.NewMemoryActionPlanStore()
+	auditService := audit.NewService(repository)
+	readService := execution.NewReadOnlyService(runner, auditService)
+	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
+		return time.Date(2026, time.July, 21, 11, 0, 0, 0, time.UTC)
+	}))
+	assistantService := assistant.NewService(assistant.NewCapabilityAwarePlanner(assistant.DeterministicPlanner{}), readService, planService, nil)
+	executionService := execution.NewServiceWithClock(repository, writeExecutor{}, func() time.Time {
+		return time.Date(2026, time.July, 21, 11, 1, 0, 0, time.UTC)
+	})
+	router := httpapi.NewRouter(
+		httpapi.NewHMACAuthenticator([]byte("test-secret")),
+		readService,
+		httpapi.WithAssistant(assistantService),
+		httpapi.WithActionPlans(repository),
+		httpapi.WithActionPlanConfirmation(planService, executionService),
+		httpapi.WithAuditEvents(auditService),
+	)
+	return router, repository
 }
 
 func createPendingPlan(t *testing.T, service *plans.Service) plans.Plan {
@@ -2802,12 +2834,88 @@ func signedPostRequest(t *testing.T, path, subject string, roles, environments [
 
 func tool(t *testing.T, name string) tools.Tool {
 	t.Helper()
+	ensureMiddlewareTools(t)
 	tool, ok := tools.Lookup(name)
 	if !ok {
 		t.Fatalf("unknown tool %q", name)
 	}
 	return tool
 }
+
+// --- Middleware tools externalization test wiring ---
+//
+// The four middleware tools (glusterfs/minio/kafka read + topic.retention.set
+// write) are no longer statically registered: they load from published YAML
+// capabilities and execute over HTTP. Tests that reference them by name must
+// register them dynamically (mirroring the published schemas) and grant the
+// role permissions they receive from capability auth.roles. Registration is
+// idempotent and mutex-guarded so parallel tests share the registry safely.
+
+var ensureMiddlewareToolsMu sync.Mutex
+
+func ensureMiddlewareTools(t *testing.T) {
+	t.Helper()
+	ensureMiddlewareToolsMu.Lock()
+	defer ensureMiddlewareToolsMu.Unlock()
+	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+		if err := tools.RegisterDynamicTools(httpAPIMiddlewareDefinitions()); err != nil {
+			t.Fatalf("register middleware tools: %v", err)
+		}
+	}
+	// Role permissions are additive/idempotent; re-inject on every call so a
+	// policy-level reset elsewhere cannot leave the middleware tools unroutable.
+	policy.RegisterDynamicRolePermissions(map[string][]string{
+		tools.GlusterVolumeHealthRead: {"viewer", "operator", "admin"},
+		tools.MinIOBucketHealthRead:   {"viewer", "operator", "admin"},
+		tools.KafkaConsumerLagRead:    {"viewer", "operator", "admin"},
+		tools.TopicRetentionSet:       {"operator", "admin"},
+	})
+}
+
+func httpAPIMiddlewareDefinitions() []tools.DynamicToolDefinition {
+	return []tools.DynamicToolDefinition{
+		{
+			Tool: tools.Tool{Name: tools.GlusterVolumeHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{Name: tools.MinIOBucketHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{Name: tools.KafkaConsumerLagRead, Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{
+				Name:                tools.TopicRetentionSet,
+				Operation:           tools.Write,
+				Risk:                tools.Medium,
+				RollbackDescription: "reset_to_previous",
+				Domain:              "kafka",
+				ResourceType:        "topic",
+				SupportsDryRun:      true,
+			},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment":     {Type: "string", Required: true},
+				"topic":           {Type: "string", Required: true},
+				"retention_hours": {Type: "integer", Required: true, Min: httpAPIMinBound(1), Max: httpAPIMaxBound(8760)},
+			},
+		},
+	}
+}
+
+func httpAPIMinBound(value float64) *float64 { return &value }
+func httpAPIMaxBound(value float64) *float64 { return &value }
 
 func retentionInput() map[string]any {
 	return map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}

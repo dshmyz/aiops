@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,12 +24,14 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/execution"
 	"github.com/gracegaoya/ai-operations-copilot/internal/httpapi"
 	"github.com/gracegaoya/ai-operations-copilot/internal/plans"
+	"github.com/gracegaoya/ai-operations-copilot/internal/policy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/store"
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 func TestAssistantReturnsMiddlewareDiagnosticPackage(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareTools(t)
 	db := openAssistantSQLite(t)
 	repository := store.NewSQLActionPlanStore(db)
 	auditService := audit.NewService(repository)
@@ -90,6 +93,7 @@ func TestAssistantReturnsMiddlewareDiagnosticPackage(t *testing.T) {
 // answer 响应包含 Summary 和 Blocks 字段（端到端验证双阶段应答链路）。
 func TestAssistantFormatterProducesBlocks(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareTools(t)
 	db := openAssistantSQLite(t)
 	repository := store.NewSQLActionPlanStore(db)
 	auditService := audit.NewService(repository)
@@ -146,6 +150,7 @@ func TestAssistantFormatterProducesBlocks(t *testing.T) {
 }
 
 func TestAssistantWriteMessageStoresPendingPlanInSQLite(t *testing.T) {
+	ensureMiddlewareTools(t)
 	db := openAssistantSQLite(t)
 	repository := store.NewSQLActionPlanStore(db)
 	auditService := audit.NewService(repository)
@@ -156,7 +161,7 @@ func TestAssistantWriteMessageStoresPendingPlanInSQLite(t *testing.T) {
 	router := httpapi.NewRouter(
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		readService,
-		httpapi.WithAssistant(assistant.NewService(assistant.DeterministicPlanner{}, readService, planService, nil)),
+		httpapi.WithAssistant(assistant.NewService(assistant.NewCapabilityAwarePlanner(assistant.DeterministicPlanner{}), readService, planService, nil)),
 		httpapi.WithActionPlans(repository),
 	)
 	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"把 prod 的 orders topic retention 改成 72 小时"}`))
@@ -196,6 +201,83 @@ func TestAssistantWriteMessageStoresPendingPlanInSQLite(t *testing.T) {
 		t.Fatalf("list body = %s, must not expose confirmation token", listRes.Body.String())
 	}
 }
+
+// --- Middleware tools externalization test wiring ---
+//
+// The four middleware tools (glusterfs/minio/kafka read + topic.retention.set
+// write) are no longer statically registered: they load from published YAML
+// capabilities and execute over HTTP. Tests that reference them by name must
+// register them dynamically (mirroring the published schemas) and grant the
+// role permissions they receive from capability auth.roles. Registration is
+// idempotent and mutex-guarded so parallel tests share the registry safely.
+// (The non-parallel capabilities test that resets the registry runs in the
+// sequential phase, before these parallel tests, so it cannot race.)
+
+var e2eEnsureMiddlewareToolsMu sync.Mutex
+
+func ensureMiddlewareTools(t *testing.T) {
+	t.Helper()
+	e2eEnsureMiddlewareToolsMu.Lock()
+	defer e2eEnsureMiddlewareToolsMu.Unlock()
+	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+		if err := tools.RegisterDynamicTools(e2eMiddlewareDefinitions()); err != nil {
+			t.Fatalf("register middleware tools: %v", err)
+		}
+	}
+	// Role permissions are additive/idempotent; re-inject on every call so a
+	// policy-level reset elsewhere cannot leave the middleware tools unroutable.
+	policy.RegisterDynamicRolePermissions(map[string][]string{
+		tools.GlusterVolumeHealthRead: {"viewer", "operator", "admin"},
+		tools.MinIOBucketHealthRead:   {"viewer", "operator", "admin"},
+		tools.KafkaConsumerLagRead:    {"viewer", "operator", "admin"},
+		tools.TopicRetentionSet:       {"operator", "admin"},
+	})
+}
+
+func e2eMiddlewareDefinitions() []tools.DynamicToolDefinition {
+	return []tools.DynamicToolDefinition{
+		{
+			Tool: tools.Tool{Name: tools.GlusterVolumeHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{Name: tools.MinIOBucketHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{Name: tools.KafkaConsumerLagRead, Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+				"name":        {Type: "string", Required: true},
+			},
+		},
+		{
+			Tool: tools.Tool{
+				Name:                tools.TopicRetentionSet,
+				Operation:           tools.Write,
+				Risk:                tools.Medium,
+				RollbackDescription: "reset_to_previous",
+				Domain:              "kafka",
+				ResourceType:        "topic",
+				SupportsDryRun:      true,
+			},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment":     {Type: "string", Required: true},
+				"topic":           {Type: "string", Required: true},
+				"retention_hours": {Type: "integer", Required: true, Min: e2eMinBound(1), Max: e2eMaxBound(8760)},
+			},
+		},
+	}
+}
+
+func e2eMinBound(value float64) *float64 { return &value }
+func e2eMaxBound(value float64) *float64 { return &value }
 
 func openAssistantSQLite(t *testing.T) *sql.DB {
 	t.Helper()
@@ -307,6 +389,7 @@ func TestEinoMockProviderIntegrationReadFlow(t *testing.T) {
 // correctly creates a pending action plan for write operations.
 func TestEinoMockProviderIntegrationWriteFlow(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareTools(t)
 	db := openAssistantSQLite(t)
 	repository := store.NewSQLActionPlanStore(db)
 	auditService := audit.NewService(repository)

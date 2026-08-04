@@ -14,6 +14,7 @@ import (
 
 func TestCreateRunbookPlanLowRiskAutoConfirms(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareWriteTool(t)
 	ctx := context.Background()
 	repository := store.NewMemoryActionPlanStore()
 	service := plans.NewService(repository, fixedClock())
@@ -51,6 +52,7 @@ func TestCreateRunbookPlanLowRiskAutoConfirms(t *testing.T) {
 
 func TestCreateRunbookPlanMediumRiskRequiresConfirmation(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareWriteTool(t)
 	ctx := context.Background()
 	repository := store.NewMemoryActionPlanStore()
 	service := plans.NewService(repository, fixedClock())
@@ -70,6 +72,7 @@ func TestCreateRunbookPlanMediumRiskRequiresConfirmation(t *testing.T) {
 
 func TestCreateRunbookPlanRejectsNotPermittedDecision(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareWriteTool(t)
 	ctx := context.Background()
 	repository := store.NewMemoryActionPlanStore()
 	service := plans.NewService(repository, fixedClock())
