@@ -179,7 +179,9 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
   const importBackendBaseURL = ref('https://middleware.example.com');
   const importMessage = ref('');
   const importWizardStep = ref<ImportWizardStep>('source');
-  const managementPhase = ref<ManagementPhase>('source');
+  // 落地默认落在「能力清单（评审发布）」而非导入向导：返回用户想先看到已接入的
+  // 能力库，而不是每次都从 Swagger 收件箱开始。需要导入时点向导第 1 步即可。
+  const managementPhase = ref<ManagementPhase>('review');
   const importPreview = ref<ImportPreview | null>(null);
   const importPreviewLoading = ref(false);
   const importPreviewGeneration = ref(0);

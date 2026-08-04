@@ -64,6 +64,14 @@ async function openReview(wrapper: ReturnType<typeof mountApp>) {
   await flushPromises();
 }
 
+// The management view now lands on the capability list (review). These helpers
+// reach the sibling phases from there.
+async function openSource(wrapper: ReturnType<typeof mountApp>) {
+  await openManagement(wrapper);
+  await wrapper.find('[data-test="workflow-step-source"]').trigger('click');
+  await flushPromises();
+}
+
 describe('Capability Console', () => {
   beforeEach(() => {
     // Disable SSE streaming in tests so existing fetch mocks for
@@ -348,7 +356,9 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="assistant-entry"]').exists()).toBe(false);
     expect(managementEl.style.display).not.toBe('none');
     expect(wrapper.find('[data-test="management-entry"]').text()).toContain('把后台 API 翻译成 AI 工具');
-    expect(wrapper.find('[data-test="import-wizard"]').exists()).toBe(true);
+    // 落地落在能力清单（review）而非导入向导
+    expect(wrapper.find('[data-test="workflow-review"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="capability-table-body"]').text()).toContain('minio.bucket.capacity.read');
   });
 
   test('renders quick-start example prompts when transcript is empty', async () => {
@@ -677,9 +687,10 @@ describe('Capability Console', () => {
     await openManagement(wrapper);
 
     expect(wrapper.find('[data-test="workflow-console"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="workflow-start"]').text()).toContain('先接入一批后台 API');
+    // 落地默认落在能力清单（评审发布）
     expect(wrapper.find('[data-test="workflow-step-review"]').text()).toContain('评审发布');
     expect(wrapper.find('[data-test="workflow-step-ai"]').text()).toContain('AI 试问');
+    expect(wrapper.find('[data-test="workflow-step-source"]').text()).toContain('接入 API');
   });
 
   test('starts capability management as a guided workflow instead of an always-on three-column console', async () => {
@@ -689,10 +700,17 @@ describe('Capability Console', () => {
     await openManagement(wrapper);
 
     expect(wrapper.find('[data-test="workflow-console"]').exists()).toBe(true);
+    // 落地默认落在能力清单（评审发布）而非导入向导；评审编辑区随清单出现，但 AI 试问不显示
+    expect(wrapper.find('[data-test="workflow-step-review"]').classes()).toContain('active');
+    expect(wrapper.find('[data-test="workflow-review"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="workflow-start"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="studio-ai-runner"]').exists()).toBe(false);
+
+    // 点向导第 1 步进入打开 API 导入
+    await wrapper.find('[data-test="workflow-step-source"]').trigger('click');
+    await flushPromises();
     expect(wrapper.find('[data-test="workflow-step-source"]').classes()).toContain('active');
     expect(wrapper.find('[data-test="workflow-start"]').text()).toContain('先接入一批后台 API');
-    expect(wrapper.find('[data-test="studio-translator"]').exists()).toBe(false);
-    expect(wrapper.find('[data-test="studio-ai-runner"]').exists()).toBe(false);
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
@@ -1157,7 +1175,7 @@ describe('Capability Console', () => {
     const fetchMock = vi.mocked(fetch);
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     expect(wrapper.find('[data-test="import-wizard"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="commit-openapi-import"]').attributes('disabled')).toBeDefined();
@@ -1225,7 +1243,7 @@ describe('Capability Console', () => {
   test('disables Swagger commit when no candidates are selected', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
@@ -1239,7 +1257,7 @@ describe('Capability Console', () => {
     const fetchMock = vi.mocked(fetch);
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
@@ -1277,7 +1295,7 @@ describe('Capability Console', () => {
     }));
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     await wrapper.find('[data-test="openapi-url-input"]').setValue('https://admin.example.com/v3/api-docs');
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
@@ -1322,7 +1340,7 @@ describe('Capability Console', () => {
   test('updates commit summary when a selected candidate operation is overridden', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
@@ -1336,7 +1354,7 @@ describe('Capability Console', () => {
   test('keeps generated drafts available to the existing import review batch', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
@@ -1351,7 +1369,7 @@ describe('Capability Console', () => {
   test('filters Swagger preview candidates by domain', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
@@ -1594,7 +1612,7 @@ describe('Capability Console', () => {
   test('renders the quick publish form on the source step', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     expect(wrapper.find('[data-test="quick-publish-form"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="quick-publish-name"]').exists()).toBe(true);
@@ -1633,7 +1651,7 @@ describe('Capability Console', () => {
     vi.stubGlobal('fetch', fetchMock);
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     await wrapper.find('[data-test="quick-publish-name"]').setValue('redis.cluster.info.read');
     await wrapper.find('[data-test="quick-publish-domain"]').setValue('redis');
@@ -1679,7 +1697,7 @@ describe('Capability Console', () => {
     }));
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openSource(wrapper);
 
     await wrapper.find('[data-test="quick-publish-name"]').setValue('redis.cluster.info.read');
     await wrapper.find('[data-test="quick-publish-domain"]').setValue('redis');
