@@ -1,33 +1,31 @@
 schema_version: 1
-name: kafka.consumer_group.lag.read
+name: minio.bucket.health.read
 status: published
-domain: kafka
-resource_type: consumer_group
+domain: minio
+resource_type: bucket
 operation: read
 risk: low
 backend:
     adapter: http
     method: GET
-    path: /api/kafka/{cluster}/consumer-groups/{group}/lag
+    path: /api/minio/default/buckets/{name}/capacity
     timeout_ms: 3000
     base_url: http://127.0.0.1:19090
 input_schema:
-    cluster:
-        type: string
-        required: true
     environment:
         type: string
         required: true
-    group:
+    name:
         type: string
         required: true
 output:
     kind: observation
     severity_path: $.status
-    summary_template: Consumer group {group} lag is {lag}
+    summary_template: Bucket {name} usage is {usage_pct}%
     fields:
-        lag: $.data.lag
-        members: $.data.members
+        limit_gb: $.data.limit_gb
+        usage_pct: $.data.usage_pct
+        used_gb: $.data.used_gb
 governance:
     requires_action_plan: false
     requires_approval: false
@@ -42,6 +40,6 @@ auth:
         - admin
     environment_scoped: true
 ai:
-    description: Read Kafka consumer group lag from the demo middleware backend.
+    description: Read MinIO bucket health from the demo middleware backend.
     examples:
-        - 查询 prod k1 payments consumer_group 的 kafka 延迟
+        - 检查 prod minio archive bucket 的健康状态

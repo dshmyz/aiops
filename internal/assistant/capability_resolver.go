@@ -80,15 +80,10 @@ func (p CapabilityAwarePlanner) Plan(ctx context.Context, user identity.CurrentU
 	detIntent, detErr := det.Plan(ctx, user, cleanMessage, history, pageContext)
 	if detErr == nil {
 		if detIntent.Diagnostic == nil {
-			// 非诊断意图：静态写工具（topic.retention.set）只是内置兜底，
-			// 已发布的同域动态写能力（kafka.topic.retention.write）更具体，
-			// 带治理/回滚/校验，优先走它。
-			if domain, ok := staticWriteToolDomain(detIntent.ToolName); ok {
-				if intent, matched, err := p.resolveWriteCapabilityForDomain(ctx, cleanMessage, domain); matched {
-					return intent, err
-				}
-			}
-			// 其他非诊断意图（告警/事件/任务等），直接返回
+			// 非诊断意图（告警/事件/任务等）直接返回。中间件写意图（如 Kafka
+			// topic 保留）已不再在此硬编码静态写工具名，改由下方通用的
+			// resolveDynamicCapabilityWithExtractor 按域/参数动态匹配
+			// （写能力从 yaml 工具的 Domain 读取）。
 			return detIntent, nil
 		}
 		// 诊断意图：检查是否有匹配该域名的动态能力
@@ -117,115 +112,6 @@ func (p CapabilityAwarePlanner) Plan(ctx context.Context, user identity.CurrentU
 		}
 	}
 	return p.fallback.Plan(ctx, user, message, history, pageContext)
-}
-
-// staticWriteToolDomain 把内置静态写工具映射到它所属的中间件领域，用于查找
-// 可以取代它的同域动态写能力。静态写工具名不带领域前缀（历史原因），所以
-// 这里显式登记映射，而不是从工具名解析。
-func staticWriteToolDomain(toolName string) (string, bool) {
-	switch toolName {
-	case tools.TopicRetentionSet:
-		return "kafka", true
-	default:
-		return "", false
-	}
-}
-
-// resolveWriteCapabilityForDomain 匹配指定域名的写入动态能力。
-// 用于当 DeterministicPlanner 识别出写入意图时，只匹配对应域名的能力。
-func (p CapabilityAwarePlanner) resolveWriteCapabilityForDomain(ctx context.Context, message string, domain string) (Intent, bool, error) {
-	text := strings.ToLower(strings.TrimSpace(message))
-	if text == "" || domain == "" {
-		return Intent{}, false, nil
-	}
-	candidates := []dynamicCapabilityCandidate{}
-	for _, tool := range tools.All() {
-		if !tools.IsDynamic(tool.Name) {
-			continue
-		}
-		// 只匹配写入操作
-		if tool.Operation != tools.Write {
-			continue
-		}
-		// 只匹配指定域名
-		if tool.Domain != domain {
-			continue
-		}
-		schema, ok := tools.DynamicInputSchema(tool.Name)
-		if !ok {
-			continue
-		}
-		score, matched, reasons := capabilityMatchScore(text, tool)
-		if !matched {
-			continue
-		}
-		candidates = append(candidates, dynamicCapabilityCandidate{tool: tool, schema: schema, score: score, reasons: reasons})
-	}
-	if len(candidates) == 0 {
-		return Intent{}, false, nil
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].score == candidates[j].score {
-			return candidates[i].tool.Name < candidates[j].tool.Name
-		}
-		return candidates[i].score > candidates[j].score
-	})
-	best := candidates[0]
-
-	input, params, invalid := extractDynamicInput(text, best.schema)
-	if len(invalid) > 0 {
-		return Intent{}, true, NewClarificationWithSelection(
-			"无效参数: "+strings.Join(invalid, ", "),
-			&CapabilitySelection{
-				Selected:  best.tool.Name,
-				Extracted: params,
-				Missing:   invalid,
-				Reason:    "invalid parameters",
-			},
-		)
-	}
-	missing := missingRequiredFields(best.schema, input)
-	if len(missing) > 0 {
-		// 规则提取失败，尝试 AI 提取
-		if p.paramExtractor != nil {
-			aiInput, aiErr := p.paramExtractor.ExtractParams(ctx, message, best.schema)
-			if aiErr == nil && len(aiInput) > 0 {
-				for k, v := range aiInput {
-					if _, exists := input[k]; !exists {
-						input[k] = v
-						params = append(params, ExtractedParameter{Name: k, Value: v, Source: "ai"})
-					}
-				}
-				missing = missingRequiredFields(best.schema, input)
-			}
-		}
-	}
-	if len(missing) > 0 {
-		fields := buildPreflightFields(best.schema, missing)
-		return Intent{}, true, ClarificationError{
-			Message: "缺少参数: " + strings.Join(missing, ", "),
-			Selection: &CapabilitySelection{
-				Selected:  best.tool.Name,
-				Extracted: params,
-				Missing:   missing,
-				Reason:    "missing required fields",
-			},
-			Fields: fields,
-		}
-	}
-	return Intent{
-		ToolName:    best.tool.Name,
-		Input:       input,
-		Confidence:  0.9,
-		Explanation: fmt.Sprintf("dynamic write capability match (score=%d)", best.score),
-		Selection: &CapabilitySelection{
-			Selected:   best.tool.Name,
-			Confidence: float64(best.score) / 10.0,
-			Extracted:  params,
-			Reason:     fmt.Sprintf("score %d", best.score),
-		},
-	}, true, nil
 }
 
 // resolveDynamicCapabilityForDomain 尝试匹配指定域名的动态能力。
@@ -558,7 +444,7 @@ func hasGenericReadCue(text string) bool {
 }
 
 func hasGenericWriteCue(text string) bool {
-	for _, cue := range []string{"set", "update", "configure", "配置", "修改", "设置", "调整"} {
+	for _, cue := range []string{"set", "update", "configure", "配置", "修改", "设置", "调整", "改成", "改为"} {
 		if tokenExists(text, cue) {
 			return true
 		}

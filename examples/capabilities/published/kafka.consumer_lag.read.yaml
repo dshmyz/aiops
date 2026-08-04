@@ -1,34 +1,30 @@
 schema_version: 1
-name: glusterfs.volume.status.read
+name: kafka.consumer_lag.read
 status: published
-domain: glusterfs
-resource_type: volume
+domain: kafka
+resource_type: consumer_group
 operation: read
 risk: low
 backend:
     adapter: http
     method: GET
-    path: /api/glusterfs/{cluster}/volumes/{volume}/status
+    path: /api/kafka/default/consumer-groups/{name}/lag
     timeout_ms: 3000
     base_url: http://127.0.0.1:19090
 input_schema:
-    cluster:
-        type: string
-        required: true
     environment:
         type: string
         required: true
-    volume:
+    name:
         type: string
         required: true
 output:
     kind: observation
     severity_path: $.status
-    summary_template: Volume {volume} has {online_bricks} online bricks and {heal_backlog} heal backlog
+    summary_template: Consumer group {name} lag is {lag}
     fields:
-        heal_backlog: $.data.heal_backlog
-        offline_bricks: $.data.offline_bricks
-        online_bricks: $.data.online_bricks
+        lag: $.data.lag
+        members: $.data.members
 governance:
     requires_action_plan: false
     requires_approval: false
@@ -43,6 +39,6 @@ auth:
         - admin
     environment_scoped: true
 ai:
-    description: Read GlusterFS volume status from the demo middleware backend.
+    description: Read Kafka consumer group lag from the demo middleware backend.
     examples:
-        - 查询 prod g1 data volume 的 glusterfs 状态
+        - 查询 prod kafka payments consumer_group 的延迟

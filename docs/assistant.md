@@ -15,6 +15,33 @@ assistant 的核心抽象是 **planner**：把用户消息解析为一个 `Inten
   重规划 → …`，直到 planner 给出 `final_answer`、要求澄清、遇到写意图交还给人，
   或耗尽 `maxSteps`。这是"多工具链式执行 + 结果反馈重规划"的智能所在。
 
+## Assistant 边界：中间件能力外置（注册 + 执行走 HTTP）
+
+中间件相关能力**不写死在 Go 代码里**——新增或调整一个中间件能力的接入，无需改 Go
+代码、重新编译、重新发布：
+
+- **注册外置**：中间件工具（`glusterfs.volume.health.read`、
+  `minio.bucket.health.read`、`kafka.consumer_lag.read`、`topic.retention.set`）
+  不在 Go 静态注册表（`internal/tools/registry.go` 的 `registeredTools`）中，而是声明为
+  `examples/capabilities/published/*.yaml` 的 published 能力，由 `COPILOT_CAPABILITIES_DIR`
+  加载（`capabilities.RegisterPublished` → 注册为动态工具）。静态注册表只保留 5 个**平台
+  元工具**（`cluster.status.read`、`system.posture.read`、`alert.query`、`event.query`、
+  `task.query`），它们是助手自身的内建查询，非中间件能力。
+- **执行外置**：中间件读/写经 `CapabilityReadRunner` / `CapabilityWriteRunner` +
+  `HTTPAdapter` 打到 yaml `backend.base_url + path` 指向的 HTTP 中间件后端。本地开发由
+  mock 中间件（`examples/mock-middleware-api.js`，`:19090`）承接，需在 `.env` 配置
+  `COPILOT_MOCK_MIDDLEWARE_URL`（与 yaml 的 `base_url` 一致）。未配置 backend 时中间件
+  能力退化为不可用，平台元工具不受影响。
+- **校验 schema 外置**：中间件工具的 input schema 迁到 yaml `input_schema`（动态工具
+  经 `DynamicInputSchema` 校验），静态 `ValidateInput` 只处理平台元工具。
+- **planner 路由去硬编码**：写意图（如 `topic.retention.set`）不再由确定性 planner 写死
+  工具名，而是由 `CapabilityAwarePlanner` 按域/参数动态解析能力（工具 Domain 从 yaml
+  读取）。
+
+演进的必然代价：dev 环境未起 mock 时中间件能力不可用（HTTP 连接失败），而不是进程内
+模拟。这符合"外置 HTTP"的取舍。
+
+
 ## 启用方式
 
 循环是 **opt-in**：`assistant.Service.WithAgentLoop(true)` 才开启，默认关闭以保留

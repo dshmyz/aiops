@@ -5,7 +5,7 @@ Go backend foundation for an AI-assisted middleware operations console.
 ## What Exists
 
 - Go HTTP service with `GET /healthz`.
-- Governed tool registry: **9 static tools** — `cluster.status.read`, `topic.retention.set` (write), `glusterfs.volume.health.read`, `minio.bucket.health.read`, `kafka.consumer_lag.read`, `system.posture.read` (系统态势), `alert.query` (告警), `event.query` (审计事件), `task.query` (定时任务) — plus dynamic tools from capabilities and external MCP servers.
+- Governed tool registry: **5 static platform meta-tools** — `cluster.status.read`, `system.posture.read` (系统态势), `alert.query` (告警), `event.query` (审计事件), `task.query` (定时任务) — plus dynamic tools from capabilities and external MCP servers. Middleware capability tools (`topic.retention.set` (write), `glusterfs.volume.health.read`, `minio.bucket.health.read`, `kafka.consumer_lag.read`) are **not** hardcoded in Go: they are declared as published YAML capabilities (`examples/capabilities/published/`) and executed over the configured HTTP middleware backend (see `docs/assistant.md` → "Assistant Boundary").
 - Tool execution layer: server-side authorization (static allowlist + role/environment/input/risk policy), a **per-read timeout** (default 5s, `ReadOnlyService.WithTimeout`), and audit on every call.
 - External MCP integration: `COPILOT_MCP_SERVERS` startup registration + `/v1/mcp/servers` hot CRUD/reload + health checks.
 - Assistant endpoints: `POST /v1/assistant/messages` (one-shot) and `POST /v1/assistant/stream` (SSE: delta/thinking/tool_call/progress/response), multiturn conversations (`/v1/assistant/conversations*`), and page-context support.

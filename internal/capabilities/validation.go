@@ -119,7 +119,14 @@ func ToTool(capability Capability) (tools.Tool, error) {
 	if capability.Operation == tools.Write {
 		rollback = "Rollback through capability strategy: " + capability.Governance.Rollback.Strategy
 	}
-	return tools.Tool{Name: capability.Name, Operation: capability.Operation, Risk: capability.Risk, RollbackDescription: rollback, Domain: capability.Domain, ResourceType: capability.ResourceType}, nil
+	// Write capabilities support dry-run preview: the operator should be able
+	// to request a risk_notice preview before committing a state-changing call.
+	// There is deliberately no middleware-name special-case here — it is a
+	// general property of writes, matching the static registry where only write
+	// tools declare SupportsDryRun. Whether a specific write capability actually
+	// renders a preview is resolved at request time by the registered dry-run
+	// handler for that tool (a missing handler skips the preview non-blockingly).
+	return tools.Tool{Name: capability.Name, Operation: capability.Operation, Risk: capability.Risk, RollbackDescription: rollback, Domain: capability.Domain, ResourceType: capability.ResourceType, SupportsDryRun: capability.Operation == tools.Write}, nil
 }
 
 func pathVariables(path string) []string {

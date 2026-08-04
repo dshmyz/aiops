@@ -35,38 +35,30 @@ type Decision struct {
 
 // rolePermissions is deliberately maintained in Go source. JWTs, request
 // input, and model output can name a role or tool, but cannot add a mapping.
+// 中间件读/写能力已外置为 YAML published 能力（examples/capabilities/published），
+// 其角色权限由 capability auth.roles 经 RegisterDynamicRolePermissions 注入，
+// 故此处仅保留平台内建元工具（系统态势/告警/事件/任务中心）。
 var rolePermissions = map[string]map[string]struct{}{
 	"viewer": {
-		tools.ClusterStatusRead:       {},
-		tools.GlusterVolumeHealthRead: {},
-		tools.MinIOBucketHealthRead:   {},
-		tools.KafkaConsumerLagRead:    {},
-		tools.QuerySystemPosture:      {},
-		tools.AlertQuery:              {},
-		tools.EventQuery:              {},
-		tools.TaskQuery:               {},
+		tools.ClusterStatusRead:  {},
+		tools.QuerySystemPosture: {},
+		tools.AlertQuery:         {},
+		tools.EventQuery:         {},
+		tools.TaskQuery:          {},
 	},
 	"operator": {
-		tools.ClusterStatusRead:       {},
-		tools.GlusterVolumeHealthRead: {},
-		tools.MinIOBucketHealthRead:   {},
-		tools.KafkaConsumerLagRead:    {},
-		tools.TopicRetentionSet:       {},
-		tools.QuerySystemPosture:      {},
-		tools.AlertQuery:              {},
-		tools.EventQuery:              {},
-		tools.TaskQuery:               {},
+		tools.ClusterStatusRead:  {},
+		tools.QuerySystemPosture: {},
+		tools.AlertQuery:         {},
+		tools.EventQuery:         {},
+		tools.TaskQuery:          {},
 	},
 	"admin": {
-		tools.ClusterStatusRead:       {},
-		tools.GlusterVolumeHealthRead: {},
-		tools.MinIOBucketHealthRead:   {},
-		tools.KafkaConsumerLagRead:    {},
-		tools.TopicRetentionSet:       {},
-		tools.QuerySystemPosture:      {},
-		tools.AlertQuery:              {},
-		tools.EventQuery:              {},
-		tools.TaskQuery:               {},
+		tools.ClusterStatusRead:  {},
+		tools.QuerySystemPosture: {},
+		tools.AlertQuery:         {},
+		tools.EventQuery:         {},
+		tools.TaskQuery:          {},
 	},
 }
 

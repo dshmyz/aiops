@@ -292,33 +292,10 @@ func (DeterministicPlanner) Plan(_ context.Context, _ identity.CurrentUser, mess
 			},
 		}, nil
 	}
-	if containsAny(text, "retention", "保留", "留存") {
-		topic, topicOK := extractTopic(text)
-		hours, hoursOK := extractHours(text)
-		if !topicOK || !hoursOK {
-			return Intent{}, ErrClarificationNeeded
-		}
-		return Intent{
-			ToolName: tools.TopicRetentionSet,
-			Input: map[string]any{
-				"environment":     environment,
-				"topic":           topic,
-				"retention_hours": hours,
-			},
-			Confidence:  0.8,
-			Explanation: "topic retention intent",
-			Selection: &CapabilitySelection{
-				Selected:   tools.TopicRetentionSet,
-				Confidence: 0.8,
-				Reason:     "topic retention intent",
-				Extracted: []ExtractedParameter{
-					{Name: "environment", Value: environment, Source: "environment"},
-					{Name: "topic", Value: topic, Source: "pattern"},
-					{Name: "retention_hours", Value: hours, Source: "pattern"},
-				},
-			},
-		}, nil
-	}
+	// 中间件写意图（如 Kafka topic 保留）已不再在此硬编码具体静态工具名。
+	// topic.retention.set 等写能力外置为 YAML published 能力，由
+	// CapabilityAwarePlanner 按域/参数动态解析（见 capability_resolver.go），
+	// tool 名由动态解析给出。
 	return Intent{}, ErrClarificationNeeded
 }
 

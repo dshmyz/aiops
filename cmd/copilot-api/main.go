@@ -679,12 +679,10 @@ func (staticReadRunner) Read(_ context.Context, tool tools.Tool, input map[strin
 				{"domain": "minio", "status": "ok", "summary": "所有 bucket 健康"},
 			},
 		}, nil
-	case tools.GlusterVolumeHealthRead:
-		return map[string]any{"tool": tool.Name, "environment": input["environment"], "name": input["name"], "status": "warning", "capacity_pct": 82.5, "heal_pending": 12}, nil
-	case tools.MinIOBucketHealthRead:
-		return map[string]any{"tool": tool.Name, "environment": input["environment"], "name": input["name"], "status": "ok", "objects": 42000, "quota_pct": 61.2}, nil
-	case tools.KafkaConsumerLagRead:
-		return map[string]any{"tool": tool.Name, "environment": input["environment"], "name": input["name"], "status": "warning", "lag": 1840}, nil
+	case tools.GlusterVolumeHealthRead, tools.MinIOBucketHealthRead, tools.KafkaConsumerLagRead:
+		// 中间件读工具已外置为 YAML published 能力（examples/capabilities/published），
+		// 经 CapabilityReadRunner + HTTPAdapter 执行，不落静态 stub。
+		return map[string]any{"tool": tool.Name, "environment": input["environment"], "status": "unavailable"}, nil
 	default:
 		return map[string]any{"tool": tool.Name, "environment": input["environment"], "status": "available"}, nil
 	}
@@ -705,20 +703,11 @@ func newConfigurableReadRunner(baseURL string) configurableReadRunner {
 	}
 }
 
-// pathFor maps a static tool name to the middleware API path. The cluster
-// segment is hardcoded to "default" because the static read runner's input
-// schema only carries environment and name.
-func (r configurableReadRunner) pathFor(toolName, name string) string {
-	switch toolName {
-	case tools.GlusterVolumeHealthRead:
-		return fmt.Sprintf("/api/glusterfs/default/volumes/%s/status", name)
-	case tools.MinIOBucketHealthRead:
-		return fmt.Sprintf("/api/minio/default/buckets/%s/capacity", name)
-	case tools.KafkaConsumerLagRead:
-		return fmt.Sprintf("/api/kafka/default/consumer-groups/%s/lag", name)
-	default:
-		return ""
-	}
+// pathFor maps a static tool name to the middleware API path. 中间件读工具已
+// 外置为 YAML published 能力，经 HTTPAdapter 自路由（见
+// examples/capabilities/published/*.yaml），此处不再保留中间件静态映射。
+func (r configurableReadRunner) pathFor(_ string, _ string) string {
+	return ""
 }
 
 func (r configurableReadRunner) Read(ctx context.Context, tool tools.Tool, input map[string]any) (map[string]any, error) {
@@ -950,14 +939,10 @@ func newConfigurableWriteExecutor(baseURL string) configurableWriteExecutor {
 }
 
 // writePathFor maps a static tool name to the middleware API write path.
-func (e configurableWriteExecutor) writePathFor(toolName string, input map[string]any) string {
-	topic, _ := input["topic"].(string)
-	switch toolName {
-	case "kafka.topic.retention.set":
-		return fmt.Sprintf("/api/kafka/default/topics/%s/retention", topic)
-	default:
-		return ""
-	}
+// 中间件写工具已外置为 YAML published 能力（topic.retention.set），经
+// HTTPAdapter 自路由，不再保留静态写映射。
+func (e configurableWriteExecutor) writePathFor(_ string, _ map[string]any) string {
+	return ""
 }
 
 func (e configurableWriteExecutor) Execute(ctx context.Context, toolName string, input map[string]any) (map[string]any, error) {

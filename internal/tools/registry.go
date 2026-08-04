@@ -76,34 +76,6 @@ var registeredTools = map[string]Tool{
 		Operation: Read,
 		Risk:      Low,
 	},
-	TopicRetentionSet: {
-		Name:                TopicRetentionSet,
-		Operation:           Write,
-		Risk:                Medium,
-		RollbackDescription: "Restore the previously recorded retention setting through a confirmed action plan.",
-		SupportsDryRun:      true,
-	},
-	GlusterVolumeHealthRead: {
-		Name:         GlusterVolumeHealthRead,
-		Operation:    Read,
-		Risk:         Low,
-		Domain:       "glusterfs",
-		ResourceType: "volume",
-	},
-	MinIOBucketHealthRead: {
-		Name:         MinIOBucketHealthRead,
-		Operation:    Read,
-		Risk:         Low,
-		Domain:       "minio",
-		ResourceType: "bucket",
-	},
-	KafkaConsumerLagRead: {
-		Name:         KafkaConsumerLagRead,
-		Operation:    Read,
-		Risk:         Low,
-		Domain:       "kafka",
-		ResourceType: "consumer_group",
-	},
 	QuerySystemPosture: {
 		Name:      QuerySystemPosture,
 		Operation: Read,
@@ -370,30 +342,6 @@ func ValidateInput(requested Tool, input map[string]any) error {
 			return err
 		}
 		_, err := requiredString(input, "environment")
-		return err
-	case TopicRetentionSet:
-		if err := onlyFields(input, "environment", "topic", "retention_hours"); err != nil {
-			return err
-		}
-		if _, err := requiredString(input, "environment"); err != nil {
-			return err
-		}
-		if _, err := requiredString(input, "topic"); err != nil {
-			return err
-		}
-		hours, ok := positiveInteger(input["retention_hours"])
-		if !ok || hours > 8760 {
-			return errors.New("retention_hours must be an integer between 1 and 8760")
-		}
-		return nil
-	case GlusterVolumeHealthRead, MinIOBucketHealthRead, KafkaConsumerLagRead:
-		if err := onlyFields(input, "environment", "name"); err != nil {
-			return err
-		}
-		if _, err := requiredString(input, "environment"); err != nil {
-			return err
-		}
-		_, err := requiredString(input, "name")
 		return err
 	case AlertQuery:
 		if err := onlyFields(input, "environment", "severity", "status", "domain"); err != nil {
