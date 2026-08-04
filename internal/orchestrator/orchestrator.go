@@ -95,6 +95,26 @@ func (o *Orchestrator) RunWithMessage(ctx context.Context, user identity.Current
 	return o.Orchestrate(ctx, user, requests)
 }
 
+// ResolveReadTool resolves a diagnostic request to the read tool name that the
+// wrapped runner will execute. When the runner exposes the capability-backed
+// resolution (e.g. *diagnostics.Service with a DiagnosticCapabilityResolver) it
+// delegates to it, so the name reflects the published YAML capability; otherwise
+// it returns a domain-derived name. It is used by the assistant to display which
+// tool a diagnostic step runs, and deliberately never fails so a missing
+// capability cannot block execution.
+func (o *Orchestrator) ResolveReadTool(request diagnostics.Request) (string, error) {
+	if r, ok := o.runner.(interface {
+		ResolveReadTool(diagnostics.Request) (string, error)
+	}); ok {
+		return r.ResolveReadTool(request)
+	}
+	domain := strings.TrimSpace(request.Domain)
+	if domain == "" {
+		return "", fmt.Errorf("diagnostic domain required")
+	}
+	return domain, nil
+}
+
 // DomainsInText returns the ordered, de-duplicated list of middleware diagnostic
 // domains named in the message (e.g. ["kafka", "minio"] for "kafka 和 minio 健康").
 // It is the shared single source for domain detection: SplitMessage uses it to

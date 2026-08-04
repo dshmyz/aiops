@@ -37,7 +37,13 @@ type ReadService interface {
 // ok=false (or the resolver itself is nil), the Service falls back to the
 // switch.
 type DiagnosticCapabilityResolver interface {
-	ResolveDiagnosticTool(domain, resourceType, operation string) (toolName string, inputSchema map[string]any, ok bool)
+	// ResolveDiagnosticTool looks up a published read capability for the given
+	// domain. When resourceType is non-empty it must match the capability's
+	// resource type. It returns the resolved tool name and resource type (both
+	// sourced from the capability, so the caller need not fall back to the
+	// hardcoded switch) plus the capability's input schema, and ok=false when no
+	// capability matches.
+	ResolveDiagnosticTool(domain, resourceType, operation string) (toolName, resolvedResourceType string, inputSchema map[string]any, ok bool)
 }
 
 type Clock interface {
@@ -202,7 +208,12 @@ func validateRequestString(field, value string, required bool) (string, error) {
 	return value, nil
 }
 
-func ResolveReadTool(request Request) (string, error) {
+func (s *Service) ResolveReadTool(request Request) (string, error) {
+	if s.capabilityResolver != nil {
+		if tn, _, _, ok := s.capabilityResolver.ResolveDiagnosticTool(strings.TrimSpace(request.Domain), "", string(tools.Read)); ok {
+			return tn, nil
+		}
+	}
 	toolName, _, err := resolveRunbook(strings.TrimSpace(request.Domain))
 	if err != nil {
 		return "", err
@@ -278,21 +289,13 @@ func validRunbook(runbook string) bool {
 }
 
 // resolveRunbookCapability tries the capability resolver first. If it finds a
-// matching diagnostic capability, the returned toolName and input schema are
-// used. If the resolver is nil or returns ok=false, the method falls back to
-// the hardcoded resolveRunbook switch.
+// matching diagnostic capability, the returned toolName, resource type and
+// input schema are used (all sourced from the capability — no hardcoded switch
+// involvement). If the resolver is nil or returns ok=false, the method falls
+// back to the hardcoded resolveRunbook switch.
 func (s *Service) resolveRunbookCapability(domain, requestedResourceType string) (toolName, resourceType string, inputSchema map[string]any, err error) {
 	if s.capabilityResolver != nil {
-		if tn, schema, ok := s.capabilityResolver.ResolveDiagnosticTool(domain, requestedResourceType, string(tools.Read)); ok {
-			rt := requestedResourceType
-			if rt == "" {
-				// Derive a default resource type from the hardcoded mapping.
-				if _, fallback, ferr := resolveRunbook(domain); ferr == nil {
-					rt = fallback
-				} else {
-					rt = domain
-				}
-			}
+		if tn, rt, schema, ok := s.capabilityResolver.ResolveDiagnosticTool(domain, requestedResourceType, string(tools.Read)); ok {
 			return tn, rt, schema, nil
 		}
 	}

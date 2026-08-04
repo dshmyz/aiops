@@ -2,13 +2,10 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -166,10 +163,8 @@ func main() {
 	if err := mcpManager.Reload(serviceContext); err != nil {
 		logger.Warn("initial MCP reload from DB", zap.Error(err))
 	}
-	mockMiddlewareURL := os.Getenv("COPILOT_MOCK_MIDDLEWARE_URL")
-	baseRunner := newConfigurableReadRunner(mockMiddlewareURL)
-	var readRunner execution.ReadRunner = baseRunner
-	var writeExecutor execution.Executor = newConfigurableWriteExecutor(mockMiddlewareURL)
+	var readRunner execution.ReadRunner = staticReadRunner{}
+	var writeExecutor execution.Executor = staticWriteExecutor{}
 	var verifier execution.Verifier
 	var capabilityRuntime capabilities.PublishedCapabilityRuntime
 	capabilitiesConfigured := os.Getenv("COPILOT_CAPABILITIES_DIR") != ""
@@ -180,9 +175,6 @@ func main() {
 		FailureThreshold: 5,
 		ResetTimeout:     30 * time.Second,
 	})
-	if mockMiddlewareURL != "" {
-		logger.Info("static read runner pointing to mock middleware", zap.String("url", mockMiddlewareURL))
-	}
 	if capabilitiesConfigured {
 		readRunner, writeExecutor, verifier, capabilityRuntime = buildCapabilityRuntimes(loadedCapabilities, capabilityAdapter, true, writeExecutor)
 	}
@@ -278,7 +270,7 @@ func main() {
 	// concurrent sub-diagnostics and merged into a single package. The
 	// assistant service injects the user message into the diagnostic context;
 	// the orchestrator reads it to decide whether to orchestrate or delegate.
-	diagService := diagnostics.NewService(readService, nil)
+	diagService := diagnostics.NewService(readService, nil).WithCapabilityResolver(diagnostics.NewCapabilityResolver(loadedCapabilities))
 	assistantService = assistantService.WithDiagnostics(orchestrator.New(diagService, 3, nil))
 	notifier := buildNotifier()
 	options := routerOptions(repository, assistantService, planService, executionService, capabilityManagerFromEnv(capabilityRuntime), auditService)
@@ -688,70 +680,6 @@ func (staticReadRunner) Read(_ context.Context, tool tools.Tool, input map[strin
 	}
 }
 
-// configurableReadRunner wraps the static stub but can proxy read calls to a
-// real or mock middleware HTTP API when COPILOT_MOCK_MIDDLEWARE_URL is set.
-// When the base URL is empty it falls back to the hardcoded stub data.
-type configurableReadRunner struct {
-	baseURL string
-	client  *http.Client
-}
-
-func newConfigurableReadRunner(baseURL string) configurableReadRunner {
-	return configurableReadRunner{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: 5 * time.Second},
-	}
-}
-
-// pathFor maps a static tool name to the middleware API path. 中间件读工具已
-// 外置为 YAML published 能力，经 HTTPAdapter 自路由（见
-// examples/capabilities/published/*.yaml），此处不再保留中间件静态映射。
-func (r configurableReadRunner) pathFor(_ string, _ string) string {
-	return ""
-}
-
-func (r configurableReadRunner) Read(ctx context.Context, tool tools.Tool, input map[string]any) (map[string]any, error) {
-	if r.baseURL == "" {
-		return staticReadRunner{}.Read(ctx, tool, input)
-	}
-	name, _ := input["name"].(string)
-	if name == "" {
-		name, _ = input["name"].(string)
-	}
-	path := r.pathFor(tool.Name, name)
-	if path == "" {
-		return staticReadRunner{}.Read(ctx, tool, input)
-	}
-	url := r.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	resp, err := r.client.Do(req)
-	if err != nil {
-		runLogger := observability.LoggerFromContext(ctx)
-		runLogger.Warn("configurable read runner HTTP call failed", zap.Error(err))
-		return nil, fmt.Errorf("read call to middleware failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		runLogger := observability.LoggerFromContext(ctx)
-		runLogger.Warn("configurable read runner non-200", zap.Int("status", resp.StatusCode))
-		return nil, fmt.Errorf("read call to middleware returned status %d", resp.StatusCode)
-	}
-	var result map[string]any
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 10*1024)).Decode(&result); err != nil {
-		runLogger := observability.LoggerFromContext(ctx)
-		runLogger.Warn("configurable read runner decode failed", zap.Error(err))
-		return nil, fmt.Errorf("decode read response: %w", err)
-	}
-	result["tool"] = tool.Name
-	if _, ok := result["environment"]; !ok {
-		result["environment"] = input["environment"]
-	}
-	return result, nil
-}
-
 // alertReadRunner 把 alert.query 解析到真实 AlertStore 查询（非 stub）。
 // 让 AI 助手能回答"当前有哪些告警"。经 ReadOnlyService 治理边界执行，
 // 自动获得 policy 鉴权 + 审计记录。
@@ -921,71 +849,6 @@ func (staticWriteExecutor) Execute(_ context.Context, toolName string, input map
 		"topic":       input["topic"],
 		"status":      "applied",
 	}, nil
-}
-
-// configurableWriteExecutor wraps the static stub but can proxy write calls to
-// a real or mock middleware HTTP API when COPILOT_MOCK_MIDDLEWARE_URL is set.
-// When the base URL is empty it falls back to the hardcoded stub response.
-type configurableWriteExecutor struct {
-	baseURL string
-	client  *http.Client
-}
-
-func newConfigurableWriteExecutor(baseURL string) configurableWriteExecutor {
-	return configurableWriteExecutor{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: 10 * time.Second},
-	}
-}
-
-// writePathFor maps a static tool name to the middleware API write path.
-// 中间件写工具已外置为 YAML published 能力（topic.retention.set），经
-// HTTPAdapter 自路由，不再保留静态写映射。
-func (e configurableWriteExecutor) writePathFor(_ string, _ map[string]any) string {
-	return ""
-}
-
-func (e configurableWriteExecutor) Execute(ctx context.Context, toolName string, input map[string]any) (map[string]any, error) {
-	if e.baseURL == "" {
-		return staticWriteExecutor{}.Execute(ctx, toolName, input)
-	}
-	path := e.writePathFor(toolName, input)
-	if path == "" {
-		return staticWriteExecutor{}.Execute(ctx, toolName, input)
-	}
-	url := e.baseURL + path
-	bodyJSON, err := json.Marshal(input)
-	if err != nil {
-		return nil, fmt.Errorf("marshal write input: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyJSON))
-	if err != nil {
-		return nil, fmt.Errorf("build write request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.client.Do(req)
-	if err != nil {
-		runLogger := observability.LoggerFromContext(ctx)
-		runLogger.Warn("configurable write executor HTTP call failed", zap.Error(err))
-		return nil, fmt.Errorf("write call to middleware failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		runLogger := observability.LoggerFromContext(ctx)
-		runLogger.Warn("configurable write executor non-200", zap.Int("status", resp.StatusCode))
-		return nil, fmt.Errorf("write call to middleware returned status %d", resp.StatusCode)
-	}
-	var result map[string]any
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 10*1024)).Decode(&result); err != nil {
-		runLogger := observability.LoggerFromContext(ctx)
-		runLogger.Warn("configurable write executor decode failed", zap.Error(err))
-		return nil, fmt.Errorf("decode write response: %w", err)
-	}
-	result["tool"] = toolName
-	if _, ok := result["status"]; !ok {
-		result["status"] = "applied"
-	}
-	return result, nil
 }
 
 // loadDotEnv 解析 KEY=VALUE 格式的 .env 文件，把未在真实环境变量中设置的项

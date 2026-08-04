@@ -121,16 +121,35 @@ func (s *Service) executeAgentStep(ctx context.Context, user identity.CurrentUse
 	return out, nil
 }
 
+// resolveDiagnosticToolName resolves a diagnostic request to a stable,
+// displayable read tool name for progress events. It prefers a capability-backed
+// resolver when the configured diagnostics runner exposes one (e.g. the
+// orchestrator delegating to a *diagnostics.Service with a
+// DiagnosticCapabilityResolver), falls back to the runner's own resolution, and
+// finally to the domain itself. It deliberately never fails: the name only drives
+// progress/timeline display, and treating a resolution miss here as an error
+// would wrongly block a diagnostic that can otherwise execute.
+func resolveDiagnosticToolName(d DiagnosticRunner, request diagnostics.Request) string {
+	if r, ok := d.(interface {
+		ResolveReadTool(diagnostics.Request) (string, error)
+	}); ok {
+		if name, err := r.ResolveReadTool(request); err == nil && name != "" {
+			return name
+		}
+	}
+	if domain := strings.TrimSpace(request.Domain); domain != "" {
+		return domain
+	}
+	return "diagnostic"
+}
+
 // agentDiagnosticStep executes a diagnostic intent in the loop, capturing the
 // package as the step output.
 func (s *Service) agentDiagnosticStep(ctx context.Context, user identity.CurrentUser, intent Intent, out StepOutcome) (StepOutcome, error) {
 	if s.diagnostics == nil {
 		return StepOutcome{}, errors.New("diagnostic service is required")
 	}
-	toolName, err := diagnostics.ResolveReadTool(*intent.Diagnostic)
-	if err != nil {
-		return StepOutcome{}, err
-	}
+	toolName := resolveDiagnosticToolName(s.diagnostics, *intent.Diagnostic)
 	pkg, err := s.diagnostics.Run(ctx, user, *intent.Diagnostic)
 	if err != nil {
 		return StepOutcome{}, err

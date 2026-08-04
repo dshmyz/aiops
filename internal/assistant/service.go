@@ -595,10 +595,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		if s.diagnostics == nil {
 			return Response{}, errors.New("diagnostic service is required")
 		}
-		toolName, err := diagnostics.ResolveReadTool(*intent.Diagnostic)
-		if err != nil {
-			return Response{}, err
-		}
+		toolName := resolveDiagnosticToolName(s.diagnostics, *intent.Diagnostic)
 		// Emit progress: tool_executing stage with the resolved tool name.
 		s.emitProgress(ProgressToolExecuting, toolName)
 		// Emit tool call start event for real-time SSE display

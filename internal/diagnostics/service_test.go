@@ -193,6 +193,7 @@ func user() identity.CurrentUser {
 
 type mockCapabilityResolver struct {
 	toolName         string
+	resourceType     string
 	schema           map[string]any
 	ok               bool
 	callDomain       string
@@ -200,20 +201,21 @@ type mockCapabilityResolver struct {
 	callOperation    string
 }
 
-func (m *mockCapabilityResolver) ResolveDiagnosticTool(domain, resourceType, operation string) (string, map[string]any, bool) {
+func (m *mockCapabilityResolver) ResolveDiagnosticTool(domain, resourceType, operation string) (string, string, map[string]any, bool) {
 	m.callDomain = domain
 	m.callResourceType = resourceType
 	m.callOperation = operation
-	return m.toolName, m.schema, m.ok
+	return m.toolName, m.resourceType, m.schema, m.ok
 }
 
 func TestServicePrefersCapabilityResolverOverHardcodedSwitch(t *testing.T) {
 	t.Parallel()
 	reads := &fakeReads{result: map[string]any{"status": "warning"}}
 	resolver := &mockCapabilityResolver{
-		toolName: "custom.domain.health.read",
-		schema:   map[string]any{"environment": "string", "name": "string"},
-		ok:       true,
+		toolName:     "custom.domain.health.read",
+		resourceType: "custom-resource",
+		schema:       map[string]any{"environment": "string", "name": "string"},
+		ok:           true,
 	}
 	service := diagnostics.NewService(reads, nil).WithCapabilityResolver(resolver)
 
@@ -253,9 +255,10 @@ func TestServiceCapabilityResolverOverridesKnownDomainTool(t *testing.T) {
 	t.Parallel()
 	reads := &fakeReads{result: map[string]any{"status": "warning"}}
 	resolver := &mockCapabilityResolver{
-		toolName: "kafka.enhanced.health.read",
-		schema:   map[string]any{"environment": "string", "name": "string"},
-		ok:       true,
+		toolName:     "kafka.enhanced.health.read",
+		resourceType: "consumer_group",
+		schema:       map[string]any{"environment": "string", "name": "string"},
+		ok:           true,
 	}
 	service := diagnostics.NewService(reads, nil).WithCapabilityResolver(resolver)
 
@@ -302,9 +305,10 @@ func TestServiceUsesCapabilityInputSchemaToBuildReadInput(t *testing.T) {
 	t.Parallel()
 	reads := &fakeReads{result: map[string]any{"status": "warning"}}
 	resolver := &mockCapabilityResolver{
-		toolName: "custom.domain.health.read",
-		schema:   map[string]any{"environment": "string", "volume": "string"},
-		ok:       true,
+		toolName:     "custom.domain.health.read",
+		resourceType: "custom-resource",
+		schema:       map[string]any{"environment": "string", "volume": "string"},
+		ok:           true,
 	}
 	service := diagnostics.NewService(reads, nil).WithCapabilityResolver(resolver)
 
