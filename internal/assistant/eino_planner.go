@@ -553,6 +553,12 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 - 当你"还需要调用另一个工具"（继续排查、验证、对比）时，输出 final_answer: false 并按正常意图填 tool_name。
 - 只有当信息已足够、不需要再调用工具时才置 true——回答完就结束，不要空转。
 
+### agent 循环收敛规则（重要）
+- **不要重复执行已运行过的工具**：如果历史[Last Intent]中某个工具已经执行过且返回值确定，就不要再次调用同一个工具。反复返回同一结果的重复调用是空转，应直接 final_answer: true 汇总。
+- **单域健康/容量/延迟检查拿到结果后立即收尾**：一次诊断请求（如 glusterfs volume 健康）执行完拿到结论（即使有 1 条 finding/建议），就 final_answer: true，除非用户明确要求连环排查或对比多个域。
+- 只有当你需要**新的信息**（另一个域、另一个资源、或排查异常的下一步证据）时才调用新工具，并且**换用与之前不同的工具**。
+- 若某工具执行失败，可根据错误换用其他候选工具，但失败次数超过预算仍无法推进时应 final_answer: true 汇总已知信息，而不是空转。
+
 ### summary（最终答复）
 - 字符串或null
 - 仅当 final_answer: true 时必填
@@ -653,6 +659,20 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
   "explanation": "已用告警工具取得生产环境告警，可以回答",
   "final_answer": true,
   "summary": "生产环境当前有 1 条告警：kafka 慢消费者（warning）。"
+}
+
+### 示例7：单域健康检查完成立即收尾（不要空转重复同一工具）
+历史：[Last Intent] diagnostic: domain=glusterfs, environment=prod, resource_type=volume, resource_name=data；结果摘要：glusterfs.volume.health.read：诊断完成：1 个观察，1 个发现，1 个建议
+用户："检查 prod glusterfs data volume 健康"
+输出：
+{
+  "tool_name": null,
+  "input": null,
+  "diagnostic": null,
+  "confidence": 0.95,
+  "explanation": "glusterfs data volume 健康检查已完成并拿到结论，无需再次调用同一工具，直接汇总",
+  "final_answer": true,
+  "summary": "prod glusterfs data volume 健康检查完成：1 个观察、1 个发现、1 个建议。"
 }
 
 ## 重要约束
