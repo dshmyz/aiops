@@ -95,13 +95,13 @@ func (o *Orchestrator) RunWithMessage(ctx context.Context, user identity.Current
 	return o.Orchestrate(ctx, user, requests)
 }
 
-// SplitMessage 从用户消息中检测涉及的诊断域，为每个域生成一个子请求。
-// baseRequest 的 Environment/Runbook 等字段被继承到每个子请求。
-// 返回 nil 表示消息中未识别到任何域；返回 1 个元素表示单域（无需编排）。
-//
-// 用 tools.MatchDomainBounded 检测，要求词边界完整：修复前用裸 strings.Contains，
-// "kafkax" 误命中 "kafka"；现 "kafkax" 不匹配。
-func (o *Orchestrator) SplitMessage(message string, base diagnostics.Request) []diagnostics.Request {
+// DomainsInText returns the ordered, de-duplicated list of middleware diagnostic
+// domains named in the message (e.g. ["kafka", "minio"] for "kafka 和 minio 健康").
+// It is the shared single source for domain detection: SplitMessage uses it to
+// fan out, and the assistant planner uses it to decide whether a diagnostic
+// intent must reach the orchestrator for splitting rather than being folded into
+// a single-domain read tool.
+func DomainsInText(message string) []string {
 	text := strings.ToLower(message)
 	found := make([]string, 0, len(knownDomains()))
 	seen := make(map[string]bool)
@@ -123,6 +123,24 @@ func (o *Orchestrator) SplitMessage(message string, base diagnostics.Request) []
 		}
 		remaining = remaining[idx+len(domain):]
 	}
+	return found
+}
+
+// SplitMessage 从用户消息中检测涉及的诊断域，为每个域生成一个子请求。
+// baseRequest 的 Environment/Runbook 等字段被继承到每个子请求。
+// 返回 nil 表示消息中未识别到任何域；返回 1 个元素表示单域（无需编排）。
+//
+// 多域扇出时（len(found) > 1），每个子请求会清空 ResourceType/ResourceName：
+// base 往往来自用户最先提到的那一个域（如 glusterfs volume），若原样继承到
+// minio/kafka 子请求，会把对方的资源类型也带成 volume，导致 diagnostics 服务以
+// ErrInvalidRequest 拒绝，编排器 best-effort 直接丢域。清空后每个域由 diagnostics
+// 服务按自身 capability 解析出正确的默认资源类型与资源名。单域消息保留 base 的
+// 资源字段（用户可能显式指定了具体资源）。
+//
+// 用 tools.MatchDomainBounded 检测，要求词边界完整：修复前用裸 strings.Contains，
+// "kafkax" 误命中 "kafka"；现 "kafkax" 不匹配。
+func (o *Orchestrator) SplitMessage(message string, base diagnostics.Request) []diagnostics.Request {
+	found := DomainsInText(message)
 	if len(found) == 0 {
 		return nil
 	}
@@ -130,6 +148,11 @@ func (o *Orchestrator) SplitMessage(message string, base diagnostics.Request) []
 	for _, domain := range found {
 		req := base
 		req.Domain = domain
+		if len(found) > 1 {
+			// 多域扇出：资源归属随域变化，清掉由首个域带过来的类型/名字。
+			req.ResourceType = ""
+			req.ResourceName = ""
+		}
 		requests = append(requests, req)
 	}
 	return requests

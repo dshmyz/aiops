@@ -91,3 +91,31 @@ func TestDiagnosticStepSummaryIsDataBearing(t *testing.T) {
 		t.Fatalf("packageSeverity = %q, want critical", sev)
 	}
 }
+
+// TestDiagnosticStepSummaryMultiDomainAggregatesAllDomains verifies that a
+// multi-domain package (an orchestrator-merged sweep) is summarized across ALL
+// domains rather than only the first — the operator-facing conclusion must
+// reflect the glusterfs→minio→kafka chain, not a single domain.
+func TestDiagnosticStepSummaryMultiDomainAggregatesAllDomains(t *testing.T) {
+	t.Parallel()
+	pkg := diagnostics.Package{
+		Environment: "prod",
+		Domains:     []string{"glusterfs", "minio", "kafka"},
+		Resources: []diagnostics.ResourceRef{
+			{Domain: "glusterfs", Type: "volume", Name: "glusterfs-volume", Environment: "prod"},
+			{Domain: "minio", Type: "bucket", Name: "minio-bucket", Environment: "prod"},
+			{Domain: "kafka", Type: "consumer_group", Name: "kafka-consumer_group", Environment: "prod"},
+		},
+		Observations: []diagnostics.Observation{
+			{Kind: "glusterfs.volume.health", Severity: diagnostics.SeverityInfo, Summary: "glusterfs 资源 glusterfs-volume 状态为 可用"},
+			{Kind: "minio.bucket.health", Severity: diagnostics.SeverityWarning, Summary: "minio 资源 minio-bucket 状态为 可用"},
+			{Kind: "kafka.consumer_lag", Severity: diagnostics.SeverityInfo, Summary: "kafka 资源 kafka-consumer_group 状态为 可用"},
+		},
+	}
+	summary := diagnosticStepSummary(pkg)
+	for _, want := range []string{"glusterfs", "minio", "kafka", "3 个域"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("diagnosticStepSummary %q missing %q — multi-domain chain not aggregated", summary, want)
+		}
+	}
+}

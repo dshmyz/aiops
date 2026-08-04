@@ -377,8 +377,37 @@ func TestCapabilityAwarePlannerRoutesWriteToDynamicCapability(t *testing.T) {
 	}
 }
 
-func registerDynamicCapacityTool(t *testing.T) {
-	t.Helper()
+// TestCapabilityAwarePlannerKeepsMultiDomainDiagnosticIntent verifies that when
+// a message names multiple middleware domains, the planner does NOT fold the
+// diagnostic into a single-domain read tool (which would bypass the
+// Orchestrator and drop the other domains). It returns the raw diagnostic
+// intent so the Orchestrator — production's diagnostics runner — can split by
+// the original message and merge. The single-domain control still resolves to a
+// concrete read tool.
+func TestCapabilityAwarePlannerKeepsMultiDomainDiagnosticIntent(t *testing.T) {
+	registerMiddlewareToolsForService(t)
+	planner := assistant.NewCapabilityAwarePlanner(assistant.DeterministicPlanner{})
+
+	intent, err := planner.Plan(context.Background(), viewer(), "检查 prod glusterfs、minio、kafka 健康", nil, assistant.PageContext{})
+	if err != nil {
+		t.Fatalf("Plan returned %v", err)
+	}
+	if intent.Diagnostic == nil {
+		t.Fatalf("intent = %+v, want a raw multi-domain diagnostic intent (not folded to a single read tool)", intent)
+	}
+
+	// Single-domain control: a one-domain query still resolves to a concrete
+	// middleware read tool (not a raw diagnostic).
+	single, err := planner.Plan(context.Background(), viewer(), "查询 prod minio archive bucket 健康 name=archive", nil, assistant.PageContext{})
+	if err != nil {
+		t.Fatalf("Plan(single) returned %v", err)
+	}
+	if single.Diagnostic != nil || single.ToolName != tools.MinIOBucketHealthRead {
+		t.Fatalf("single intent = %+v, want read tool %s", single, tools.MinIOBucketHealthRead)
+	}
+}
+
+func registerDynamicCapacityTool(t *testing.T) {	t.Helper()
 	registerDynamicTools(t, dynamicReadTool("minio.bucket.capacity.read", map[string]tools.DynamicInputField{
 		"environment": {Type: "string", Required: true},
 		"cluster":     {Type: "string", Required: true},

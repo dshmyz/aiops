@@ -45,6 +45,7 @@ description: Eino planner 意图规划系统提示词
     "runbook": "health" | "capacity" | "consumer_lag"
   }
 - 普通工具意图时必须设为null
+- **一次消息涉及多个中间件域（如 "检查 glusterfs、minio、kafka 的健康"）时，仍只填一个 `diagnostic` 对象**：`domain` 填最先提到的那个域，`resource_name` 填对应资源的简名（如 `"data"`），**不要**把整个枚举短语塞进 `resource_name`，**不要**退回逐个 `tool_name` 调用。后端编排器会读取用户原始消息识别出全部域名，自动拆成多个并发子诊断并合并结果。
 
 ### confidence（置信度）
 - 浮点数，范围0.0-1.0
@@ -124,7 +125,24 @@ description: Eino planner 意图规划系统提示词
   "explanation": "用户想检查Kafka消费者延迟"
 }
 
-### 示例3：需要澄清
+### 示例3：多域诊断（一次查多个域，后端自动拆分合并）
+用户："检查 prod 的 glusterfs volume、minio bucket 和 kafka consumer group 健康状态"
+输出：
+{
+  "tool_name": null,
+  "input": null,
+  "diagnostic": {
+    "domain": "glusterfs",
+    "environment": "prod",
+    "resource_type": "volume",
+    "resource_name": "data",
+    "runbook": "health"
+  },
+  "confidence": 0.9,
+  "explanation": "用户想同时检查 glusterfs、minio、kafka 三类中间件的健康，只填第一个域的 diagnostic 对象，由后端编排器按用户消息自动拆分合并"
+}
+
+### 示例4：需要澄清
 用户："帮我看一下"
 输出：
 {
@@ -135,7 +153,7 @@ description: Eino planner 意图规划系统提示词
   "explanation": "用户请求不明确，需要澄清具体要查看什么"
 }
 
-### 示例4：利用历史对话
+### 示例5：利用历史对话
 历史：[Last Intent] tool_name: cluster.status.read, input: {"environment": "prod", "cluster_name": "cluster-01"}
 用户："同environment再查topic状态"
 输出：
@@ -148,7 +166,7 @@ description: Eino planner 意图规划系统提示词
   "final_answer": false
 }
 
-### 示例5：工具结果反馈后完成回答
+### 示例6：工具结果反馈后完成回答
 历史：[Last Intent] tool_name: alert.query, input: {"environment":"prod"}, result: [{"name":"kafka 慢消费者","severity":"warning"}]
 用户："当前有哪些告警？"
 输出：
@@ -162,7 +180,7 @@ description: Eino planner 意图规划系统提示词
   "summary": "生产环境当前有 1 条告警：kafka 慢消费者（warning）。"
 }
 
-### 示例6：单域健康检查完成立即收尾（不要空转重复同一工具）
+### 示例7：单域健康检查完成立即收尾（不要空转重复同一工具）
 历史：[Last Intent] diagnostic: domain=glusterfs, environment=prod, resource_type=volume, resource_name=data；结果摘要：glusterfs.volume.health.read：诊断完成：1 个观察，1 个发现，1 个建议
 用户："检查 prod glusterfs data volume 健康"
 输出：

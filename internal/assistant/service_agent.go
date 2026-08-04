@@ -217,8 +217,23 @@ func stepReadSummary(toolName string, answer map[string]any) string {
 // (severity + resource + observation) instead of a generic count. This matters
 // for loop convergence: a single-domain diagnostic that already answered the
 // question must read as conclusive to the planner.
+//
+// For a multi-domain package (an orchestrator-merged sweep across glusterfs /
+// minio / kafka), it enumerates each domain's result so the operator-facing
+// conclusion reflects all domains, not just the first.
 func diagnosticStepSummary(pkg diagnostics.Package) string {
 	sev := packageSeverity(pkg)
+	if len(pkg.Domains) > 1 {
+		parts := make([]string, 0, len(pkg.Observations))
+		for _, obs := range pkg.Observations {
+			parts = append(parts, obs.Summary)
+		}
+		joined := strings.Join(parts, "；")
+		if joined != "" {
+			return fmt.Sprintf("诊断完成（%d 个域：%s）：%s", len(pkg.Domains), strings.Join(pkg.Domains, ","), joined)
+		}
+		return fmt.Sprintf("诊断完成（%d 个域：%s）：综合状态为 %s", len(pkg.Domains), strings.Join(pkg.Domains, ","), sev)
+	}
 	var resource string
 	if len(pkg.Resources) > 0 {
 		r := pkg.Resources[0]

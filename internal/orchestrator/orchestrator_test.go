@@ -221,6 +221,60 @@ func TestSplitMessageSingleDomainReturnsOne(t *testing.T) {
 	}
 }
 
+// TestSplitMessageMultiDomainClearsInheritedResource 是回归测试：当 base
+// 诊断请求携带了某一域（如 glusterfs）的资源类型/名字，多域扇出到 minio/kafka
+// 时，必须清空这些字段，否则 diagnostics 服务会把 volume 资源类型套到 minio/
+// kafka 上并以 ErrInvalidRequest 拒绝，编排器 best-effort 丢域，只剩首个域。
+func TestSplitMessageMultiDomainClearsInheritedResource(t *testing.T) {
+	t.Parallel()
+	orch := orchestrator.New(nil, 3, time.Now)
+
+	// base 来自用户最先提到的 glusterfs 域：携带 volume / glusterfs-volume。
+	base := diagnostics.Request{
+		Environment:  "prod",
+		Runbook:      "health",
+		ResourceType: "volume",
+		ResourceName: "glusterfs-volume",
+	}
+	requests := orch.SplitMessage("检查 prod 环境的 glusterfs volume、minio bucket 和 kafka consumer group 健康状态", base)
+
+	if len(requests) != 3 {
+		t.Fatalf("SplitMessage returned %d requests, want 3", len(requests))
+	}
+	for _, req := range requests {
+		if req.ResourceType != "" || req.ResourceName != "" {
+			t.Fatalf("domain %q inherited resource (type=%q name=%q), want cleared on multi-domain fan-out",
+				req.Domain, req.ResourceType, req.ResourceName)
+		}
+		if req.Environment != "prod" || req.Runbook != "health" {
+			t.Fatalf("domain %q lost inherited context (env=%q runbook=%q)", req.Domain, req.Environment, req.Runbook)
+		}
+	}
+}
+
+// TestSplitMessageSingleDomainKeepsInheritedResource 验证单域消息保留 base 的
+// 资源字段（用户可能显式指定了具体资源），不被清空。
+func TestSplitMessageSingleDomainKeepsInheritedResource(t *testing.T) {
+	t.Parallel()
+	orch := orchestrator.New(nil, 3, time.Now)
+
+	base := diagnostics.Request{
+		Environment:  "prod",
+		Runbook:      "health",
+		ResourceType: "volume",
+		ResourceName: "data",
+	}
+	requests := orch.SplitMessage("检查 prod glusterfs data volume 健康状态", base)
+
+	if len(requests) != 1 {
+		t.Fatalf("SplitMessage returned %d requests, want 1", len(requests))
+	}
+	if requests[0].ResourceType != "volume" || requests[0].ResourceName != "data" {
+		t.Fatalf("single-domain resource = (type=%q name=%q), want preserved (volume/data)",
+			requests[0].ResourceType, requests[0].ResourceName)
+	}
+}
+
 // TestSplitMessageNoDomainReturnsEmpty verifies that a message with no
 // recognized domain returns an empty slice.
 func TestSplitMessageNoDomainReturnsEmpty(t *testing.T) {

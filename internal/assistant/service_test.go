@@ -1414,6 +1414,85 @@ func TestAssistantOrchestratorIntegrationSplitsMultiDomainMessage(t *testing.T) 
 	}
 }
 
+// TestAssistantMultiDomainChainRunStream verifies the full multi-domain
+// diagnostic chain through the streaming agent-loop path with production
+// wiring (orchestrator wrapping the diagnostics runner, exactly as main.go does).
+//
+// A single diagnostic intent whose user message names glusterfs / minio / kafka
+// must be fanned out by the orchestrator into per-domain concurrent sub-runs,
+// merged into one package whose Domains carry all three, and surfaced in the
+// terminal answer. This proves the glusterfs→minio→kafka chain runs and
+// aggregates — previously only exercised at the unit / single-domain level.
+func TestAssistantMultiDomainChainRunStream(t *testing.T) {
+	runner := &recordingRunner{
+		packages: map[string]diagnostics.Package{
+			"glusterfs": {ID: "diag-glusterfs", Environment: "prod", Domains: []string{"glusterfs"}, Observations: []diagnostics.Observation{{ID: "obs-1", Severity: diagnostics.SeverityInfo, Summary: "volume 健康"}}, CreatedAt: time.Date(2026, time.July, 31, 10, 0, 0, 0, time.UTC)},
+			"minio":     {ID: "diag-minio", Environment: "prod", Domains: []string{"minio"}, Observations: []diagnostics.Observation{{ID: "obs-2", Severity: diagnostics.SeverityWarning, Summary: "bucket 容量接近阈值"}}, CreatedAt: time.Date(2026, time.July, 31, 10, 0, 0, 0, time.UTC)},
+			"kafka":     {ID: "diag-kafka", Environment: "prod", Domains: []string{"kafka"}, Observations: []diagnostics.Observation{{ID: "obs-3", Severity: diagnostics.SeverityInfo, Summary: "consumer lag 正常"}}, CreatedAt: time.Date(2026, time.July, 31, 10, 0, 0, 0, time.UTC)},
+		},
+	}
+	orch := orchestrator.New(runner, 3, func() time.Time { return time.Date(2026, time.July, 31, 10, 0, 0, 0, time.UTC) })
+
+	// Agent-capable planner: one diagnostic intent + a final answer. The message
+	// names all three domains so the orchestrator fans out the single diagnostic
+	// step into glusterfs/minio/kafka sub-runs, mirroring EinoPlanner's real
+	// multi-domain behavior once the LLM sees the combined query.
+	planner := &agentFakePlanner{intents: []assistant.Intent{
+		{Diagnostic: &diagnostics.Request{Domain: "kafka", Environment: "prod", Runbook: "health"}},
+		doneIntent("glusterfs、minio、kafka 均已检查：minio 容量接近阈值，其余正常"),
+	}}
+	service, _ := newAssistant(t, planner)
+	service.WithAgentLoop(true)
+	service = service.WithDiagnostics(orch)
+
+	events, err := service.HandleMessageStream(context.Background(), admin(), "检查 prod glusterfs、minio、kafka 健康状态", "", assistant.PageContext{})
+	if err != nil {
+		t.Fatalf("HandleMessageStream start: %v", err)
+	}
+	var resp *assistant.Response
+	var steps []assistant.StepEvent
+	done := false
+	for ev := range events {
+		if ev.Step != nil {
+			steps = append(steps, *ev.Step)
+		}
+		if ev.Done {
+			done = true
+			resp = ev.Response
+		}
+	}
+	if !done || resp == nil {
+		t.Fatalf("done=%v resp=%+v, want a terminal answer", done, resp)
+	}
+	if resp.Type != "answer" {
+		t.Fatalf("response type = %q, want an answer summarizing the aggregated chain", resp.Type)
+	}
+
+	// The orchestrator must have fanned out to all three domains.
+	got := runner.domains()
+	for _, wantDomain := range []string{"glusterfs", "minio", "kafka"} {
+		if !containsString(got, wantDomain) {
+			t.Fatalf("runner domains = %v, want to include %s — multi-domain chain did not fan out", got, wantDomain)
+		}
+	}
+
+	// The single diagnostic step's output must carry the merged package's domains
+	// (aggregated across the three sub-runs), proving the chain results are summed
+	// into one conclusion the planner/final answer can cite.
+	if len(steps) != 1 {
+		t.Fatalf("step events = %d, want 1 (single diagnostic step fanned out internally by the orchestrator)", len(steps))
+	}
+	merged, _ := steps[0].Output["domains"].([]string)
+	for _, wantDomain := range []string{"glusterfs", "minio", "kafka"} {
+		if !containsString(merged, wantDomain) {
+			t.Fatalf("merged step domains = %v, want to include %s — chain results not aggregated", merged, wantDomain)
+		}
+	}
+	if !strings.Contains(resp.Message, "minio") {
+		t.Fatalf("final answer = %q, want the chain summary to reference the findings", resp.Message)
+	}
+}
+
 // --- IntentType 分类（借鉴-2）测试 ---
 
 func TestClassifyIntent(t *testing.T) {

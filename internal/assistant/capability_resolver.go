@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
+	"github.com/gracegaoya/ai-operations-copilot/internal/orchestrator"
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
@@ -87,6 +88,13 @@ func (p CapabilityAwarePlanner) Plan(ctx context.Context, user identity.CurrentU
 			return detIntent, nil
 		}
 		// 诊断意图：检查是否有匹配该域名的动态能力
+		if isMultiDomainDiagnostic(cleanMessage) {
+			// 一次消息涉及多个中间件域（如 "检查 glusterfs、minio、kafka"）：
+			// 不把它折叠成单一域的读工具（那会绕过编排器、漏掉其它域），而是
+			// 原样返回 diagnostic 意图。production 的诊断 runner 是
+			// Orchestrator，会读取用户原始消息识别全部域名，并发拆分合并。
+			return detIntent, nil
+		}
 		if intent, matched, err := resolveDynamicCapabilityForDomain(ctx, cleanMessage, detIntent.Diagnostic.Domain, p.paramExtractor); matched {
 			return intent, err
 		}
@@ -112,6 +120,18 @@ func (p CapabilityAwarePlanner) Plan(ctx context.Context, user identity.CurrentU
 		}
 	}
 	return p.fallback.Plan(ctx, user, message, history, pageContext)
+}
+
+// isMultiDomainDiagnostic reports whether the user message names multiple
+// middleware diagnostic domains (e.g. "检查 glusterfs、minio、kafka"). When it
+// does, the planner must not fold the diagnostic into a single-domain read tool
+// (that would bypass the Orchestrator and drop the other domains); instead it
+// keeps the raw diagnostic intent and lets the Orchestrator, which reads the
+// original message, split into per-domain concurrent sub-requests and merge.
+func isMultiDomainDiagnostic(message string) bool {
+	// Reuse the orchestrator's domain scanner so domain-detection stays single
+	// sourced; a request is "multi-domain" when the message names 2+ domains.
+	return len(orchestrator.DomainsInText(message)) > 1
 }
 
 // resolveDynamicCapabilityForDomain 尝试匹配指定域名的动态能力。
