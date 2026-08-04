@@ -30,6 +30,12 @@ func NewActionAwarePlanner(inner Planner, router *ActionRouter) *ActionAwarePlan
 	return &ActionAwarePlanner{inner: inner, router: router}
 }
 
+// UnwrapPlanner exposes the wrapped inner planner so capability probing (e.g.
+// the agent loop's PlanStream detection) can look through this wrapper at the
+// planner chain beneath it. The wrapper is a transparent pass-through on top of
+// inner for non-Action messages, so the innermost planner drives streaming.
+func (p *ActionAwarePlanner) UnwrapPlanner() Planner { return p.inner }
+
 // Plan 先路由 Action，再把 PromptAugment 注入到消息前面，最后委托给底层 Planner。
 func (p *ActionAwarePlanner) Plan(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) (Intent, error) {
 	augment, err := p.routeAction(ctx, message, pageContext)

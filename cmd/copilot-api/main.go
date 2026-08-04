@@ -251,7 +251,7 @@ func main() {
 	// 启用自治 agent 循环（多步链式执行 + 结果反馈重规划）。只有 LLM planner
 	// （eino-openai）支持；确定性 planner 忽略历史，不启用。循环内只读工具自主
 	// 链式执行，写工具在建 plan/审批处停下交还给人，绝不自动执行写。
-	if plannerMode == "eino-openai" {
+	if strings.HasPrefix(plannerMode, "eino-openai") {
 		assistantService = assistantService.WithAgentLoop(true)
 	}
 	// Wire second-stage response formatter. eino-openai 模式下 formatter 是

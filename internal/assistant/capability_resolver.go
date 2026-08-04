@@ -59,6 +59,12 @@ func NewCapabilityAwarePlannerWithExtractor(fallback Planner, extractor ParamExt
 	return CapabilityAwarePlanner{fallback: fallback, paramExtractor: extractor}
 }
 
+// UnwrapPlanner exposes the wrapped inner planner so capability probing (e.g.
+// the agent loop's PlanStream detection) can look through this wrapper at the
+// planner chain beneath it. The wrapper's own Plan delegates to fallback when
+// no dynamic capability matches, so the innermost planner drives streaming.
+func (p CapabilityAwarePlanner) UnwrapPlanner() Planner { return p.fallback }
+
 func (p CapabilityAwarePlanner) Plan(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) (Intent, error) {
 	// 剥离 ActionAwarePlanner 注入的 Action/Skill SOP 提示。注入文本本身含有
 	// "健康"/"kafka"/"glusterfs" 等关键词，若不剥离，关键词匹配看到的是 SOP

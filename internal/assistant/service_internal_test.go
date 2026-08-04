@@ -1,7 +1,10 @@
 package assistant
 
 import (
+	"context"
 	"testing"
+
+	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
 )
 
 func TestAssistantTurnContent(t *testing.T) {
@@ -61,5 +64,58 @@ func TestAssistantTurnContent(t *testing.T) {
 				t.Fatalf("assistantTurnContent() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// fakeStreamingPlanner implements the agentPlanner interface (Planner +
+// PlanStream) as a stand-in for *EinoPlanner at the bottom of the wrapper chain.
+type fakeStreamingPlanner struct{}
+
+func (*fakeStreamingPlanner) Plan(context.Context, identity.CurrentUser, string, []Turn, PageContext) (Intent, error) {
+	return Intent{}, nil
+}
+
+func (*fakeStreamingPlanner) PlanStream(context.Context, identity.CurrentUser, string, []Turn, PageContext) (<-chan StreamEvent, error) {
+	events := make(chan StreamEvent, 1)
+	events <- StreamEvent{Done: true}
+	close(events)
+	return events, nil
+}
+
+// TestAgentPlannerCapableUnwrapsChain verifies agentPlannerCapable looks through
+// the production wrapper chain (ActionAwarePlanner -> CapabilityAwarePlanner ->
+// *EinoPlanner) to the innermost PlanStream-capable planner, and stays false for
+// planners that never reach a streaming planner.
+func TestAgentPlannerCapableUnwrapsChain(t *testing.T) {
+	t.Parallel()
+
+	// A minimal PlanStream-capable stand-in (agentPlanner) at the bottom of the
+	// chain, mirroring *EinoPlanner's role in production wiring.
+	streaming := &fakeStreamingPlanner{}
+
+	// Production chain: ActionAwarePlanner wraps CapabilityAwarePlanner wraps the
+	// streaming planner. The inner planners do not implement PlanStream
+	// themselves, so the check must unwrap to find it.
+	capability := NewCapabilityAwarePlanner(streaming)
+	action := NewActionAwarePlanner(capability, nil)
+	if !agentPlannerCapable(action) {
+		t.Fatal("agentPlannerCapable(production wrapper chain) = false, want true")
+	}
+	// Capability-only chain (no Action wrapper) unwraps too.
+	if !agentPlannerCapable(capability) {
+		t.Fatal("agentPlannerCapable(capability planner) = false, want true")
+	}
+	// Bare streaming planner is directly capable.
+	if !agentPlannerCapable(streaming) {
+		t.Fatal("agentPlannerCapable(raw streaming planner) = false, want true")
+	}
+	// Deterministic planner never unwraps to a streaming planner.
+	var det Planner = DeterministicPlanner{}
+	if agentPlannerCapable(det) {
+		t.Fatal("agentPlannerCapable(deterministic planner) = true, want false")
+	}
+	// Wrapper around a non-streaming planner stays incapable.
+	if agentPlannerCapable(NewActionAwarePlanner(DeterministicPlanner{}, nil)) {
+		t.Fatal("agentPlannerCapable(wrapper around deterministic planner) = true, want false")
 	}
 }

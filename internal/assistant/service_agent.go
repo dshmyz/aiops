@@ -42,9 +42,22 @@ func (s *Service) agentEnabled() bool {
 	return s.agentLoopEnabled && agentPlannerCapable(s.planner)
 }
 
+// plannerUnwrapper lets a wrapper planner (CapabilityAwarePlanner,
+// ActionAwarePlanner) expose the planner it delegates to, so capability probing
+// can look through the wrapper chain at the innermost planner.
+type plannerUnwrapper interface{ UnwrapPlanner() Planner }
+
 func agentPlannerCapable(planner Planner) bool {
-	_, ok := planner.(agentPlanner)
-	return ok
+	for {
+		if _, ok := planner.(agentPlanner); ok {
+			return true
+		}
+		u, ok := planner.(plannerUnwrapper)
+		if !ok || u.UnwrapPlanner() == nil {
+			return false
+		}
+		planner = u.UnwrapPlanner()
+	}
 }
 
 // executeAgentStep is the loop's execution callback. It resolves one planner
