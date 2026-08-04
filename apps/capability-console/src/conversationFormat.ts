@@ -1,4 +1,4 @@
-export type ResponseTypeVariant = 'answer' | 'clarification' | 'confirmation' | 'execution' | 'default';
+export type ResponseTypeVariant = 'answer' | 'converged' | 'clarification' | 'confirmation' | 'execution' | 'default';
 
 export interface ResponseTypeDisplay {
   label: string;
@@ -7,6 +7,7 @@ export interface ResponseTypeDisplay {
 
 const RESPONSE_TYPE_MAP: Record<string, ResponseTypeDisplay> = {
   answer: { label: '答案', variant: 'answer' },
+  answer_converged: { label: '兜底总结', variant: 'converged' },
   clarification_needed: { label: '待补充参数', variant: 'clarification' },
   confirmation_required: { label: '待审批', variant: 'confirmation' },
   execution_result: { label: '执行结果', variant: 'execution' },

@@ -23,6 +23,13 @@ import (
 // audited without re-running the underlying capability.
 const responseTypeToolStep = "tool_step"
 
+// responseTypeFallbackAnswer marks a terminal answer that was synthesized by the
+// loop's fallback (maxSteps exhaustion or repeated-read convergence) rather than
+// authored as a model final_answer. Persisted turns and the streamed Response use
+// it so the frontend can badge it distinctly: the operator must not mistake it for
+// completed multi-step reasoning.
+const responseTypeFallbackAnswer = "answer_converged"
+
 // agentPlanner is the subset of Planner the loop's streaming wiring needs. A
 // planner that implements PlanStream (e.g. *EinoPlanner) supports the
 // multi-step agent loop; the deterministic planner does not and keeps the
@@ -339,16 +346,19 @@ func handoffResponse(out *StepOutcome) Response {
 // stepsAnswer builds a fallback terminal answer from the accumulated advisory
 // steps (used when the loop exhausts maxSteps without a final_answer, or to
 // enrich a Done answer). Each step's summary is listed so the operator can see
-// what was checked.
+// what was checked. The wording is deliberately honest: this is a synthesized
+// summary of what was executed, NOT a model-authored final conclusion, and the
+// operator should treat it as provisional (repeated-read / maxSteps convergence
+// often means the diagnosis did not reach a definitive verdict).
 func stepsAnswer(run *AgentRun) string {
 	if run.FinalAnswer != "" {
 		return run.FinalAnswer
 	}
 	var b strings.Builder
 	if len(run.Steps) == 0 {
-		return "已执行若干检查，但未能给出明确结论。"
+		return "未能给出明确结论：本轮未执行到任何检查。请补充信息或换个问法重试。"
 	}
-	b.WriteString("已完成以下检查：")
+	b.WriteString("未达到明确的最终结论。已执行以下检查，结论仅供参考（可继续追问）：")
 	for i, out := range run.Steps {
 		if out.Kind != StepAdvisory {
 			continue

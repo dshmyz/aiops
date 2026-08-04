@@ -122,7 +122,24 @@ user 消息 turn
   结果（跨轮引用）。
 - executive / clarification 步不写 `tool_step`（写步的终态响应本身已持久化）。
 
-## 审计步骤身份
+## 兜底收敛标记（answer_converged）
+
+**目标**：让操作员一眼区分「模型正常给出的 `final_answer`」与「未走完多步推理、
+由系统合成的兜底结论」，避免把兜底误当成完整推理结果。
+
+两条兜底路径（convergence backstop、maxSteps 耗尽）在 `AgentRun` 上置
+`Fallback=true`，`service.go` 据此把终态 `Response.Type` 设为 `answer_converged`
+（区别于正常 `answer`）：
+
+- 模型 `final_answer`（TerminalDone 且 Fallback=false）→ `response_type='answer'`
+- 重复读收敛 / maxSteps 耗尽（Fallback=true）→ `response_type='answer_converged'`，
+  `message` 用诚实措辞「未达到明确的最终结论。已执行以下检查，结论仅供参考（可继续
+  追问）」，逐条列出已执行的步骤摘要。
+
+前端把 `answer_converged` 打为「兜底总结」徽标（converged 变体，琥珀色警告系），
+状态栏显示「兜底总结（未完整推理）」，让操作员知道这是系统合成的、非模型的最终
+结论，可继续追问。
+
 
 循环内每次只读调用会带步骤身份进审计：`execution.AgentStep{StepIndex, Conversation}`
 经 context 传递（定义在 `internal/execution`，避免 import cycle），

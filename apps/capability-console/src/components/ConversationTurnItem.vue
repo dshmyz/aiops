@@ -429,6 +429,11 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
   color: var(--color-success);
 }
 
+.conversation-turn-badge.variant-converged {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
 .conversation-turn-badge.variant-clarification {
   background: var(--color-warning-soft);
   color: var(--color-warning);

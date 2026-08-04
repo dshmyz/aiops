@@ -453,14 +453,22 @@ func (s *Service) runAgentLoopInStream(ctx context.Context, events chan<- Stream
 	var resp Response
 	switch run.Reason {
 	case TerminalDone:
-		resp = Response{Type: "answer", Answer: map[string]any{"message": run.FinalAnswer}, Message: run.FinalAnswer}
+		// A genuine model final_answer is only TerminalDone without Fallback; the
+		// repeated-read convergence backstop also lands on TerminalDone but sets
+		// Fallback, so it routes to the distinct fallback marker below.
+		if run.Fallback {
+			answer := stepsAnswer(run)
+			resp = Response{Type: responseTypeFallbackAnswer, Message: answer, Answer: map[string]any{"message": answer}}
+		} else {
+			resp = Response{Type: "answer", Answer: map[string]any{"message": run.FinalAnswer}, Message: run.FinalAnswer}
+		}
 	case TerminalClarification:
 		resp = Response{Type: "clarification_needed", Message: run.Clarified}
 	case TerminalHandoff:
 		resp = handoffResponse(run.Handoff)
 	default: // TerminalMaxSteps
 		answer := stepsAnswer(run)
-		resp = Response{Type: "answer", Message: answer, Answer: map[string]any{"message": answer}}
+		resp = Response{Type: responseTypeFallbackAnswer, Message: answer, Answer: map[string]any{"message": answer}}
 	}
 	if hasConversation {
 		// Persist the full step-level audit trail: each tool step as a chained

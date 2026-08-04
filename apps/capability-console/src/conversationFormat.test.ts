@@ -45,6 +45,13 @@ describe('formatResponseType', () => {
     expect(formatResponseType('answer')).toEqual({ label: '答案', variant: 'answer' });
   });
 
+  test('maps answer_converged to 兜底总结 and converged variant', () => {
+    expect(formatResponseType('answer_converged')).toEqual({
+      label: '兜底总结',
+      variant: 'converged',
+    });
+  });
+
   test('maps clarification_needed to 待补充参数 and clarification variant', () => {
     expect(formatResponseType('clarification_needed')).toEqual({
       label: '待补充参数',

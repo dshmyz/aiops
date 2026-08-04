@@ -255,6 +255,18 @@ export interface ExecutionResult {
 export type AssistantConsoleResponse =
   | { type: 'answer'; tool: string; answer: Record<string, unknown>; diagnostic?: DiagnosticPackage; trace?: AssistantTrace; blocks?: Block[]; conversation_id?: string; turn_id?: string }
   | {
+      /** 兜底/收敛结论：agent 循环未得到模型 final_answer，由系统根据已执行步骤合成。
+       *  message 为面向操作员的中文兜底总结；后端持久化为 answer_converged，前端据此打标。 */
+      type: 'answer_converged';
+      message: string;
+      answer?: Record<string, unknown>;
+      tool?: string;
+      trace?: AssistantTrace;
+      blocks?: Block[];
+      conversation_id?: string;
+      turn_id?: string;
+    }
+  | {
       type: 'confirmation_required';
       tool: string;
       plan_id: string;

@@ -89,6 +89,13 @@ type AgentRun struct {
 	FinalAnswer string // planner's final_answer summary (TerminalDone)
 	Clarified   string // clarification message (TerminalClarification)
 	Handoff     *StepOutcome
+	// Fallback is set when the loop concluded WITHOUT the planner emitting a
+	// final_answer — it ran out of steps (TerminalMaxSteps) or hit a repeated-read
+	// convergence backstop. In both cases FinalAnswer is a synthesized summary of
+	// the executed steps, not a model-authored conclusion; the wiring surfaces this
+	// distinctly so the operator does not mistake it for completed multi-step
+	// reasoning.
+	Fallback bool
 
 	// History is the full agent turn slice (seeded history + per-step feedback
 	// turns) so the wiring can persist tool steps to the conversation.
@@ -212,6 +219,7 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 		if key, ok := intentAdvisoryKey(intent); ok {
 			if _, dup := seen[key]; dup && !isWriteIntent(intent) {
 				run.Reason = TerminalDone
+				run.Fallback = true // synthesized summary, not a model final_answer
 				run.FinalAnswer = stepsAnswer(run)
 				return run
 			}
@@ -242,6 +250,7 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 		run.History = append(run.History, feedbackTurn(intent, out))
 	}
 	run.Reason = TerminalMaxSteps
+	run.Fallback = true // ran out of steps without a final_answer; summary is synthesized
 	return run
 }
 

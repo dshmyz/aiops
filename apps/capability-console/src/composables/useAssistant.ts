@@ -20,6 +20,7 @@ export type AssistantDetailStatus =
   | '需要审批'
   | '已返回答案'
   | '执行结果'
+  | '兜底总结（未完整推理）'
   | '响应详情'
   | '已停止';
 
@@ -103,6 +104,12 @@ function assistantResponseSummary(response: unknown): string {
     }
     return fallback;
   }
+  if (response.type === 'answer_converged') {
+    // 兜底/收敛结论：展示具体 message（由后端 stepsAnswer 生成），并加前缀
+    // 让操作员一眼看出这不是模型给出的最终结论。
+    const message = stringValue((response as Record<string, unknown>).message);
+    return message ? `[兜底总结] ${message}` : fallback;
+  }
   if (response.type === 'clarification_needed') {
     return stringValue(response.message) || fallback;
   }
@@ -142,6 +149,9 @@ function assistantResponseStatus(response: unknown): AssistantDetailStatus {
   }
   if (response.type === 'answer') {
     return '已返回答案';
+  }
+  if (response.type === 'answer_converged') {
+    return '兜底总结（未完整推理）';
   }
   if (response.type === 'clarification_needed') {
     return '需要补充参数';

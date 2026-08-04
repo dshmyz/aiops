@@ -3,6 +3,7 @@ package assistant_test
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -92,6 +93,80 @@ func TestServiceHandleMessageStreamRunsAgentLoop(t *testing.T) {
 	}
 	if resp == nil || resp.Type != "answer" || resp.Message != "prod 集群健康，无异常" {
 		t.Fatalf("response = %+v, want final_answer answer", resp)
+	}
+}
+
+// TestServiceHandleMessageStreamConvergenceEmitsFallbackMarker drives a
+// repeated-read convergence backstop: the planner sends the same advisory read
+// twice, the loop collapses the duplicate and concludes. Because the terminal
+// answer is synthesized (not a model final_answer), the response must be tagged
+// answer_converged so the operator never mistakes it for completed multi-step
+// reasoning.
+func TestServiceHandleMessageStreamConvergenceEmitsFallbackMarker(t *testing.T) {
+	planner := &agentFakePlanner{intents: []assistant.Intent{
+		readIntent(),
+		readIntent(), // identical read -> convergence backstop
+	}}
+	service, _ := newAssistant(t, planner)
+	service.WithAgentLoop(true)
+
+	events, err := service.HandleMessageStream(context.Background(), viewer(), "查一下 prod 集群", "", assistant.PageContext{})
+	if err != nil {
+		t.Fatalf("HandleMessageStream start: %v", err)
+	}
+	var resp *assistant.Response
+	done := false
+	for ev := range events {
+		if ev.Done {
+			done = true
+			resp = ev.Response
+		}
+	}
+	if !done || resp == nil {
+		t.Fatalf("done=%v resp=%+v, want a terminal answer_converged", done, resp)
+	}
+	if resp.Type != "answer_converged" {
+		t.Fatalf("response type = %q, want answer_converged (converged fallback, not a model final_answer)", resp.Type)
+	}
+	if !strings.Contains(resp.Message, "未达到明确的最终结论") {
+		t.Fatalf("message = %q, want honest provisional wording", resp.Message)
+	}
+}
+
+// TestServiceHandleMessageStreamMaxStepsEmitsFallbackMarker drives a maxSteps
+// exhaustion: with a 2-step budget the loop runs out before the planner ever
+// emits a final_answer, so the synthesized summary must surface as
+// answer_converged.
+func TestServiceHandleMessageStreamMaxStepsEmitsFallbackMarker(t *testing.T) {
+	t.Setenv("COPILOT_ASSISTANT_MAX_STEPS", "2")
+	planner := &agentFakePlanner{intents: []assistant.Intent{
+		readIntent(),
+		readIntentOn("alert.query", map[string]any{"environment": "prod"}),
+		readIntentOn("event.query", map[string]any{"environment": "prod"}),
+	}}
+	service, _ := newAssistant(t, planner)
+	service.WithAgentLoop(true)
+
+	events, err := service.HandleMessageStream(context.Background(), viewer(), "给我全面排查", "", assistant.PageContext{})
+	if err != nil {
+		t.Fatalf("HandleMessageStream start: %v", err)
+	}
+	var resp *assistant.Response
+	done := false
+	for ev := range events {
+		if ev.Done {
+			done = true
+			resp = ev.Response
+		}
+	}
+	if !done || resp == nil {
+		t.Fatalf("done=%v resp=%+v, want a terminal answer_converged", done, resp)
+	}
+	if resp.Type != "answer_converged" {
+		t.Fatalf("response type = %q, want answer_converged (maxSteps exhaustion)", resp.Type)
+	}
+	if !strings.Contains(resp.Message, "未达到明确的最终结论") {
+		t.Fatalf("message = %q, want honest provisional wording", resp.Message)
 	}
 }
 
