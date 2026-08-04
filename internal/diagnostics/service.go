@@ -160,8 +160,8 @@ func (s *Service) validateRequest(request Request) (validatedRequest, error) {
 	}
 
 	runbook := strings.TrimSpace(request.Runbook)
-	if runbook != "" && runbook != "health" {
-		return validatedRequest{}, fmt.Errorf("%w: runbook 必须为空或 health", ErrInvalidRequest)
+	if !validRunbook(runbook) {
+		return validatedRequest{}, fmt.Errorf("%w: runbook 必须为空、health、capacity 或 consumer_lag", ErrInvalidRequest)
 	}
 
 	if requestedResourceType != "" && requestedResourceType != resourceType {
@@ -260,6 +260,20 @@ func resolveRunbook(domain string) (string, string, error) {
 		return tools.KafkaConsumerLagRead, "consumer_group", nil
 	default:
 		return "", "", fmt.Errorf("%w: %q 不支持的领域", ErrUnsupportedDomain, domain)
+	}
+}
+
+// validRunbook reports whether the diagnostic runbook is one of the values the
+// Eino planner schema may emit (see eino_planner.go prompt:
+// "runbook": "health" | "capacity" | "consumer_lag"). Empty is allowed for
+// backward compatibility. Each runbook still resolves to the domain's read tool
+// via resolveRunbookCapability/resolveRunbook.
+func validRunbook(runbook string) bool {
+	switch runbook {
+	case "", "health", "capacity", "consumer_lag":
+		return true
+	default:
+		return false
 	}
 }
 

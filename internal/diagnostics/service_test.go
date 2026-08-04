@@ -52,6 +52,37 @@ func TestServiceRejectsUnknownDomain(t *testing.T) {
 	}
 }
 
+func TestServiceAcceptsSchemaRunbookValues(t *testing.T) {
+	t.Parallel()
+	// The Eino planner schema (eino_planner.go prompt) advertises runbook
+	// health | capacity | consumer_lag. Each maps to the same domain read tool;
+	// all three must be accepted instead of rejected.
+	cases := []struct {
+		name    string
+		request diagnostics.Request
+	}{
+		{name: "capacity", request: diagnostics.Request{Domain: "minio", Environment: "prod", ResourceType: "bucket", ResourceName: "archive", Runbook: "capacity"}},
+		{name: "consumer_lag", request: diagnostics.Request{Domain: "kafka", Environment: "prod", ResourceType: "consumer_group", ResourceName: "orders", Runbook: "consumer_lag"}},
+		{name: "empty", request: diagnostics.Request{Domain: "minio", Environment: "prod", ResourceType: "bucket", ResourceName: "archive", Runbook: ""}},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			reads := &fakeReads{result: map[string]any{"status": "ok"}}
+			service := diagnostics.NewService(reads, nil)
+
+			_, err := service.Run(context.Background(), user(), testCase.request)
+
+			if err != nil {
+				t.Fatalf("Run returned %v, want accepted", err)
+			}
+			if reads.calls != 1 {
+				t.Fatalf("read calls = %d, want 1", reads.calls)
+			}
+		})
+	}
+}
+
 func TestServiceTruncatesLargeReadResultBeforePackaging(t *testing.T) {
 	t.Parallel()
 	reads := &fakeReads{result: map[string]any{
