@@ -315,10 +315,16 @@ func (failingPlanner) Plan(context.Context, identity.CurrentUser, string, []assi
 
 // TestCapabilityAwarePlannerPrefersStaticToolOverDynamic verifies that a message
 // hitting a static tool keyword (e.g. 告警) is resolved by the deterministic
-// planner even when a dynamic capability's loose name-token matching would also
+// The planner must keep preferring the static AlertQuery tool over a dynamic
+// capability even when a dynamic capability's loose name-token matching would also
 // claim it (Bug1: 动态能力匹配误抢静态工具).
+//
+// NOTE: intentionally NOT t.Parallel(). registerDynamicTools resets the
+// process-global dynamic-tool registry, which would wipe the middleware tools
+// (topic.retention.set etc.) out from under the other t.Parallel() tests that
+// route through newAssistantWithStore. Keep it serial with its reset-using
+// siblings (see TestCapabilityAwarePlannerRoutesWriteToDynamicCapability).
 func TestCapabilityAwarePlannerPrefersStaticToolOverDynamic(t *testing.T) {
-	t.Parallel()
 	registerDynamicTools(t, dynamicReadTool("glusterfs.volume.status.read", map[string]tools.DynamicInputField{
 		"environment": {Type: "string", Required: true},
 		"cluster":     {Type: "string", Required: true},
