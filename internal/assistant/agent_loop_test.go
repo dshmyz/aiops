@@ -40,6 +40,10 @@ func readIntent() assistant.Intent {
 	return assistant.Intent{ToolName: "cluster.status.read", Input: map[string]any{"environment": "prod"}}
 }
 
+func readIntentOn(tool string, input map[string]any) assistant.Intent {
+	return assistant.Intent{ToolName: tool, Input: input}
+}
+
 func writeIntent() assistant.Intent {
 	// The executive type is declared explicitly: topic.retention.set is now a
 	// runtime-registered capability, so ClassifyIntent cannot infer write from a
@@ -163,7 +167,14 @@ func TestAgentLoopStopsOnWriteHandoff(t *testing.T) {
 // at maxSteps with the accumulated steps, not spin forever.
 func TestAgentLoopBoundedByMaxSteps(t *testing.T) {
 	t.Parallel()
-	planner := &scriptedPlanner{intents: []assistant.Intent{readIntent(), readIntent(), readIntent()}}
+	// Distinct reads so the convergence backstop (which collapses repeated
+	// identical reads at step 0) does not fire; this isolates the maxSteps
+	// budget as the terminator.
+	planner := &scriptedPlanner{intents: []assistant.Intent{
+		readIntentOn("cluster.status.read", map[string]any{"environment": "prod", "cluster": "a"}),
+		readIntentOn("cluster.status.read", map[string]any{"environment": "prod", "cluster": "b"}),
+		readIntentOn("cluster.status.read", map[string]any{"environment": "prod", "cluster": "c"}),
+	}}
 	exec := &recorderExecute{}
 	loop := assistant.NewAgentLoop(planner, exec.fn(), 2)
 
@@ -226,5 +237,58 @@ func TestAgentLoopGivesUpAfterRepeatedFailures(t *testing.T) {
 	}
 	if exec.ran != 3 {
 		t.Fatalf("executed %d, want 3 (failure budget)", exec.ran)
+	}
+}
+
+// TestAgentLoopConvergesOnRepeatedRead: even if the planner keeps re-emitting
+// the same read on the same resource (as a weak reasoning model can), the loop's
+// deterministic convergence backstop concludes after the first execution instead
+// of burning maxSteps on identical reads.
+func TestAgentLoopConvergesOnRepeatedRead(t *testing.T) {
+	t.Parallel()
+	planner := &scriptedPlanner{intents: []assistant.Intent{
+		readIntent(), // executes once
+		readIntent(), // identical tool+input: must be collapsed, not re-run
+	}}
+	exec := &recorderExecute{}
+	loop := assistant.NewAgentLoop(planner, exec.fn(), 8)
+
+	run := loop.Run(context.Background(), user(), "检查 prod 集群", nil, assistant.PageContext{})
+	if run.Reason != assistant.TerminalDone {
+		t.Fatalf("reason = %v, want TerminalDone (converged on repeated read)", run.Reason)
+	}
+	if exec.ran != 1 {
+		t.Fatalf("executed %d, want 1 (duplicate read collapsed)", exec.ran)
+	}
+	if len(run.Steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(run.Steps))
+	}
+	if run.FinalAnswer == "" {
+		t.Fatal("expected a fallback answer summarizing the executed step")
+	}
+}
+
+// TestAgentLoopDoesNotCollapseDistinctReads: the convergence backstop must NOT
+// collapse reads that target different resources/tools, so legitimate multi-step
+// diagnosis still runs to completion.
+func TestAgentLoopDoesNotCollapseDistinctReads(t *testing.T) {
+	t.Parallel()
+	planner := &scriptedPlanner{intents: []assistant.Intent{
+		readIntentOn("cluster.status.read", map[string]any{"environment": "prod", "cluster": "a"}),
+		readIntentOn("cluster.status.read", map[string]any{"environment": "prod", "cluster": "b"}),
+		doneIntent("两个集群都检查完"),
+	}}
+	exec := &recorderExecute{}
+	loop := assistant.NewAgentLoop(planner, exec.fn(), 8)
+
+	run := loop.Run(context.Background(), user(), "查两个集群", nil, assistant.PageContext{})
+	if run.Reason != assistant.TerminalDone {
+		t.Fatalf("reason = %v, want TerminalDone", run.Reason)
+	}
+	if exec.ran != 2 {
+		t.Fatalf("executed %d, want 2 (distinct reads both run)", exec.ran)
+	}
+	if run.FinalAnswer != "两个集群都检查完" {
+		t.Fatalf("FinalAnswer = %q, want the planner's answer", run.FinalAnswer)
 	}
 }

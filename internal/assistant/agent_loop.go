@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -147,6 +148,14 @@ func (l *AgentLoop) WithStreaming(planStream func(context.Context, identity.Curr
 func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) *AgentRun {
 	run := &AgentRun{History: append([]Turn{}, history...)}
 	consecutiveFailures := 0
+	// seen records every advisory (read/diagnostic) execution in this run, keyed
+	// by the tool plus the concrete resource it targeted. It is the
+	// deterministic convergence backstop: if the planner repeats a read on a
+	// resource it already executed this run, the loop concludes instead of
+	// burning another step on the same data. Prompt feedback (feedbackText)
+	// nudges well-behaved models to conclude on their own; this guard guarantees
+	// it even when the model re-emits the same tool.
+	seen := map[string]struct{}{}
 
 	for step := 0; step < l.maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -197,6 +206,16 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 			run.Reason = TerminalHandoff
 			return run
 		}
+		// Convergence backstop: a read intent that replays a tool on a resource
+		// already executed this run cannot move the diagnosis forward. Conclude
+		// with the accumulated steps instead of re-running it.
+		if key, ok := intentAdvisoryKey(intent); ok {
+			if _, dup := seen[key]; dup && !isWriteIntent(intent) {
+				run.Reason = TerminalDone
+				run.FinalAnswer = stepsAnswer(run)
+				return run
+			}
+		}
 		// Advisory: run the read/diagnostic step.
 		out, execErr := l.execute(intent, step)
 		if execErr != nil {
@@ -215,12 +234,42 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 		out.Kind = StepAdvisory
 		out.StepIndex = step
 		run.Steps = append(run.Steps, out)
+		if key, ok := intentAdvisoryKey(intent); ok {
+			seen[key] = struct{}{}
+		}
 		// Feed the result back into the agent history so the next Plan() call
 		// sees it (read-only chaining / fallback reasoning).
 		run.History = append(run.History, feedbackTurn(intent, out))
 	}
 	run.Reason = TerminalMaxSteps
 	return run
+}
+
+// intentAdvisoryKey canonicalizes an advisory (read/diagnostic) intent into a
+// stable key identifying "which tool, on which resource". Diagnostics key on
+// the resolved resource; read tools key on the tool name plus a
+// deterministically-ordered JSON of their input so identical calls compare
+// equal regardless of map key order. It returns ok=false for write/terminal
+// intents that should never be de-duplicated away.
+func intentAdvisoryKey(intent Intent) (string, bool) {
+	if intent.Diagnostic != nil {
+		d := intent.Diagnostic
+		return "diag:" + strings.Join([]string{
+			d.Domain, d.Environment, d.ResourceType, d.ResourceName,
+		}, "\x00"), true
+	}
+	if intent.ToolName == "" {
+		return "", false
+	}
+	// Terminal non-executable intents and write tools must not be collapsed.
+	if intent.Done || isWriteIntent(intent) {
+		return "", false
+	}
+	ordered, err := json.Marshal(intent.Input)
+	if err != nil {
+		return "", false
+	}
+	return "tool:" + intent.ToolName + "\x00" + string(ordered), true
 }
 
 // isWriteIntent reports whether an intent targets a write tool. It is the
@@ -273,14 +322,31 @@ func (l *AgentLoop) planOnce(ctx context.Context, user identity.CurrentUser, mes
 }
 
 // feedbackTurn wraps an executed advisory step as an assistant Turn carrying the
-// tool result, so the next Plan() sees what the previous tool returned.
+// tool result, so the next Plan() sees what the previous tool returned. The
+// content is explicit about the tool already having run and returned a definite
+// value, and instructs the planner to conclude (final_answer) when that result
+// answers the question — a single-domain diagnostic that already returned data is
+// conclusive, not a reason to re-run the same tool.
 func feedbackTurn(intent Intent, out StepOutcome) Turn {
 	return Turn{
 		Role:         "assistant",
 		ResponseType: "tool_step",
-		Content:      out.Summary,
+		Content:      feedbackText(out),
 		Intent:       &intent,
 	}
+}
+
+// feedbackText renders the human-visible feedback for an executed step. When
+// present, it includes the step summary so the replanning LLM can see the actual
+// result. The trailing instruction tells the planner to emit final_answer when
+// the returned data already answers the user's question, instead of repeating the
+// same tool.
+func feedbackText(out StepOutcome) string {
+	if out.Tool == "" || out.Summary == "" {
+		return "工具已执行。若结果已回答用户问题，请直接 final_answer: true 总结收尾，不要重复执行已执行过的工具。"
+	}
+	return out.Tool + " 已执行并返回结果：" + out.Summary +
+		"。若此结果已回答用户问题，请直接 final_answer: true 并给出面向用户的中文 summary 收尾；不要重复执行同域/同资源的相同工具。"
 }
 
 // failureTurn wraps a failed advisory step as an assistant Turn signalling the

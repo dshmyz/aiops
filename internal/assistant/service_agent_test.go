@@ -57,7 +57,7 @@ func (p *agentFakePlanner) PlanStream(_ context.Context, _ identity.CurrentUser,
 func TestServiceHandleMessageStreamRunsAgentLoop(t *testing.T) {
 	planner := &agentFakePlanner{intents: []assistant.Intent{
 		readIntent(),
-		readIntent(),
+		readIntentOn("alert.query", map[string]any{"environment": "prod"}),
 		doneIntent("prod 集群健康，无异常"),
 	}}
 	service, _ := newAssistant(t, planner)
@@ -136,7 +136,7 @@ func TestServiceHandleMessageStreamAgentLoopStopsOnWrite(t *testing.T) {
 func TestAgentLoopPersistsToolSteps(t *testing.T) {
 	planner := &agentFakePlanner{intents: []assistant.Intent{
 		readIntent(),
-		readIntent(),
+		readIntentOn("alert.query", map[string]any{"environment": "prod"}),
 		doneIntent("prod 集群健康，无异常"),
 	}}
 	conversations := store.NewMemoryAssistantConversationStore()
@@ -174,7 +174,14 @@ func TestAgentLoopPersistsToolSteps(t *testing.T) {
 	if user.Role != store.ConversationRoleUser || user.Content != "检查 prod 集群" {
 		t.Fatalf("user turn = %+v, want the original message", user)
 	}
+	// Two distinct advisory reads (cluster status then alerts) so the step chain
+	// exercises multi-step execution without tripping the convergence backstop
+	// (which collapses repeated identical reads).
 	for i, step := range []store.Turn{step1, step2} {
+		wantTool := tools.ClusterStatusRead
+		if i == 1 {
+			wantTool = tools.AlertQuery
+		}
 		if step.Role != store.ConversationRoleAssistant {
 			t.Fatalf("step %d role = %q, want assistant", i, step.Role)
 		}
@@ -187,8 +194,8 @@ func TestAgentLoopPersistsToolSteps(t *testing.T) {
 		if step.ResponsePayload == nil {
 			t.Fatalf("step %d payload nil, want ToolFact", i)
 		}
-		if step.ResponsePayload["tool"] != tools.ClusterStatusRead {
-			t.Fatalf("step %d payload tool = %v, want %s", i, step.ResponsePayload["tool"], tools.ClusterStatusRead)
+		if step.ResponsePayload["tool"] != wantTool {
+			t.Fatalf("step %d payload tool = %v, want %s", i, step.ResponsePayload["tool"], wantTool)
 		}
 		if step.ResponsePayload["step_index"] == nil {
 			t.Fatalf("step %d payload step_index missing", i)

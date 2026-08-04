@@ -131,9 +131,12 @@ func (s *Service) agentDiagnosticStep(ctx context.Context, user identity.Current
 	out.Tool = toolName
 	out.Input = map[string]any{"domain": intent.Diagnostic.Domain, "environment": intent.Diagnostic.Environment}
 	out.Output = map[string]any{
-		"summary":         fmt.Sprintf("诊断完成：%d 个观察，%d 个发现，%d 个建议", len(pkg.Observations), len(pkg.Findings), len(pkg.Recommendations)),
+		"summary":         diagnosticStepSummary(pkg),
 		"environment":     pkg.Environment,
 		"domains":         pkg.Domains,
+		"severity":        packageSeverity(pkg),
+		"observations":    observationSummaries(pkg),
+		"findings":        packageFindings(pkg),
 		"recommendations": len(pkg.Recommendations),
 	}
 	out.Summary = stepReadSummary(toolName, out.Output)
@@ -200,6 +203,86 @@ func stepReadSummary(toolName string, answer map[string]any) string {
 		}
 	}
 	return toolName + "：已执行"
+}
+
+// diagnosticStepSummary builds a one-line, data-bearing summary of a diagnostic
+// package so the tool_step feedback lets the planner see what it actually found
+// (severity + resource + observation) instead of a generic count. This matters
+// for loop convergence: a single-domain diagnostic that already answered the
+// question must read as conclusive to the planner.
+func diagnosticStepSummary(pkg diagnostics.Package) string {
+	sev := packageSeverity(pkg)
+	var resource string
+	if len(pkg.Resources) > 0 {
+		r := pkg.Resources[0]
+		if r.Name != "" {
+			resource = fmt.Sprintf("%s %s %s", r.Domain, r.Type, r.Name)
+		}
+	}
+	if resource == "" {
+		resource = strings.Join(pkg.Domains, ",")
+	}
+	base := fmt.Sprintf("诊断完成：%s 状态为 %s", resource, sev)
+	if len(pkg.Observations) > 0 && strings.TrimSpace(pkg.Observations[0].Summary) != "" {
+		base += "；" + pkg.Observations[0].Summary
+	}
+	return base
+}
+
+// packageSeverity returns the worst severity across observations, defaulting to ok.
+func packageSeverity(pkg diagnostics.Package) diagnostics.Severity {
+	worst := diagnostics.SeverityOK
+	for _, obs := range pkg.Observations {
+		if severityRank(obs.Severity) > severityRank(worst) {
+			worst = obs.Severity
+		}
+	}
+	return worst
+}
+
+func severityRank(sev diagnostics.Severity) int {
+	switch sev {
+	case diagnostics.SeverityCritical:
+		return 4
+	case diagnostics.SeverityWarning:
+		return 3
+	case diagnostics.SeverityInfo:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// observationSummaries collects the per-observation human summaries, so the
+// planner's feedback includes the concrete diagnostic data it can draw on.
+func observationSummaries(pkg diagnostics.Package) []string {
+	if len(pkg.Observations) == 0 {
+		return nil
+	}
+	summary := make([]string, 0, len(pkg.Observations))
+	for _, obs := range pkg.Observations {
+		line := strings.TrimSpace(obs.Summary)
+		if line != "" {
+			summary = append(summary, line)
+		}
+	}
+	return summary
+}
+
+// packageFindings collects the finding summaries, latest of the diagnostic
+// conclusion.
+func packageFindings(pkg diagnostics.Package) []string {
+	if len(pkg.Findings) == 0 {
+		return nil
+	}
+	findings := make([]string, 0, len(pkg.Findings))
+	for _, f := range pkg.Findings {
+		line := strings.TrimSpace(f.Summary)
+		if line != "" {
+			findings = append(findings, line)
+		}
+	}
+	return findings
 }
 
 // envAgentMaxSteps returns the configured step budget for agent loops,
