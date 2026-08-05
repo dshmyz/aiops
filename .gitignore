@@ -26,6 +26,12 @@ dist/
 # Playwright browser scratch (automated UI verification)
 .playwright-mcp/
 
+# Local Claude Code settings (machine-specific; not shared)
+.claude/
+
+# Ad-hoc screenshots / local visualization artifacts
+incident-panorama-probe.png
+
 # Capability validator generated reports
 .capability-validation.json
 validation-report.md
