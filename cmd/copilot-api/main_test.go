@@ -21,6 +21,7 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/policy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/store"
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
+	"go.uber.org/zap"
 )
 
 func TestPublishedCapabilitiesAreOptional(t *testing.T) {
@@ -588,4 +589,56 @@ func TestMCPEventToAuditEventMapsAllEventTypes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCasSessionTTLFromEnv(t *testing.T) {
+	logger := zap.NewNop()
+
+	t.Run("parses valid duration", func(t *testing.T) {
+		t.Setenv("COPILOT_CAS_SESSION_TTL", "30m")
+		if got := casSessionTTL(logger); got != 30*time.Minute {
+			t.Fatalf("casSessionTTL = %v, want 30m", got)
+		}
+	})
+
+	t.Run("empty falls back to zero (authenticator default)", func(t *testing.T) {
+		t.Setenv("COPILOT_CAS_SESSION_TTL", "")
+		if got := casSessionTTL(logger); got != 0 {
+			t.Fatalf("casSessionTTL = %v, want 0", got)
+		}
+	})
+
+	t.Run("invalid falls back to zero with warning", func(t *testing.T) {
+		t.Setenv("COPILOT_CAS_SESSION_TTL", "not-a-duration")
+		if got := casSessionTTL(logger); got != 0 {
+			t.Fatalf("casSessionTTL = %v, want 0", got)
+		}
+	})
+}
+
+func TestCasJSONListFromEnv(t *testing.T) {
+	logger := zap.NewNop()
+
+	t.Run("parses JSON array", func(t *testing.T) {
+		t.Setenv("COPILOT_CAS_DEFAULT_ROLES", `["admin","operator"]`)
+		got := casJSONList("COPILOT_CAS_DEFAULT_ROLES", logger)
+		want := []string{"admin", "operator"}
+		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("casJSONList = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("empty returns nil (authenticator default)", func(t *testing.T) {
+		t.Setenv("COPILOT_CAS_DEFAULT_ROLES", "")
+		if got := casJSONList("COPILOT_CAS_DEFAULT_ROLES", logger); got != nil {
+			t.Fatalf("casJSONList = %v, want nil", got)
+		}
+	})
+
+	t.Run("invalid JSON returns nil", func(t *testing.T) {
+		t.Setenv("COPILOT_CAS_DEFAULT_ROLES", `admin,operator`)
+		if got := casJSONList("COPILOT_CAS_DEFAULT_ROLES", logger); got != nil {
+			t.Fatalf("casJSONList = %v, want nil", got)
+		}
+	})
 }

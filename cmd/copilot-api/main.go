@@ -336,9 +336,12 @@ func main() {
 	var casAuth *httpapi.CASAuthenticator
 	if authMode == httpapi.AuthModeCAS || authMode == httpapi.AuthModeBoth {
 		casCfg := httpapi.CASConfig{
-			ServerURL:     os.Getenv("COPILOT_CAS_SERVER_URL"),
-			ServiceURL:    os.Getenv("COPILOT_CAS_SERVICE_URL"),
-			SessionSecret: []byte(os.Getenv("COPILOT_JWT_HMAC_SECRET")),
+			ServerURL:           os.Getenv("COPILOT_CAS_SERVER_URL"),
+			ServiceURL:          os.Getenv("COPILOT_CAS_SERVICE_URL"),
+			SessionSecret:       []byte(os.Getenv("COPILOT_JWT_HMAC_SECRET")),
+			SessionTTL:          casSessionTTL(logger),
+			DefaultRoles:        casJSONList("COPILOT_CAS_DEFAULT_ROLES", logger),
+			DefaultEnvironments: casJSONList("COPILOT_CAS_DEFAULT_ENVIRONMENTS", logger),
 		}
 		var err error
 		casAuth, err = httpapi.NewCASAuthenticator(casCfg)
@@ -346,7 +349,13 @@ func main() {
 			logger.Fatal("configure CAS authenticator", zap.Error(err))
 		}
 		casAuth.WithAliasExpander(aliasExpander)
-		logger.Info("CAS authentication enabled", zap.String("mode", string(authMode)), zap.String("cas_server", casCfg.ServerURL))
+		logger.Info("CAS authentication enabled",
+			zap.String("mode", string(authMode)),
+			zap.String("cas_server", casCfg.ServerURL),
+			zap.Duration("session_ttl", casCfg.SessionTTL),
+			zap.Strings("default_roles", casCfg.DefaultRoles),
+			zap.Strings("default_environments", casCfg.DefaultEnvironments),
+		)
 	}
 	multiAuth := httpapi.NewMultiAuthenticator(authMode, authenticator, casAuth)
 
@@ -397,6 +406,41 @@ func publishedCapabilitiesFromEnv() ([]capabilities.Capability, error) {
 		return []capabilities.Capability{}, nil
 	}
 	return capabilities.RegisterPublished(dir)
+}
+
+// casSessionTTL returns the CAS session-cookie TTL from
+// COPILOT_CAS_SESSION_TTL (a Go duration like "8h", "30m"). Invalid or empty
+// values fall back to the authenticator default (8h) with a warning — CAS SSO
+// must never be blocked by a misconfigured optional knob.
+func casSessionTTL(logger *zap.Logger) time.Duration {
+	raw := strings.TrimSpace(os.Getenv("COPILOT_CAS_SESSION_TTL"))
+	if raw == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		logger.Warn("invalid COPILOT_CAS_SESSION_TTL, using default",
+			zap.String("value", raw), zap.Error(err))
+		return 0
+	}
+	return d
+}
+
+// casJSONList reads a JSON array string list from an env var (e.g. roles,
+// environments). Empty / invalid values return nil so the authenticator's
+// defaults [operator] / [prod,staging,dev] apply. Best-effort on purpose.
+func casJSONList(env string, logger *zap.Logger) []string {
+	raw := strings.TrimSpace(os.Getenv(env))
+	if raw == "" {
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		logger.Warn("invalid CAS list env var, using default",
+			zap.String("env", env), zap.String("value", raw), zap.Error(err))
+		return nil
+	}
+	return list
 }
 
 // registerMCPToolsFromEnv 加载 COPILOT_MCP_SERVERS 环境变量（JSON 数组），

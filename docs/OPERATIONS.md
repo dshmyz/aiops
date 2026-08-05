@@ -119,6 +119,10 @@ curl -s http://127.0.0.1:18080/metrics   # Prometheus 指标
 | CORS | `COPILOT_CORS_ALLOWED_ORIGINS` | 逗号分隔；**留空=允许所有 `*`，生产必须限定前端域名** |
 | 鉴权 | `COPILOT_JWT_HMAC_SECRET` | HS256 签名密钥，**生产必设，定期轮换** |
 | 鉴权 | `COPILOT_AUTH_MODE` | `jwt`（默认）/ `cas` / `both` |
+| CAS | `COPILOT_CAS_SERVER_URL` / `_SERVICE_URL` | CAS 服务器与本服务 URL（cas/both 必需） |
+| CAS | `COPILOT_CAS_SESSION_TTL` | 会话 cookie 有效期（Go duration），默认 8h |
+| CAS | `COPILOT_CAS_DEFAULT_ROLES` | CAS 用户默认角色（JSON 数组），默认 `["operator"]` |
+| CAS | `COPILOT_CAS_DEFAULT_ENVIRONMENTS` | 默认允许环境（JSON 数组），默认 `["prod","staging","dev"]` |
 | LLM | `COPILOT_ASSISTANT_PROVIDER` | `eino-openai` 或空（确定性 planner） |
 | LLM | `COPILOT_OPENAI_BASE_URL` / `_API_KEY` / `_MODEL` | OpenAI 兼容接口 |
 | LLM | `COPILOT_OPENAI_TIMEOUT` / `_RETRY` / `_RETRY_BACKOFF` | 超时/重试/退避 |
@@ -229,6 +233,11 @@ knowledge/status），其余（feedback/knowledge/MCP/marketplace/webhook）返�
 **鉴权**：开发环境下 Vite 代理注入固定 `VITE_DEV_ADMIN_TOKEN`；生产由前端直接带真实用户
 JWT（CAS 登录跳转 `/v1/auth/config` + `/v1/auth/cas/*`）。登录后侧栏品牌区显示当前用户
 `subject`（悬停可见角色），来自 `GET /v1/identity/me`。
+
+**CAS 角色**：CAS 用户角色优先取 CAS 下发的 `roles` 属性；未下发时用
+`COPILOT_CAS_DEFAULT_ROLES`（默认 `["operator"]`）。**默认不含 admin** —— admin 需由 CAS
+在 `roles` 属性下发，或用 `COPILOT_CAS_DEFAULT_ROLES=["admin","operator"]` 显式放开
+（仅内部可信场景）。环境同理用 `COPILOT_CAS_DEFAULT_ENVIRONMENTS`。
 
 ---
 
