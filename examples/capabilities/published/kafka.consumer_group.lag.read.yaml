@@ -1,14 +1,14 @@
 schema_version: 1
-name: kafka.topic.retention.read
-status: needs_review
+name: kafka.consumer_group.lag.read
+status: published
 domain: kafka
-resource_type: topic
+resource_type: consumer_group
 operation: read
 risk: low
 backend:
     adapter: http
     method: GET
-    path: /api/kafka/{cluster}/topics/{topic}/retention
+    path: /api/kafka/{cluster}/consumer-groups/{group}/lag
     timeout_ms: 3000
     base_url: http://127.0.0.1:19090
 input_schema:
@@ -18,15 +18,16 @@ input_schema:
     environment:
         type: string
         required: true
-    topic:
+    group:
         type: string
         required: true
 output:
     kind: observation
     severity_path: $.status
-    summary_template: Topic {topic} retention is {retention_hours}h
+    summary_template: Consumer group {group} lag is {lag}
     fields:
-        retention_hours: $.data.retention_hours
+        lag: $.data.lag
+        members: $.data.members
 governance:
     requires_action_plan: false
     requires_approval: false
@@ -41,6 +42,6 @@ auth:
         - admin
     environment_scoped: true
 ai:
-    description: Read Kafka topic retention configuration from the demo middleware backend.
+    description: Read Kafka consumer group lag from the demo middleware backend.
     examples:
-        - 查询 prod k1 orders topic 的 kafka retention
+        - 查询 prod k1 payments consumer_group 的 kafka 延迟
