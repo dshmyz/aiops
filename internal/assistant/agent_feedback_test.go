@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -173,5 +174,50 @@ func TestDiagnosticStepSummaryMultiDomainAggregatesAllDomains(t *testing.T) {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("diagnosticStepSummary %q missing %q — multi-domain chain not aggregated", summary, want)
 		}
+	}
+}
+
+// stepsAnswer must carry the worst severity of the diagnosed package and
+// honestly list any failed/uncompleted steps, so a fallback (maxSteps /
+// convergence) answer never reads as authoritative.
+func TestStepsAnswerCarriesSeverityAndFailures(t *testing.T) {
+	t.Parallel()
+	run := &AgentRun{
+		Steps: []StepOutcome{
+			{Kind: StepAdvisory, Tool: "alert.query", Summary: "alert.query：发现 kafka 高延迟",
+				Output: map[string]any{"severity": "warning"}},
+			{Kind: StepAdvisory, Tool: "minio.bucket.health.read", Summary: "minio：容量 92%",
+				Output: map[string]any{"severity": "critical"}},
+		},
+		Handoff: &StepOutcome{Tool: "topic.retention.set"},
+	}
+	text := stepsAnswer(run)
+	if !strings.Contains(text, "critical") {
+		t.Fatalf("stepsAnswer %q missing worst severity 'critical'", text)
+	}
+	if !strings.Contains(text, "未达到明确的最终结论") {
+		t.Fatalf("stepsAnswer %q lost the non-authoritative provisional framing", text)
+	}
+	if !strings.Contains(text, "topic.retention.set") {
+		t.Fatalf("stepsAnswer %q should list the handed-off/failed step, got %q", text, text)
+	}
+}
+
+// A plain maxSteps exhaustion with advisory steps but no severity must still be
+// explicitly provisional and enumerate the failed chain.
+func TestStepsAnswerProvisionalOnMaxSteps(t *testing.T) {
+	t.Parallel()
+	run := &AgentRun{
+		Steps: []StepOutcome{
+			{Kind: StepAdvisory, Tool: "cluster.status.read", Summary: "cluster.status.read：green"},
+		},
+		Err: errors.New("execution failed"),
+	}
+	text := stepsAnswer(run)
+	if !strings.Contains(text, "未达到明确的最终结论") {
+		t.Fatalf("stepsAnswer %q must be honest about non-conclusion", text)
+	}
+	if !strings.Contains(text, "诊断链条中断") {
+		t.Fatalf("stepsAnswer %q must surface the failed chain, got %q", text, text)
 	}
 }

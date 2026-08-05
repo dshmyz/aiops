@@ -128,6 +128,14 @@ type AgentLoop struct {
 	maxSteps   int
 	planStream func(context.Context, identity.CurrentUser, string, []Turn, PageContext) (<-chan StreamEvent, error)
 	onEvent    func(StreamEvent)
+	// sequence is an optional product-declared evidence-collection order (from a
+	// matched runbook's tool_sequence, e.g. alert-root-cause-sequence →
+	// [alert.query, event.query]). When set, the loop treats it as a conclusion
+	// gate: a model final_answer is not honored while sequence members remain
+	// untouched — the loop steers the planner back to collect them. Declared
+	// sequence steps that cannot resolve are best-effort skipped rather than
+	// stalling the loop.
+	sequence []string
 }
 
 // NewAgentLoop builds an agent loop. execute must be non-nil. maxSteps bounds
@@ -149,6 +157,16 @@ func (l *AgentLoop) WithStreaming(planStream func(context.Context, identity.Curr
 	return l
 }
 
+// WithRunbookSequence declares a product-level evidence-collection order that the
+// loop must respect before honoring a model final_answer. Members are matched
+// against advisory tool names (a diagnostic step's resolved tool name counts).
+// It turns "alert root cause collects a few checks" from model improvisation
+// into a declared plan order while still letting the model insert extra steps.
+func (l *AgentLoop) WithRunbookSequence(sequence []string) *AgentLoop {
+	l.sequence = append([]string{}, sequence...)
+	return l
+}
+
 // Run executes the loop. history is the conversation's prior turns (may be
 // nil) that seed the agent history. The caller routes the returned AgentRun:
 // each Advisory step is emitted to the UI and accumulated; Handoff / Clarified
@@ -164,6 +182,10 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 	// nudges well-behaved models to conclude on their own; this guard guarantees
 	// it even when the model re-emits the same tool.
 	seen := map[string]struct{}{}
+	// sequenceTouched records which declared runbook-sequence members have been
+	// executed this run, advanced by advisory steps whose (resolved) tool name
+	// matches a member.
+	sequenceTouched := map[string]bool{}
 
 	for step := 0; step < l.maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -180,12 +202,12 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 				if msg == "" {
 					msg = clarification.Error()
 				}
-				run.Clarified = msg
+				run.Clarified = clarifyWithCheckedSteps(run, msg)
 				return run
 			}
 			if errors.Is(err, ErrClarificationNeeded) {
 				run.Reason = TerminalClarification
-				run.Clarified = clarificationMessage
+				run.Clarified = clarifyWithCheckedSteps(run, clarificationMessage)
 				return run
 			}
 			run.Reason = TerminalMaxSteps
@@ -194,6 +216,18 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 		}
 		// Terminal: planner concluded with a human-facing answer.
 		if intent.Done {
+			// A declared runbook sequence (② chain skeleton) is a product-level
+			// conclusion gate: when the model calls final_answer BEFORE the
+			// declared evidence members have all been collected, the loop does not
+			// end — it steers the planner back to collect the remaining declared
+			// steps, turning "alert root cause collects a few checks" into a
+			// declared order instead of letting the model conclude on a whim. Only
+			// when the sequence is satisfied (or never declared) is the final_answer
+			// honored.
+			if pending := l.pendingSequenceMembers(sequenceTouched); len(pending) > 0 {
+				run.History = append(run.History, sequenceSteerTurn(pending))
+				continue
+			}
 			run.Reason = TerminalDone
 			run.FinalAnswer = intent.Answer
 			return run
@@ -245,6 +279,20 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 		run.Steps = append(run.Steps, out)
 		if key, ok := intentAdvisoryKey(intent); ok {
 			seen[key] = struct{}{}
+		}
+		sequenceTrackTouched(sequenceTouched, l.sequence, out.Tool)
+		// Execution-layer short-circuit for single-turn diagnostics: a
+		// single-domain diagnostic (e.g. "检查 kafka 健康吗") that ran
+		// successfully is structurally conclusive — it already answered the
+		// question, so looping back to re-plan (letting the model self-enforce a
+		// final_answer) only burns extra LLM turns. This moves "single-turn
+		// question → done" from model discipline to a deterministic check.
+		// Multi-domain messages and explicit continuation cues ("然后/再/对比/
+		// 延伸") are exempt so genuine investigation chains still run.
+		if shouldShortCircuitSingleDiagnostic(message, intent, out) {
+			run.Reason = TerminalDone
+			run.FinalAnswer = singleDiagnosticAnswer(out)
+			return run
 		}
 		// Feed the result back into the agent history so the next Plan() call
 		// sees it (read-only chaining / fallback reasoning).
@@ -413,4 +461,127 @@ func failureTurn(intent Intent, err error) Turn {
 		Content:      "工具执行失败：" + err.Error() + "。请选择其他候选工具继续排查，或直接给出最终答复。",
 		Intent:       &intent,
 	}
+}
+
+// continuationCues are explicit markers that the user wants an investigation
+// chain rather than a one-shot single-domain answer. When present, a single
+// diagnostic is NOT structurally conclusive — the model should be allowed to
+// keep planning follow-up steps.
+var continuationCues = []string{"继续", "然后", "再", "对比", "比较", "延伸", "顺便", "以及", "连带", "看下", "看看", "接着", "之后", "逐个", "都查"}
+
+// shouldShortCircuitSingleDiagnostic reports whether a successfully executed
+// single-domain diagnostic step is structurally conclusive for this request, so
+// the loop can conclude instead of re-planning (avoiding a full extra LLM turn
+// for what is, semantically, a single question). It is conservative: it only
+// fires for diagnostic intents, requires the message to name exactly one domain,
+// and exempts messages that express an explicit continuation/investigation
+// intent. Multi-domain requests always keep the loop (the Orchestrator already
+// fanned out inside the single diagnostic step).
+func shouldShortCircuitSingleDiagnostic(message string, intent Intent, out StepOutcome) bool {
+	if intent.Diagnostic == nil {
+		return false
+	}
+	// Only conclude when the step actually produced a package (already satisfied
+	// by the success path, but guard against an empty/broken output).
+	if len(out.Output) == 0 {
+		return false
+	}
+	if isMultiDomainDiagnostic(message) {
+		return false
+	}
+	text := strings.ToLower(message)
+	for _, cue := range continuationCues {
+		if strings.Contains(text, cue) {
+			return false
+		}
+	}
+	return true
+}
+
+// singleDiagnosticAnswer builds the operator-facing conclusion for a
+// short-circuited single-domain diagnostic. It prefers the executed step's
+// structured summary (severity + resource + observation), falling back to the
+// tool name so the answer is never empty.
+func singleDiagnosticAnswer(out StepOutcome) string {
+	if s, ok := out.Output["summary"].(string); ok && s != "" {
+		return s
+	}
+	if out.Summary != "" {
+		return out.Summary
+	}
+	if out.Tool != "" {
+		return out.Tool + " 已诊断完成。"
+	}
+	return "诊断完成。"
+}
+
+// pendingSequenceMembers returns the declared runbook-sequence members that have
+// not yet been satisfied by an executed advisory step this run. An empty slice
+// means the sequence (if any) is complete.
+func (l *AgentLoop) pendingSequenceMembers(touched map[string]bool) []string {
+	if len(l.sequence) == 0 {
+		return nil
+	}
+	var pending []string
+	for _, m := range l.sequence {
+		if m == "" {
+			continue
+		}
+		if !touched[m] {
+			pending = append(pending, m)
+		}
+	}
+	return pending
+}
+
+// sequenceTrackTouched advances the sequence-touched set: an advisory step whose
+// resolved tool name matches a declared member (exact match, else substring so a
+// domain diagnostic satisfies a member naming that domain) marks that member
+// satisfied. Sequence members that can't be matched (unregistered tools) simply
+// stay pending and fail safe to the honest fallback.
+func sequenceTrackTouched(touched map[string]bool, sequence []string, toolName string) {
+	if len(sequence) == 0 || toolName == "" {
+		return
+	}
+	for _, m := range sequence {
+		if m == "" {
+			continue
+		}
+		if toolName == m || strings.Contains(toolName, m) || strings.Contains(m, toolName) {
+			touched[m] = true
+		}
+	}
+}
+
+// sequenceSteerTurn is the feedback turn sent when the model emits final_answer
+// before a declared runbook sequence is complete. It explicitly names the
+// remaining declared steps so the planner collects them rather than concluding
+// prematurely.
+func sequenceSteerTurn(pending []string) Turn {
+	return Turn{
+		Role:         "assistant",
+		ResponseType: "tool_step",
+		Content: "告警根因序列尚未收集齐声明的证据步骤，请先执行下列步骤完成取证：" + strings.Join(pending, "、") +
+			"。全部执行完后再 final_answer: true 总结收尾。",
+	}
+}
+
+// clarifyWithCheckedSteps appends the advisory steps already run before the
+// clarification, so the operator sees what diagnostics already completed rather
+// than treating the clarification as a cold prompt. When no step has run yet the
+// message is returned unchanged (the fresh-prompt case).
+func clarifyWithCheckedSteps(run *AgentRun, msg string) string {
+	var ran []string
+	for _, out := range run.Steps {
+		if out.Kind != StepAdvisory {
+			continue
+		}
+		if s := strings.TrimSpace(out.Summary); s != "" {
+			ran = append(ran, s)
+		}
+	}
+	if len(ran) == 0 || msg == "" {
+		return msg
+	}
+	return msg + "（此前已检查：" + strings.Join(ran, "；") + "）"
 }

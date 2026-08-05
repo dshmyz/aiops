@@ -392,17 +392,94 @@ func stepsAnswer(run *AgentRun) string {
 	if len(run.Steps) == 0 {
 		return "未能给出明确结论：本轮未执行到任何检查。请补充信息或换个问法重试。"
 	}
-	b.WriteString("未达到明确的最终结论。已执行以下检查，结论仅供参考（可继续追问）：")
-	for i, out := range run.Steps {
-		if out.Kind != StepAdvisory {
-			continue
+
+	// 兜底是"未完整推理"的诚实收尾（与 answer_converged 标识一致），不能让
+	// operator 误以为是权威结论。若已执行步骤带出明确严重级别，将其提到开头，
+	// 作为对真实证据的最低限度综合——但仍明确标注未达成明确结论。
+	advisory := make([]StepOutcome, 0, len(run.Steps))
+	for _, out := range run.Steps {
+		if out.Kind == StepAdvisory {
+			advisory = append(advisory, out)
 		}
+	}
+	if sev, ok := worstAdvisorySeverity(advisory); ok && sev != "" {
+		fmt.Fprintf(&b, "综合严重级别为 %s，未达到明确的最终结论。", sev)
+	} else {
+		b.WriteString("未达到明确的最终结论。")
+	}
+	b.WriteString("已执行以下检查，结论仅供参考（可继续追问）：")
+	for i, out := range advisory {
 		if i > 0 {
 			b.WriteString("；")
 		}
 		b.WriteString(out.Summary)
 	}
+
+	// 诚实列出未达成/失败的环节，不让"部分失败"被透传成"已给出完整结论"。
+	failed := runFailedTools(run)
+	if len(failed) > 0 {
+		b.WriteString("（以下环节未完成或失败：")
+		for i, f := range failed {
+			if i > 0 {
+				b.WriteString("、")
+			}
+			b.WriteString(f)
+		}
+		b.WriteString("）")
+	}
 	return b.String()
+}
+
+// worstAdvisorySeverity returns the worst severity among the advisory steps'
+// output packages (severity is carried in step output by agentDiagnosticStep).
+func worstAdvisorySeverity(steps []StepOutcome) (string, bool) {
+	worst := diagnostics.SeverityOK
+	found := false
+	for _, out := range steps {
+		if out.Kind != StepAdvisory {
+			continue
+		}
+		sev, ok := out.Output["severity"].(string)
+		if !ok || sev == "" {
+			continue
+		}
+		found = true
+		if severityRank(diagnostics.Severity(sev)) > severityRank(worst) {
+			worst = diagnostics.Severity(sev)
+		}
+	}
+	if !found {
+		return "", false
+	}
+	return string(worst), true
+}
+
+// runFailedTools enumerates the non-advisory / error outcomes so a fallback
+// answer does not silently claim every check succeeded. Advisory steps are
+// only recorded in run.Steps once they execute; a terminal error (run.Err) or a
+// handoff (run.Handoff) marks work that did not produce a clean advisory result
+// and is surfaced here for honesty.
+func runFailedTools(run *AgentRun) []string {
+	var failed []string
+	seen := map[string]bool{}
+	note := func(tool string) {
+		if tool == "" || seen[tool] {
+			return
+		}
+		seen[tool] = true
+		failed = append(failed, tool)
+	}
+	if run.Handoff != nil {
+		// A handoff queued a plan for approval — not a failure, but the loop
+		// reached the fallback path, so flag the tool being handed off.
+		note(run.Handoff.Tool)
+	}
+	if run.Err != nil {
+		// The terminal error is not bound to a single tool; surface a generic
+		// marker rather than fabricate a tool name.
+		note("诊断链条中断")
+	}
+	return failed
 }
 
 // persistAgentRun records a completed agent-loop iteration into the

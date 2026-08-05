@@ -75,3 +75,41 @@ func containsString(items []string, target string) bool {
 	}
 	return false
 }
+
+// SequenceForMessage resolves the declared tool_sequence of the best-matching
+// enabled runbook for a message, ignoring the per-tool gate that Match applies.
+// It is the agent loop's source of a product-declared evidence-collection order
+// (② chain skeleton): for e.g. "告警根因" it returns alert-root-cause-sequence's
+// [alert.query, event.query]. Returns nil when no runbook with a sequence
+// matches.
+func (r *RunbookRouter) SequenceForMessage(ctx context.Context, message string) []string {
+	if r == nil || r.lookup == nil {
+		return nil
+	}
+	runbooks, err := r.lookup.ListEnabledRunbooks(ctx)
+	if err != nil || len(runbooks) == 0 {
+		return nil
+	}
+	text := strings.ToLower(strings.TrimSpace(message))
+	best := RunbookSummary{}
+	bestHit := 0
+	found := false
+	for _, rb := range runbooks {
+		if !rb.IsEnabled || len(rb.ToolSequence) == 0 {
+			continue
+		}
+		hit := longestKeywordHit(text, rb.IntentPattern)
+		if hit == 0 {
+			continue
+		}
+		if hit > bestHit {
+			bestHit = hit
+			best = rb
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return append([]string{}, best.ToolSequence...)
+}

@@ -416,6 +416,20 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 	return events, nil
 }
 
+// agentLoopSequence resolves the product-declared evidence-collection order for
+// the current request, when it matches an enabled runbook that carries a
+// tool_sequence (② chain skeleton). It drives the loop's conclusion gate so a
+// declared multi-step analysis ("告警根因" → alert.query → event.query) is
+// followed as a plan rather than improvised, while still letting the model
+// insert extra diagnostic steps between declared ones. Returns nil when no
+// runbook sequence applies.
+func (s *Service) agentLoopSequence(ctx context.Context, message string) []string {
+	if s.runbookRouter == nil {
+		return nil
+	}
+	return s.runbookRouter.SequenceForMessage(ctx, message)
+}
+
 // runAgentLoopInStream drives the autonomous agent loop inside the streaming
 // goroutine (used when the planner is agent-capable). It forwards live LLM
 // deltas/thinking via the loop's streaming hook, emits one StepEvent per
@@ -437,6 +451,9 @@ func (s *Service) runAgentLoopInStream(ctx context.Context, events chan<- Stream
 		WithStreaming(func(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) (<-chan StreamEvent, error) {
 			return s.startPlannerStream(ctx, user, message, history, pageContext), nil
 		}, forward)
+	if seq := s.agentLoopSequence(ctx, message); len(seq) > 0 {
+		loop.WithRunbookSequence(seq)
+	}
 
 	run := loop.Run(ctx, user, message, history, pageContext)
 

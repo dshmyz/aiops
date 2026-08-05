@@ -3,10 +3,12 @@ package assistant_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/assistant"
+	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
 )
 
@@ -290,5 +292,173 @@ func TestAgentLoopDoesNotCollapseDistinctReads(t *testing.T) {
 	}
 	if run.FinalAnswer != "两个集群都检查完" {
 		t.Fatalf("FinalAnswer = %q, want the planner's answer", run.FinalAnswer)
+	}
+}
+
+// --- ① single-turn diagnostic short-circuit ---
+
+func singleDiagIntent(domain string) assistant.Intent {
+	return assistant.Intent{Diagnostic: &diagnostics.Request{Domain: domain, Environment: "prod"}}
+}
+
+func diagOutcome(tool, summary string) assistant.StepOutcome {
+	return assistant.StepOutcome{
+		Tool:    tool,
+		Summary: summary,
+		Output:  map[string]any{"summary": summary, "severity": "ok", "domains": []string{}},
+	}
+}
+
+// TestAgentLoopShortCircuitsSingleDiagnostic: a single-domain diagnostic that
+// ran successfully is structurally conclusive — the loop must conclude after ONE
+// step instead of looping back to re-plan (letting the model self-enforce a
+// final_answer). This is the execution-layer fix for "single-turn simple
+// requests burning the full multi-step loop".
+func TestAgentLoopShortCircuitsSingleDiagnostic(t *testing.T) {
+	t.Parallel()
+	planner := &scriptedPlanner{intents: []assistant.Intent{
+		singleDiagIntent("kafka"),
+		doneIntent("should never be reached"),
+	}}
+	exec := &recorderExecute{outcomes: []assistant.StepOutcome{
+		diagOutcome("kafka", "诊断完成：kafka consumer_group lag 正常"),
+	}}
+	loop := assistant.NewAgentLoop(planner, exec.fn(), 8)
+
+	run := loop.Run(context.Background(), user(), "检查 kafka 健康吗", nil, assistant.PageContext{})
+	if run.Reason != assistant.TerminalDone {
+		t.Fatalf("reason = %v, want TerminalDone (single-domain short-circuit)", run.Reason)
+	}
+	if run.Fallback {
+		t.Fatalf("fallback = true, want false — single-domain diagnostic is a genuine answer, not a synthesized fallback")
+	}
+	if len(run.Steps) != 1 {
+		t.Fatalf("steps = %d, want 1 — the single diagnostic must not re-plan", len(run.Steps))
+	}
+	if exec.ran != 1 {
+		t.Fatalf("executed %d steps, want 1", exec.ran)
+	}
+	if !strings.Contains(run.FinalAnswer, "kafka") {
+		t.Fatalf("FinalAnswer = %q, want to carry the diagnostic summary", run.FinalAnswer)
+	}
+}
+
+// TestAgentLoopDoesNotShortCircuitContinuation: a single-domain diagnostic asked
+// with an explicit continuation intent ("再查 kafka") must NOT be short-circuited
+// — the model should be allowed to keep planning.
+func TestAgentLoopDoesNotShortCircuitContinuation(t *testing.T) {
+	t.Parallel()
+	planner := &scriptedPlanner{intents: []assistant.Intent{
+		singleDiagIntent("kafka"),
+		doneIntent("继续分析后收尾"),
+	}}
+	exec := &recorderExecute{outcomes: []assistant.StepOutcome{
+		diagOutcome("kafka", "诊断完成：kafka lag 正常"),
+	}}
+	loop := assistant.NewAgentLoop(planner, exec.fn(), 8)
+
+	run := loop.Run(context.Background(), user(), "检查 kafka，再顺便对比下历史", nil, assistant.PageContext{})
+	if run.Reason != assistant.TerminalDone {
+		t.Fatalf("reason = %v, want TerminalDone", run.Reason)
+	}
+	// The continuation cue (再/顺便) must allow the loop to re-plan and honor the
+	// model's final_answer on the second plan.
+	if len(run.Steps) != 1 || run.FinalAnswer != "继续分析后收尾" {
+		t.Fatalf("steps=%d FinalAnswer=%q, want the model's final_answer honored (no short-circuit) on continuation", len(run.Steps), run.FinalAnswer)
+	}
+}
+
+// --- ② runbook-sequence conclusion gate ---
+
+// TestAgentLoopSequenceGatesFinalAnswer: with a declared runbook sequence
+// [alert.query, event.query], a model final_answer emitted BEFORE those members
+// are touched must NOT conclude — the loop steers the planner back; only after
+// the sequence is satisfied does the final_answer conclude.
+func TestAgentLoopSequenceGatesFinalAnswer(t *testing.T) {
+	t.Parallel()
+	planner := &scriptedPlanner{intents: []assistant.Intent{
+		doneIntent("已回答但序列未齐"), // final_answer too early
+		readIntentOn("alert.query", map[string]any{"environment": "prod"}),
+		readIntentOn("event.query", map[string]any{"environment": "prod"}),
+		doneIntent("序列齐了，收尾"),
+	}}
+	exec := &recorderExecute{}
+	loop := assistant.NewAgentLoop(planner, exec.fn(), 8).
+		WithRunbookSequence([]string{"alert.query", "event.query"})
+
+	run := loop.Run(context.Background(), user(), "告警根因分析", nil, assistant.PageContext{})
+	if run.Reason != assistant.TerminalDone {
+		t.Fatalf("reason = %v, want TerminalDone", run.Reason)
+	}
+	if run.FinalAnswer != "序列齐了，收尾" {
+		t.Fatalf("FinalAnswer = %q, want the concluding answer AFTER the sequence is satisfied", run.FinalAnswer)
+	}
+	// Both sequence members must have been executed as advisory steps.
+	var tools []string
+	for _, s := range run.Steps {
+		if s.Kind == assistant.StepAdvisory {
+			tools = append(tools, s.Tool)
+		}
+	}
+	for _, want := range []string{"alert.query", "event.query"} {
+		if !slices.Contains(tools, want) {
+			t.Fatalf("advisory tools = %v, want to include sequence member %q", tools, want)
+		}
+	}
+	// The early final_answer must have been steered: a steering feedback turn
+	// naming the pending sequence must have reached the planner history.
+	steered := false
+	for _, h := range run.History {
+		if strings.Contains(h.Content, "告警根因序列尚未收集齐") && strings.Contains(h.Content, "alert.query") {
+			steered = true
+			break
+		}
+	}
+	if !steered {
+		t.Fatalf("history has no sequence steering turn before conclusion — the early final_answer was not gated")
+	}
+}
+
+// TestAgentLoopSequenceCompleteConcludesDirectly: when the sequence is already
+// satisfied before the first plan, a final_answer concludes immediately (no
+// steering).
+func TestAgentLoopSequenceCompleteConcludesDirectly(t *testing.T) {
+	t.Parallel()
+	planner := &scriptedPlanner{intents: []assistant.Intent{
+		readIntentOn("alert.query", map[string]any{"environment": "prod"}),
+		doneIntent("收尾"),
+	}}
+	exec := &recorderExecute{}
+	loop := assistant.NewAgentLoop(planner, exec.fn(), 8).
+		WithRunbookSequence([]string{"alert.query"})
+
+	run := loop.Run(context.Background(), user(), "告警根因分析", nil, assistant.PageContext{})
+	if run.Reason != assistant.TerminalDone {
+		t.Fatalf("reason = %v, want TerminalDone", run.Reason)
+	}
+	if run.FinalAnswer != "收尾" {
+		t.Fatalf("FinalAnswer = %q", run.FinalAnswer)
+	}
+}
+
+// --- ⑤ clarification carries prior steps ---
+
+// TestAgentLoopClarificationCarriesPriorSteps: when a clarification is raised
+// AFTER some advisory steps already ran, the clarification message must surface
+// what was already checked so the operator has context.
+func TestAgentLoopClarificationCarriesPriorSteps(t *testing.T) {
+	planner := &scriptedPlanner{intents: []assistant.Intent{
+		readIntent(),
+	}}
+	planner.errs = []error{nil, assistant.ErrClarificationNeeded}
+	exec := &recorderExecute{outcomes: []assistant.StepOutcome{{Summary: "cluster green"}}}
+	loop := assistant.NewAgentLoop(planner, exec.fn(), 8)
+
+	run := loop.Run(context.Background(), user(), "先查集群再看告警", nil, assistant.PageContext{})
+	if run.Reason != assistant.TerminalClarification {
+		t.Fatalf("reason = %v, want TerminalClarification", run.Reason)
+	}
+	if !strings.Contains(run.Clarified, "cluster green") {
+		t.Fatalf("clarification = %q, want it to carry the prior step summary", run.Clarified)
 	}
 }
