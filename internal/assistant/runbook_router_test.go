@@ -89,3 +89,40 @@ func TestRunbookRouterDisabledRunbookIgnored(t *testing.T) {
 		t.Fatal("Match matched a disabled runbook")
 	}
 }
+
+// TestSequenceForMessageResolvesAlertChain: SequenceForMessage resolves the
+// declared tool_sequence of the best-matching runbook for a message (no tool
+// gate), providing the agent-loop's product-declared evidence order for "告警
+// 根因" → [alert.query, event.query].
+func TestSequenceForMessageResolvesAlertChain(t *testing.T) {
+	t.Parallel()
+	router := assistant.NewRunbookRouter(fakeRunbookLookup{runbooks: runbookTestRunbooks()})
+
+	seq := router.SequenceForMessage(context.Background(), "给我做下告警根因分析")
+	if len(seq) != 2 || seq[0] != tools.AlertQuery || seq[1] != tools.EventQuery {
+		t.Fatalf("sequence = %v, want [%s %s]", seq, tools.AlertQuery, tools.EventQuery)
+	}
+}
+
+func TestSequenceForMessageNoMatch(t *testing.T) {
+	t.Parallel()
+	router := assistant.NewRunbookRouter(fakeRunbookLookup{runbooks: runbookTestRunbooks()})
+	if seq := router.SequenceForMessage(context.Background(), "查看集群健康"); seq != nil {
+		t.Fatalf("sequence = %v, want nil for non-matching message", seq)
+	}
+	// A matching runbook WITHOUT a tool_sequence yields nil (no declared gate).
+	router = assistant.NewRunbookRouter(fakeRunbookLookup{runbooks: []assistant.RunbookSummary{
+		{Slug: "no-seq", IntentPattern: []string{"告警根因"}, IsEnabled: true},
+	}})
+	if seq := router.SequenceForMessage(context.Background(), "告警根因分析"); seq != nil {
+		t.Fatalf("sequence = %v, want nil when the matched runbook has no tool_sequence", seq)
+	}
+}
+
+func TestSequenceForMessageNilLookup(t *testing.T) {
+	t.Parallel()
+	router := assistant.NewRunbookRouter(nil)
+	if seq := router.SequenceForMessage(context.Background(), "告警根因"); seq != nil {
+		t.Fatalf("sequence = %v, want nil for nil lookup", seq)
+	}
+}
