@@ -472,6 +472,176 @@ export interface AuditEventPage {
   next_cursor?: AuditEventCursor | null;
 }
 
+// ===== Executions 执行历史 =====
+// 对 GET /v1/executions 的字面映射。此端点仅 admin 可见（内部含敏感错误/入参）。
+
+export interface ExecutionRecord {
+  id: string;
+  action_plan_id: string;
+  status: string;
+  tool_name?: string;
+  result_summary?: unknown;
+  error_summary?: string;
+  verification?: unknown;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+}
+
+export interface ExecutionFilter {
+  status?: string;
+  action_plan_id?: string;
+  tool?: string;
+  started_after?: string;
+  started_before?: string;
+  limit?: number;
+  cursor_created_at?: string;
+  cursor_id?: string;
+}
+
+export interface ExecutionPage {
+  executions: ExecutionRecord[];
+  next_cursor?: AuditEventCursor | null;
+}
+
+// ===== Inspection Reports 巡检报告 =====
+// 对 GET /v1/inspection-reports 及 /{id} 的字面映射。任意登录用户可见。
+
+export interface InspectionTaskSummary {
+  task_id: string;
+  task_name: string;
+  capability_name: string;
+  total_runs: number;
+  succeeded_runs: number;
+  failed_runs: number;
+  last_status?: string;
+  last_result_summary?: string;
+  last_error?: string;
+  last_run_at?: string;
+}
+
+export interface InspectionReport {
+  id: string;
+  period: string;
+  window_start: string;
+  window_end: string;
+  generated_at: string;
+  total_tasks: number;
+  succeeded_tasks: number;
+  failed_tasks: number;
+  task_summaries?: InspectionTaskSummary[];
+  html_content: string;
+}
+
+// ===== Capability Marketplace 能力市场 =====
+// 对 /v1/marketplace/capabilities* 的字面映射。读操作对 viewer/operator/admin
+// 开放；发布需 admin。SemanticSearch 用自然语言查询召回能力（语义检索的入口）。
+
+export interface MarketplaceRegistry {
+  id: string;
+  name: string;
+  domain: string;
+  resource_type: string;
+  operation: string;
+  risk_level: string;
+  owner_id: string;
+  visibility: string;
+  organization_id?: string;
+  description: string;
+  tags?: string[];
+  category?: string;
+  download_count: number;
+  usage_count: number;
+  avg_rating?: number;
+  rating_count: number;
+  status: string;
+  published_at?: string;
+  deprecated_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceVersion {
+  id: string;
+  capability_id: string;
+  version: string;
+  yaml_content: string;
+  yaml_hash: string;
+  schema_version: number;
+  backend_adapter: string;
+  input_schema?: unknown;
+  output_schema?: unknown;
+  governance?: unknown;
+  changelog?: string;
+  breaking_changes?: string;
+  status: string;
+  published_at?: string;
+  published_by?: string;
+  created_at: string;
+}
+
+export interface MarketplaceRating {
+  id: string;
+  capability_id: string;
+  user_id: string;
+  rating: number;
+  review?: string;
+  version_used?: string;
+  environment?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceStats {
+  capability_id: string;
+  total_downloads: number;
+  total_executions: number;
+  success_rate: number;
+  avg_duration_ms?: number;
+  executions_by_environment: Record<string, number>;
+}
+
+export interface MarketplaceSearchFilter {
+  query?: string;
+  domain?: string;
+  category?: string;
+  risk_level?: string;
+  min_rating?: number;
+  visibility?: string;
+  status?: string;
+  sort_by?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface MarketplaceSearchPage {
+  capabilities: MarketplaceRegistry[];
+  total: number;
+  semantic?: boolean;
+  next_offset?: number;
+}
+
+export interface MarketplacePublishPayload {
+  yaml_content: string;
+  version: string;
+  visibility: string;
+  organization_id?: string;
+  tags?: string[];
+  category?: string;
+  changelog?: string;
+}
+
+export interface MarketplacePublishResult {
+  capability: MarketplaceRegistry;
+  version: MarketplaceVersion;
+}
+
+export interface MarketplaceDownload {
+  version: string;
+  yaml_content: string;
+  yaml_hash: string;
+}
+
 export interface QuickPublishPayload {
   name: string;
   domain: string;
@@ -643,4 +813,77 @@ export interface Block {
   title?: string;
   content?: string;
   payload?: Record<string, unknown>;
+}
+
+// ===== incident.view 告警全景（后端 incidentViewReadRunner 输出契约） =====
+
+export interface IncidentViewPivot {
+  domain?: string;
+  resource_type?: string;
+  resource_name?: string;
+  environment?: string;
+  since?: string;
+  until?: string;
+}
+
+export interface IncidentTimelineItem {
+  id: string;
+  tool_name: string;
+  action: string;
+  decision: string;
+  subject?: string;
+  created_at: string;
+  action_plan_id?: string | null;
+  tool_execution_id?: string | null;
+  trace_id?: string | null;
+}
+
+export interface IncidentRun {
+  id: string;
+  task_id: string;
+  status: string;
+  started_at: string;
+  finished_at: string;
+  audit_event_id?: string;
+}
+
+export interface IncidentProbe {
+  tool_name: string;
+  operation: string;
+  input: Record<string, unknown>;
+}
+
+export interface IncidentRunbook {
+  slug: string;
+  name?: string;
+  risk_level?: string;
+  confidence: number;
+  tool_sequence?: string[];
+}
+
+export interface IncidentRecentWrites {
+  count: number;
+  events: IncidentTimelineItem[];
+}
+
+export interface IncidentCounts {
+  audit: number;
+  scheduled_runs: number;
+  probes: number;
+  runbooks: number;
+  recent_writes: number;
+}
+
+export interface IncidentViewResult {
+  tool?: string;
+  incident_id?: string;
+  pivot?: Partial<IncidentViewPivot>;
+  // alert 是后端 alert.Alert 的 JSON 序列化，字段松散，按需弱类型访问。
+  alert?: Record<string, unknown> | null;
+  timeline: IncidentTimelineItem[];
+  scheduled_runs: IncidentRun[];
+  probes: IncidentProbe[];
+  runbooks: IncidentRunbook[];
+  recent_writes: IncidentRecentWrites;
+  counts: IncidentCounts;
 }

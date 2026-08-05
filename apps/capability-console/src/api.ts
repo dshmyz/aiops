@@ -11,13 +11,28 @@ import type {
   ConversationPage,
   ConversationTurnsFilter,
   CreateScheduledTaskPayload,
+  ExecutionFilter,
+  ExecutionPage,
+  ExecutionRecord,
   ExecutionResult,
   FeedbackEntry,
   FeedbackPage,
   ImportPreview,
+  IncidentViewPivot,
+  IncidentViewResult,
+  InspectionReport,
   KnowledgeDocument,
   KnowledgeListResponse,
   ManagedCapability,
+  MarketplaceDownload,
+  MarketplacePublishPayload,
+  MarketplacePublishResult,
+  MarketplaceRating,
+  MarketplaceRegistry,
+  MarketplaceSearchFilter,
+  MarketplaceSearchPage,
+  MarketplaceStats,
+  MarketplaceVersion,
   MCPServer,
   NormalizedResult,
   OpenAPIURLCommitPayload,
@@ -191,6 +206,19 @@ export async function commitOpenAPIURLImport(payload: OpenAPIURLCommitPayload): 
   };
 }
 
+// importOpenAPIURL performs a one-shot OpenAPI import: fetch the spec from
+// the URL and import every selected operation as a draft capability in a single
+// request, bypassing the two-phase preview/commit flow. The payload mirrors
+// capabilities.OpenAPIURLImportRequest in the backend. Returns the imported
+// (draft) capabilities.
+export async function importOpenAPIURL(payload: OpenAPIURLImportPayload): Promise<ManagedCapability[]> {
+  const body = await request<{ capabilities?: Partial<ManagedCapability>[] }>('/v1/capabilities/import/openapi-url', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return (body.capabilities ?? []).map(normalizeCapability);
+}
+
 export async function saveDraft(capability: Capability): Promise<ManagedCapability> {
   const body = await request<Partial<ManagedCapability>>('/v1/capabilities/drafts', {
     method: 'POST',
@@ -361,6 +389,117 @@ export async function searchAuditEvents(query: string): Promise<AuditEventPage> 
   const params = new URLSearchParams();
   params.set('q', query);
   return request<AuditEventPage>(`/v1/audit-events/search?${params.toString()}`);
+}
+
+// ===== Executions 执行历史 =====
+// 对应 GET /v1/executions（admin-only，内部含敏感错误/入参，operator/viewer 用审计记录）。
+// 支持 status / action_plan_id / tool / started_after / started_before / limit /
+// cursor_created_at / cursor_id 过滤与游标分页；时间参数需 RFC3339。
+
+export async function listExecutions(filter: ExecutionFilter = {}): Promise<ExecutionPage> {
+  const params = new URLSearchParams();
+  if (filter.status) params.set('status', filter.status);
+  if (filter.action_plan_id) params.set('action_plan_id', filter.action_plan_id);
+  if (filter.tool) params.set('tool', filter.tool);
+  if (filter.started_after) params.set('started_after', filter.started_after);
+  if (filter.started_before) params.set('started_before', filter.started_before);
+  if (filter.limit !== undefined) params.set('limit', String(filter.limit));
+  if (filter.cursor_created_at) params.set('cursor_created_at', filter.cursor_created_at);
+  if (filter.cursor_id) params.set('cursor_id', filter.cursor_id);
+  const query = params.toString();
+  const path = query ? `/v1/executions?${query}` : '/v1/executions';
+  return request<ExecutionPage>(path);
+}
+
+// ===== Inspection Reports 巡检报告 =====
+// 对应 GET /v1/inspection-reports（列表，任意登录用户，仅 limit 参数，由
+// Reporter 按时间窗口聚合生成）与 GET /v1/inspection-reports/{id}（详情）。
+// 列表返回裸数组（非 {reports: [...]} 包装）。
+
+export async function listInspectionReports(limit = 50): Promise<InspectionReport[]> {
+  const params = new URLSearchParams();
+  if (limit > 0) params.set('limit', String(limit));
+  return request<InspectionReport[]>(`/v1/inspection-reports?${params.toString()}`);
+}
+
+export async function getInspectionReport(id: string): Promise<InspectionReport> {
+  return request<InspectionReport>(`/v1/inspection-reports/${encodeURIComponent(id)}`);
+}
+
+// ===== Capability Marketplace 能力市场 =====
+
+export async function marketplaceSearch(filter: MarketplaceSearchFilter = {}): Promise<MarketplaceSearchPage> {
+  const params = new URLSearchParams();
+  if (filter.query) params.set('query', filter.query);
+  if (filter.domain) params.set('domain', filter.domain);
+  if (filter.category) params.set('category', filter.category);
+  if (filter.risk_level) params.set('risk_level', filter.risk_level);
+  if (filter.min_rating !== undefined) params.set('min_rating', String(filter.min_rating));
+  if (filter.visibility) params.set('visibility', filter.visibility);
+  if (filter.status) params.set('status', filter.status);
+  if (filter.sort_by) params.set('sort_by', filter.sort_by);
+  if (filter.limit !== undefined) params.set('limit', String(filter.limit));
+  if (filter.offset !== undefined) params.set('offset', String(filter.offset));
+  const query = params.toString();
+  const path = query ? `/v1/marketplace/capabilities?${query}` : '/v1/marketplace/capabilities';
+  return request<MarketplaceSearchPage>(path);
+}
+
+// 语义搜索：自然语言查询召回能力。当后端未配置向量检索时返回 503。
+export async function marketplaceSemanticSearch(query: string): Promise<MarketplaceSearchPage> {
+  const params = new URLSearchParams();
+  params.set('semantic', 'true');
+  if (query.trim()) params.set('query', query.trim());
+  return request<MarketplaceSearchPage>(`/v1/marketplace/capabilities?${params.toString()}`);
+}
+
+export async function marketplaceGet(id: string): Promise<MarketplaceRegistry> {
+  return request<MarketplaceRegistry>(`/v1/marketplace/capabilities/${encodeURIComponent(id)}`);
+}
+
+export async function marketplaceListVersions(id: string): Promise<MarketplaceVersion[]> {
+  const body = await request<{ versions: MarketplaceVersion[] }>(
+    `/v1/marketplace/capabilities/${encodeURIComponent(id)}/versions`,
+  );
+  return body.versions ?? [];
+}
+
+export async function marketplaceListRatings(id: string, limit = 20, offset = 0): Promise<{ ratings: MarketplaceRating[]; total: number }> {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  const body = await request<{ ratings: MarketplaceRating[]; total: number }>(
+    `/v1/marketplace/capabilities/${encodeURIComponent(id)}/ratings?${params.toString()}`,
+  );
+  return { ratings: body.ratings ?? [], total: body.total ?? 0 };
+}
+
+export async function marketplaceStats(id: string): Promise<MarketplaceStats> {
+  return request<MarketplaceStats>(`/v1/marketplace/capabilities/${encodeURIComponent(id)}/stats`);
+}
+
+export async function marketplacePublish(payload: MarketplacePublishPayload): Promise<MarketplacePublishResult> {
+  return request<MarketplacePublishResult>('/v1/marketplace/capabilities', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+// 下载（含版本 YAML）并记录一次 download 统计。
+export async function marketplaceDownload(id: string, versionID: string): Promise<MarketplaceDownload> {
+  return request<MarketplaceDownload>(
+    `/v1/marketplace/capabilities/${encodeURIComponent(id)}/download/${encodeURIComponent(versionID)}`,
+  );
+}
+
+export async function marketplaceRate(
+  id: string,
+  payload: { rating: number; review?: string; version_used?: string; environment?: string },
+): Promise<void> {
+  await request<void>(`/v1/marketplace/capabilities/${encodeURIComponent(id)}/ratings`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 function localPreviewCapabilities(): ManagedCapability[] {
@@ -594,4 +733,29 @@ export async function reloadMCPServers(): Promise<{ status: string }> {
   return request<{ status: string }>('/v1/mcp/servers/reload', {
     method: 'POST',
   });
+}
+
+// ===== incident.view 告警全景（Phase 3） =====
+// 对应 POST /v1/tools/incident.view/read（通用工具读端点）。后端 incidentViewReadRunner
+// 按 (domain, resource_type, resource_name, environment) 软匹配各证据源，返回
+// { result: {...} }；此处解包 result。
+export async function viewIncident(pivot: IncidentViewPivot): Promise<IncidentViewResult> {
+  const data = await request<{ result: IncidentViewResult }>('/v1/tools/incident.view/read', {
+    method: 'POST',
+    body: JSON.stringify(pivot),
+  });
+  return data.result;
+}
+
+/**
+ * executeRead 通过通用工具读端点执行一次只读探测（如 incident 全景里列出的 probe）。
+ * 调用后端 `ReadOnlyService.ExecuteRead`，自动获得 policy 鉴权 + 审计记录。
+ * 结果形态异构（能力读 / 静态元工具），返回宽松 unknown 由调用方格式化。
+ */
+export async function executeRead(toolName: string, input: Record<string, unknown>): Promise<unknown> {
+  const data = await request<{ result: unknown }>(`/v1/tools/${toolName}/read`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  });
+  return data.result;
 }

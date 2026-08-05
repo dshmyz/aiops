@@ -3,8 +3,12 @@ import {
   countScheduledTaskFailures,
   createScheduledTask,
   deleteScheduledTask,
+  getInspectionReport,
   getScheduledTask,
+  importOpenAPIURL,
   lastTraceId,
+  listExecutions,
+  listInspectionReports,
   listScheduledTaskRuns,
   listScheduledTasks,
   publishCapability,
@@ -404,5 +408,223 @@ describe('traceparent header extraction', () => {
 
     expect(runs).toEqual([sampleRun]);
     expect(lastTraceId.value).toBe('cccccccccccccccccccccccccccccccc');
+  });
+});
+
+describe('openapi direct import API', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test('POSTs openapi_url + backend_base_url to the import endpoint and maps capabilities', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      ok({
+        capabilities: [
+          {
+            name: 'minio.bucket.capacity.read',
+            domain: 'minio',
+            resource_type: 'bucket',
+            backend: { method: 'GET', path: '/api/minio/{cluster}/buckets/{bucket}/capacity' },
+          },
+        ],
+      }),
+    );
+
+    const caps = await importOpenAPIURL({
+      openapi_url: 'https://admin.example.com/v3/api-docs',
+      backend_base_url: 'https://middleware.example.com',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/v1/capabilities/import/openapi-url');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      openapi_url: 'https://admin.example.com/v3/api-docs',
+      backend_base_url: 'https://middleware.example.com',
+    });
+    expect(caps.length).toBe(1);
+    expect(caps[0].name).toBe('minio.bucket.capacity.read');
+    expect(caps[0].domain).toBe('minio');
+    // path 在 Capability 里指后端 HTTP 路径（backend.path），不存在顶层
+    // openapi-url:// 伪 URI 约定，这里校验归一化后的真实 operation 路径。
+    expect(caps[0].backend?.path).toBe('/api/minio/{cluster}/buckets/{bucket}/capacity');
+  });
+
+  test('returns an empty list when the response has no capabilities', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(ok({ capabilities: [] }));
+
+    const caps = await importOpenAPIURL({
+      openapi_url: 'https://admin.example.com/v3/api-docs',
+      backend_base_url: 'https://middleware.example.com',
+    });
+
+    expect(caps).toEqual([]);
+  });
+});
+
+describe('executions API', () => {
+  const sampleExecution = {
+    id: 'exec-1',
+    action_plan_id: 'plan-1',
+    status: 'succeeded',
+    tool_name: 'kafka.topic.retention.set',
+    result_summary: { ok: true },
+    started_at: '2026-07-27T10:00:00Z',
+    completed_at: '2026-07-27T10:00:02Z',
+    created_at: '2026-07-27T10:00:02Z',
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test('listExecutions issues GET /v1/executions when no filter', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(ok({ executions: [sampleExecution] }));
+
+    const page = await listExecutions();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [input, init] = fetchMock.mock.calls[0];
+    expect(String(input)).toBe('/v1/executions');
+    expect(init?.method).toBeUndefined();
+    expect(page.executions).toEqual([sampleExecution]);
+  });
+
+  test('listExecutions forwards status/tool/action_plan_id/limit as query parameters', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(ok({ executions: [] }));
+
+    await listExecutions({ status: 'failed', tool: 'minio.bucket.capacity.read', action_plan_id: 'plan-9', limit: 25 });
+
+    const [input] = fetchMock.mock.calls[0];
+    expect(String(input)).toBe(
+      '/v1/executions?status=failed&action_plan_id=plan-9&tool=minio.bucket.capacity.read&limit=25',
+    );
+  });
+
+  test('listExecutions forwards time filters and cursor as RFC3339 / params', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      ok({
+        executions: [sampleExecution],
+        next_cursor: { created_at: '2026-07-27T10:00:02Z', id: 'exec-1' },
+      }),
+    );
+
+    const page = await listExecutions({
+      started_after: '2026-07-27T09:00:00Z',
+      started_before: '2026-07-27T11:00:00Z',
+      cursor_created_at: '2026-07-27T10:00:02Z',
+      cursor_id: 'exec-1',
+    });
+
+    const [input] = fetchMock.mock.calls[0];
+    expect(String(input)).toBe(
+      '/v1/executions?started_after=2026-07-27T09%3A00%3A00Z&started_before=2026-07-27T11%3A00%3A00Z&cursor_created_at=2026-07-27T10%3A00%3A02Z&cursor_id=exec-1',
+    );
+    expect(page.next_cursor).toEqual({ created_at: '2026-07-27T10:00:02Z', id: 'exec-1' });
+  });
+
+  test('listExecutions surfaces backend errors', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'unsupported query parameter: foo' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(listExecutions({ tool: 'x' })).rejects.toThrow('unsupported query parameter: foo');
+  });
+});
+
+describe('inspection reports API', () => {
+  const sampleReport = {
+    id: 'report-1',
+    period: 'daily',
+    window_start: '2026-07-27T00:00:00Z',
+    window_end: '2026-07-27T23:59:59Z',
+    generated_at: '2026-07-28T00:05:00Z',
+    total_tasks: 2,
+    succeeded_tasks: 1,
+    failed_tasks: 1,
+    task_summaries: [
+      {
+        task_id: 'task-1',
+        task_name: 'minio 巡检',
+        capability_name: 'minio.bucket.capacity.read',
+        total_runs: 12,
+        succeeded_runs: 11,
+        failed_runs: 1,
+        last_status: 'failed',
+      },
+    ],
+    html_content: '<p>ok</p>',
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test('listInspectionReports issues GET /v1/inspection-reports?limit= and returns a bare array', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(ok([sampleReport]));
+
+    const reports = await listInspectionReports(25);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [input, init] = fetchMock.mock.calls[0];
+    expect(String(input)).toBe('/v1/inspection-reports?limit=25');
+    expect(init?.method).toBeUndefined();
+    expect(reports).toEqual([sampleReport]);
+  });
+
+  test('listInspectionReports defaults to 50 when no limit given', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(ok([]));
+
+    await listInspectionReports();
+
+    const [input] = fetchMock.mock.calls[0];
+    expect(String(input)).toBe('/v1/inspection-reports?limit=50');
+  });
+
+  test('getInspectionReport issues GET /v1/inspection-reports/{id}', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(ok(sampleReport));
+
+    const report = await getInspectionReport('report-1');
+
+    const [input, init] = fetchMock.mock.calls[0];
+    expect(String(input)).toBe('/v1/inspection-reports/report-1');
+    expect(init?.method).toBeUndefined();
+    expect(report.id).toBe('report-1');
+  });
+
+  test('getInspectionReport surfaces 404 as APIError with backend message', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'inspection report not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(getInspectionReport('nope')).rejects.toThrow('inspection report not found');
   });
 });

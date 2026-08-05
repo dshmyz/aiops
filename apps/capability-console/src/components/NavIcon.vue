@@ -12,7 +12,7 @@
  * Icons are simplified from Lucide (ISC/Ishikawa Masashi, MIT-style license).
  * Each path uses stroke="currentColor" so it tints with the parent color.
  */
-type IconName = 'assistant' | 'management' | 'plans' | 'audit' | 'scheduled-tasks' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers';
+type IconName = 'assistant' | 'management' | 'plans' | 'audit' | 'executions' | 'incident' | 'scheduled-tasks' | 'inspection-reports' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers';
 
 defineProps<{ name: IconName }>();
 </script>
@@ -72,11 +72,55 @@ defineProps<{ name: IconName }>();
         stroke-linejoin="round"
       />
     </template>
+    <!-- executions: list with checkmarks (execution history) -->
+    <template v-else-if="name === 'executions'">
+      <path
+        d="M11 4H4v16h16v-7M15 3l2 2 4-4M3 8h6M3 12h6M3 16h6"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+    <!-- incident: activity waveform (告警全景) -->
+    <template v-else-if="name === 'incident'">
+      <path
+        d="M22 12h-4l-3 9L9 3l-3 9H2"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
     <!-- scheduled-tasks: clock -->
     <template v-else-if="name === 'scheduled-tasks'">
       <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
       <path
         d="M12 7v5l3 3"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+    <!-- inspection-reports: file with rising bars (report) -->
+    <template v-else-if="name === 'inspection-reports'">
+      <path
+        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 17v-3M12 17V10M16 17v-5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+    <!-- marketplace: storefront -->
+    <template v-else-if="name === 'marketplace'">
+      <path
+        d="M3 9l1-5h16l1 5M3 9a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0M4 12v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8M9 21v-6h6v6"
         fill="none"
         stroke="currentColor"
         stroke-width="2"

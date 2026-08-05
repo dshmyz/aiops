@@ -13,9 +13,13 @@ import AssistantInlineConfirm from './components/AssistantInlineConfirm.vue';
 import AssistantTranscript from './components/AssistantTranscript.vue';
 import AssistantTraceView from './components/AssistantTraceView.vue';
 const AuditView = defineAsyncComponent(() => import('./views/AuditView.vue'));
+const ExecutionsView = defineAsyncComponent(() => import('./views/ExecutionsView.vue'));
+const InspectionReportsView = defineAsyncComponent(() => import('./views/InspectionReportsView.vue'));
+const IncidentView = defineAsyncComponent(() => import('./views/IncidentView.vue'));
 const PlansView = defineAsyncComponent(() => import('./views/PlansView.vue'));
 const ScheduledTasksView = defineAsyncComponent(() => import('./views/ScheduledTasksView.vue'));
 const McpServersView = defineAsyncComponent(() => import('./views/McpServersView.vue'));
+const MarketplaceView = defineAsyncComponent(() => import('./views/MarketplaceView.vue'));
 import ManagementView from './views/ManagementView.vue';
 const AdminPromptsView = defineAsyncComponent(() => import('./views/AdminPromptsView.vue'));
 const AdminKnowledgeView = defineAsyncComponent(() => import('./views/AdminKnowledgeView.vue'));
@@ -37,7 +41,7 @@ import type {
   ExecutionResult,
 } from './types';
 
-type ActiveView = 'assistant' | 'management' | 'plans' | 'audit' | 'scheduled-tasks' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers';
+type ActiveView = 'assistant' | 'management' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers';
 
 const activeView = ref<ActiveView>('assistant');
 
@@ -45,7 +49,7 @@ const activeView = ref<ActiveView>('assistant');
 const sidebarCollapsed = ref(false);
 
 // 视图顺序与快捷键映射（Cmd/Ctrl+1..9），顺序与侧栏视觉分组一致
-const viewOrder: ActiveView[] = ['assistant', 'management', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'knowledge', 'feedback', 'mcp-servers'];
+const viewOrder: ActiveView[] = ['assistant', 'management', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'knowledge', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace'];
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   // Cmd/Ctrl + 数字 切换视图
@@ -202,6 +206,7 @@ const {
   toggleEnabled: toggleScheduledTaskEnabled,
   viewRuns: viewRunHistory,
   closeRuns: closeRunHistory,
+  viewFailures: viewScheduledTaskFailures,
 } = scheduledTasksComposable;
 
 // MCP 服务器热配置：onMounted 自动加载列表，视图切换无需额外触发
@@ -271,6 +276,25 @@ async function jumpToPlanFromAudit(planID: string) {
   activeView.value = 'plans';
   await refreshPendingPlans();
   await selectPendingPlan(planID);
+}
+
+// 从执行历史跳到该 plan 的审计记录。审计 API 无 plan_id 过滤，这里按执行的工具
+// 名称进过滤，定位到这条执行的确认/执行审计链（plan 事件含 tool_name）。
+function jumpToAuditFromExecution(_planID: string, toolName: string) {
+  activeView.value = 'audit';
+  applyAuditFilter({ tool: toolName || undefined });
+}
+
+// incident 视图的 timeline plan 只有 tool_name（无 planID），复用同一过滤逻辑。
+function jumpToAuditFromIncident(toolName: string) {
+  activeView.value = 'audit';
+  applyAuditFilter({ tool: toolName || undefined });
+}
+
+// 定时巡检失败计数 → 跳定时巡检视图并打开失败列表（最近一次失败任务的执行历史）。
+async function jumpToScheduledTaskFailures() {
+  activeView.value = 'scheduled-tasks';
+  await viewScheduledTaskFailures();
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -510,7 +534,22 @@ onUnmounted(() => {
         >
           <NavIcon name="scheduled-tasks" />
           <span v-if="!sidebarCollapsed">定时巡检</span>
-          <ScheduledTaskBadge v-if="!sidebarCollapsed" :count="scheduledTaskFailures" />
+          <ScheduledTaskBadge
+            v-if="!sidebarCollapsed"
+            :count="scheduledTaskFailures"
+            @click.stop="jumpToScheduledTaskFailures"
+          />
+        </button>
+        <button
+          data-test="nav-inspection-reports"
+          data-view="inspection-reports"
+          class="nav-item"
+          :class="{ active: activeView === 'inspection-reports' }"
+          :title="'巡检报告'"
+          @click="activeView = 'inspection-reports'"
+        >
+          <NavIcon name="inspection-reports" />
+          <span v-if="!sidebarCollapsed">巡检报告</span>
         </button>
       </div>
 
@@ -526,7 +565,39 @@ onUnmounted(() => {
         >
           <NavIcon name="audit" />
           <span v-if="!sidebarCollapsed">审计记录</span>
-          <span v-if="auditEvents.length > 0 && !sidebarCollapsed" data-test="nav-badge" class="nav-badge">{{ auditEvents.length }}</span>
+        </button>
+        <button
+          data-test="nav-executions"
+          data-view="executions"
+          class="nav-item"
+          :class="{ active: activeView === 'executions' }"
+          :title="'执行历史（仅管理员）'"
+          @click="activeView = 'executions'"
+        >
+          <NavIcon name="executions" />
+          <span v-if="!sidebarCollapsed">执行历史</span>
+        </button>
+        <button
+          data-test="nav-incident"
+          data-view="incident"
+          class="nav-item"
+          :class="{ active: activeView === 'incident' }"
+          :title="'告警全景：按资源身份串起告警证据'"
+          @click="activeView = 'incident'"
+        >
+          <NavIcon name="incident" />
+          <span v-if="!sidebarCollapsed">告警全景</span>
+        </button>
+        <button
+          data-test="nav-marketplace"
+          data-view="marketplace"
+          class="nav-item"
+          :class="{ active: activeView === 'marketplace' }"
+          :title="'能力市场：浏览/搜索/发布能力'"
+          @click="activeView = 'marketplace'"
+        >
+          <NavIcon name="marketplace" />
+          <span v-if="!sidebarCollapsed">能力市场</span>
         </button>
         <button
           data-test="nav-prompts"
@@ -797,6 +868,14 @@ onUnmounted(() => {
         :audit="auditComposable"
         @jump-to-plan="jumpToPlanFromAudit"
       />
+
+      <ExecutionsView v-if="activeView === 'executions'" @jump-to-audit="jumpToAuditFromExecution" />
+
+      <IncidentView v-if="activeView === 'incident'" @jump-to-audit="jumpToAuditFromIncident" />
+
+      <InspectionReportsView v-if="activeView === 'inspection-reports'" />
+
+      <MarketplaceView v-if="activeView === 'marketplace'" />
 
       <ScheduledTasksView
         v-if="activeView === 'scheduled-tasks'"

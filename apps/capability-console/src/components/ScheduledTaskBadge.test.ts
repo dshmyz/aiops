@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import ScheduledTaskBadge from './ScheduledTaskBadge.vue';
 
 describe('ScheduledTaskBadge', () => {
@@ -47,5 +47,19 @@ describe('ScheduledTaskBadge', () => {
     const badge = wrapper.find('[data-test="scheduled-task-badge"]');
     expect(badge.exists()).toBe(true);
     expect(badge.text()).toBe('99+');
+  });
+
+  test('暴露根元素点击，供外部绑定跳转事件', () => {
+    // App.vue 在 badge 上用 @click.stop 绑定"跳到失败列表"。根元素可通过
+    // attrs 接收该监听器，这里验证点击监听器确实落到根 <span> 上。
+    const onJump = vi.fn();
+    const wrapper = mount(ScheduledTaskBadge, {
+      props: { count: 2 },
+      attrs: { onClick: onJump },
+    });
+
+    const badge = wrapper.find('[data-test="scheduled-task-badge"]');
+    badge.trigger('click');
+    expect(onJump).toHaveBeenCalledTimes(1);
   });
 });

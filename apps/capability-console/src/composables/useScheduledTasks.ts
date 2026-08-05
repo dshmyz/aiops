@@ -49,6 +49,7 @@ export interface UseScheduledTasks {
   toggleEnabled: (id: string, enabled: boolean) => Promise<void>;
   viewRuns: (task: ScheduledTask) => Promise<void>;
   closeRuns: () => void;
+  viewFailures: () => Promise<void>;
 }
 
 const FAILURE_POLL_INTERVAL_MS = 60_000;
@@ -169,6 +170,19 @@ export function useScheduledTasks(options: UseScheduledTasksOptions): UseSchedul
     }
   }
 
+  // 从失败计数跳转到失败列表：优先打开最近一次 status=failed 的任务执行历史，
+  // 让用户直接看到失败运行的明细。若没有已知失败任务，则仅保证列表加载。
+  async function viewFailures() {
+    const failed = scheduledTasks.value.find(
+      (task) => task.last_status === 'failed',
+    );
+    if (failed) {
+      await viewRuns(failed);
+    } else if (scheduledTasks.value.length === 0) {
+      await refresh();
+    }
+  }
+
   function closeRuns() {
     scheduledTaskViewingRunsFor.value = null;
     scheduledTaskRuns.value = [];
@@ -209,5 +223,6 @@ export function useScheduledTasks(options: UseScheduledTasksOptions): UseSchedul
     toggleEnabled,
     viewRuns,
     closeRuns,
+    viewFailures,
   };
 }

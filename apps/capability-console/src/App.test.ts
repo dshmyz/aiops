@@ -525,10 +525,10 @@ describe('Capability Console', () => {
     expect(sections.length).toBe(2);
     expect(sections[0].find('[data-test="nav-section-label"]').text()).toBe('运维');
     expect(sections[1].find('[data-test="nav-section-label"]').text()).toBe('管理配置');
-    // 运维组包含 4 个 nav-item
-    expect(sections[0].findAll('.nav-item').length).toBe(4);
-    // 管理配置组包含 5 个 nav-item（audit/prompts/knowledge/feedback/mcp-servers）
-    expect(sections[1].findAll('.nav-item').length).toBe(5);
+    // 运维组包含 5 个 nav-item（assistant/management/plans/scheduled-tasks/inspection-reports）
+    expect(sections[0].findAll('.nav-item').length).toBe(5);
+    // 管理配置组包含 8 个 nav-item（audit/executions/incident/marketplace/prompts/knowledge/feedback/mcp-servers）
+    expect(sections[1].findAll('.nav-item').length).toBe(8);
   });
 
   test('switches views via Cmd+number shortcut', async () => {
@@ -2055,13 +2055,12 @@ describe('Capability Console', () => {
     expect(calls.some((path) => path === '/v1/audit-events' || path.startsWith('/v1/audit-events?'))).toBe(true);
   });
 
-  test('audit nav badge shows event count', async () => {
+  test('audit nav item has no badge (execution log, not a todo count)', async () => {
     const wrapper = mountApp();
     await flushPromises();
 
     const badge = wrapper.find('[data-test="nav-audit"] [data-test="nav-badge"]');
-    expect(badge.exists()).toBe(true);
-    expect(badge.text()).toBe('2');
+    expect(badge.exists()).toBe(false);
   });
 
   test('loads conversation history into the sidebar on mount (cross-refresh persistence)', async () => {
