@@ -477,15 +477,15 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
 }
 
 .conversation-turn-item.user .conversation-turn-content {
-  background: var(--gradient-brand);
-  color: #fff;
+  background: var(--color-accent-soft);
+  color: var(--color-text-primary);
   border-color: transparent;
   border-bottom-right-radius: 4px;
 }
 
 .conversation-turn-item.assistant .conversation-turn-content {
   background: var(--color-bg-elevated);
-  border-color: var(--color-border);
+  border-color: transparent;
   border-bottom-left-radius: 4px;
 }
 
@@ -497,13 +497,13 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
 
 /* user 气泡内的链接和代码保持可读 */
 .conversation-turn-item.user .conversation-turn-content :deep(a) {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-accent);
   text-decoration: underline;
 }
 
 .conversation-turn-item.user .conversation-turn-content :deep(code) {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
 .error-icon {
