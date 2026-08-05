@@ -745,6 +745,20 @@ export async function getDoc(name = 'OPERATIONS.md'): Promise<DocContent> {
   return request<DocContent>(`/v1/docs/${encodeURIComponent(name)}`);
 }
 
+// ===== 当前登录用户 =====
+// GET /v1/identity/me 返回当前调用者的 subject + roles，供顶栏展示"我是谁"。
+
+export interface CurrentUser {
+  subject: string;
+  roles: string[];
+}
+
+/** 读取当前登录用户的 identity（subject + roles）。任一登录用户可查自己的身份。 */
+export async function getCurrentUser(): Promise<CurrentUser> {
+  const me = await request<CurrentUser>('/v1/identity/me');
+  return { subject: me.subject ?? '', roles: me.roles ?? [] };
+}
+
 // ===== MCP 服务器热配置 =====
 // 后端 /v1/mcp/servers CRUD + /v1/mcp/servers/reload 触发增量注册/注销工具。
 // 注意：list 返回直接数组（非 {servers: [...]} 包装）；update 用 PUT（非 PATCH）。

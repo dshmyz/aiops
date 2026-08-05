@@ -2039,6 +2039,36 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="docs-view"]').attributes('data-view')).toBe('docs');
   });
 
+  test('shows the current logged-in user in the sidebar', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/v1/identity/me') {
+        return ok({ subject: 'goryun', roles: ['admin', 'operator'] });
+      }
+      return ok({});
+    }));
+
+    const wrapper = mountApp();
+    await flushPromises();
+
+    const chip = wrapper.find('[data-test="current-user"]');
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toContain('goryun');
+    expect(chip.attributes('title')).toContain('admin');
+  });
+
+  test('hides the user chip when identity cannot be loaded', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('network down');
+    }));
+
+    const wrapper = mountApp();
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="current-user"]').exists()).toBe(false);
+  });
+
+
   test('refreshes audit events after an assistant answer response', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

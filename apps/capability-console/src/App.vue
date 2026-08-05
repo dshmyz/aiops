@@ -8,6 +8,8 @@ import { useAssistant } from './composables/useAssistant';
 import { useScheduledTasks } from './composables/useScheduledTasks';
 import { useMCPServers } from './composables/useMCPServers';
 import { useCapabilities } from './composables/useCapabilities';
+import { getCurrentUser } from './api';
+import type { CurrentUser } from './api';
 import PendingPlanDetail from './components/PendingPlanDetail.vue';
 import AssistantInlineConfirm from './components/AssistantInlineConfirm.vue';
 import AssistantTranscript from './components/AssistantTranscript.vue';
@@ -48,6 +50,16 @@ const activeView = ref<ActiveView>('assistant');
 
 // 侧栏折叠状态
 const sidebarCollapsed = ref(false);
+
+// 当前登录用户（顶栏展示"我是谁"）。失败/未配置时不阻塞界面，仅留空。
+const currentUser = ref<CurrentUser | null>(null);
+async function loadCurrentUser() {
+  try {
+    currentUser.value = await getCurrentUser();
+  } catch {
+    currentUser.value = null;
+  }
+}
 
 // 视图顺序与快捷键映射（Cmd/Ctrl+1..9），顺序与侧栏视觉分组一致
 const viewOrder: ActiveView[] = ['assistant', 'management', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'knowledge', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace', 'docs'];
@@ -463,6 +475,7 @@ onMounted(() => {
   refreshConversations();
   // 定时巡检：加载任务列表（失败 badge 轮询由 useScheduledTasks 内部管理）
   void refreshScheduledTasks();
+  void loadCurrentUser();
   window.addEventListener('keydown', handleGlobalKeydown);
 });
 
@@ -477,6 +490,10 @@ onUnmounted(() => {
       <div class="app-brand">
         <strong v-if="!sidebarCollapsed">AI 运维 Copilot</strong>
         <span v-if="!sidebarCollapsed">中间件智能运维</span>
+        <span v-if="currentUser && !sidebarCollapsed" data-test="current-user" class="current-user" :title="`角色：${(currentUser.roles ?? []).join(', ') || '无'}`">
+          <SfSymbol name="person" :size="12" />
+          {{ currentUser.subject }}
+        </span>
         <button
           data-test="nav-collapse-toggle"
           class="nav-collapse-toggle"

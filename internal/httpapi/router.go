@@ -484,6 +484,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		r.serveSearchAuditEvents(writer, request)
 		return
 	}
+	if request.Method == http.MethodGet && request.URL.Path == "/v1/identity/me" {
+		r.serveIdentityMe(writer, request)
+		return
+	}
 	if request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/v1/action-plans/") {
 		r.serveGetActionPlan(writer, request)
 		return
@@ -2744,6 +2748,20 @@ func (r *Router) serveKnowledgeStatus(writer http.ResponseWriter, request *http.
 	writeCappedJSON(writer, map[string]any{
 		"embedder_configured": true,
 		"documents_count":     len(docs),
+	})
+}
+
+// serveIdentityMe returns the currently authenticated caller's identity
+// (Subject + Roles). Any logged-in user may view their own identity — no
+// admin gate, since subjects/roles are already established at auth time.
+func (r *Router) serveIdentityMe(writer http.ResponseWriter, request *http.Request) {
+	user, _, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	writeCappedJSON(writer, map[string]any{
+		"subject": user.Subject,
+		"roles":   user.Roles,
 	})
 }
 

@@ -6,7 +6,7 @@
  */
 withDefaults(defineProps<{
   /** 图标名称，对应内置 SF Symbol 风格图形 */
-  name: 'bubble-left' | 'sparkles' | 'waveform' | 'exclamationmark-triangle' | 'checkmark-circle' | 'arrow-up-circle'
+  name: 'bubble-left' | 'sparkles' | 'waveform' | 'exclamationmark-triangle' | 'checkmark-circle' | 'arrow-up-circle' | 'person'
   /** 尺寸 px */
   size?: number
 }>(), {
@@ -64,6 +64,12 @@ withDefaults(defineProps<{
       <circle cx="12" cy="12" r="9" />
       <line x1="12" y1="16" x2="12" y2="8" />
       <polyline points="8,12 12,8 16,12" />
+    </template>
+
+    <!-- 用户（头+肩） -->
+    <template v-else-if="name === 'person'">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20a7 7 0 0 1 14 0" />
     </template>
   </svg>
 </template>

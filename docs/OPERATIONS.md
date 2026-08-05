@@ -173,6 +173,7 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（含 prod/staging/de
 | `POST /v1/action-plans/{id}/confirm` | viewer/operator/admin + 策略/environment |
 | `GET /v1/audit-events` · `/v1/audit-events/search` | viewer/operator/admin |
 | `GET /v1/executions` | **admin only** |
+| `GET /v1/identity/me` | 任一登录用户（返回当前 subject + roles，供顶栏"我是谁"） |
 | `GET /v1/scheduled-tasks*` | 任一登录用户（写/触发=admin） |
 | `GET /v1/inspection-reports*` | 任一登录用户 |
 | `GET/POST /v1/marketplace/capabilities*` | 读=任一；发布/评分写=admin |
@@ -226,7 +227,8 @@ knowledge/status），其余（feedback/knowledge/MCP/marketplace/webhook）返�
 | 使用手册 | — | 渲染 docs/OPERATIONS.md（admin 只读，`GET /v1/docs/OPERATIONS.md`） |
 
 **鉴权**：开发环境下 Vite 代理注入固定 `VITE_DEV_ADMIN_TOKEN`；生产由前端直接带真实用户
-JWT（CAS 登录跳转 `/v1/auth/config` + `/v1/auth/cas/*`）。
+JWT（CAS 登录跳转 `/v1/auth/config` + `/v1/auth/cas/*`）。登录后侧栏品牌区显示当前用户
+`subject`（悬停可见角色），来自 `GET /v1/identity/me`。
 
 ---
 
