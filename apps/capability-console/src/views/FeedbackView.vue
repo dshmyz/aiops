@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue';
 import { listFeedback } from '../api';
 import type { FeedbackEntry } from '../types';
+import { buildFeedbackInsights, insightsToMarkdown } from '../composables/useFeedbackInsights';
+import type { FeedbackInsight } from '../composables/useFeedbackInsights';
 
 const items = ref<FeedbackEntry[]>([]);
 const total = ref(0);
@@ -10,9 +12,15 @@ const error = ref('');
 const offset = ref(0);
 const limit = 20;
 
+// 改进建议基于更大样本（最多 200 条），与表格自己的分页解耦。
+const insightSourceCount = ref(0);
+const insights = ref<FeedbackInsight[]>([]);
+const insightsLoading = ref(false);
+const insightsError = ref('');
+
 const thumbsUp = computed(() => items.value.filter((f) => f.rating > 0).length);
 const thumbsDown = computed(() => items.value.filter((f) => f.rating < 0).length);
-const corrections = computed(() => items.value.filter((f) => f.correction.trim() !== ''));
+const corrections = computed(() => items.value.filter((f) => (f.correction || '').trim() !== ''));
 
 async function load(reset = false) {
   if (reset) offset.value = 0;
@@ -27,6 +35,33 @@ async function load(reset = false) {
   } finally {
     loading.value = false;
   }
+}
+
+// 拉取全量反馈（上限 200）生成改进建议清单
+async function loadInsights() {
+  insightsLoading.value = true;
+  insightsError.value = '';
+  try {
+    const page = await listFeedback({ limit: 200, offset: 0 });
+    insightSourceCount.value = page.total ?? page.items?.length ?? 0;
+    insights.value = buildFeedbackInsights(page.items ?? []);
+  } catch (e) {
+    insightsError.value = e instanceof Error ? e.message : '生成改进建议失败';
+  } finally {
+    insightsLoading.value = false;
+  }
+}
+
+function exportInsights() {
+  const blob = new Blob([insightsToMarkdown(insights.value, insightSourceCount.value)], {
+    type: 'text/markdown;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `feedback-建议-${new Date().toISOString().slice(0, 10)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function prevPage() {
@@ -56,7 +91,10 @@ function formatDate(iso: string): string {
 
 defineEmits<{ 'go-to-assistant': [] }>();
 
-onMounted(() => load());
+onMounted(() => {
+  void load();
+  void loadInsights();
+});
 </script>
 
 <template>
@@ -92,6 +130,46 @@ onMounted(() => load());
 
     <p v-if="error" class="error-text" role="alert">{{ error }}</p>
     <p v-if="loading" class="loading-text">加载中…</p>
+
+    <!-- 改进建议：把好/坏反馈沉淀成可落地的下一步动作 -->
+    <section data-test="feedback-insights" class="insights-panel">
+      <div class="insights-header">
+        <h2>驱动迭代的改进建议</h2>
+        <button
+          data-test="feedback-insights-export"
+          class="mini-button"
+          :disabled="insightsLoading || insights.length === 0"
+          @click="exportInsights"
+        >
+          导出建议 (.md)
+        </button>
+      </div>
+      <p class="insights-note">
+        基于 {{ insightSourceCount }} 条反馈聚合出待处理主题，按命中条数排序，供人工确认后落到 prompt / runbook / 能力 / 策略改进。
+      </p>
+      <p v-if="insightsLoading" class="loading-text">正在聚合反馈…</p>
+      <p v-if="insightsError" class="error-text" role="alert">{{ insightsError }}</p>
+
+      <div v-if="!insightsLoading && insights.length === 0 && !insightsError" class="insights-empty">
+        暂无需要处理的负向反馈。好评与无纠正内容不会被列入改进清单。
+      </div>
+
+      <ul v-else class="insights-list">
+        <li v-for="ins in insights" :key="ins.key" data-test="feedback-insight-item" class="insight-item">
+          <div class="insight-head">
+            <strong>{{ ins.label }}</strong>
+            <span class="insight-count" :class="{ negative: ins.count > 0 }">{{ ins.count }} 条</span>
+          </div>
+          <p class="insight-suggestion">{{ ins.suggestion }}</p>
+          <details v-if="ins.examples.length" class="insight-evidence">
+            <summary>证据示例</summary>
+            <ul>
+              <li v-for="(ex, i) in ins.examples" :key="i">{{ ex }}</li>
+            </ul>
+          </details>
+        </li>
+      </ul>
+    </section>
 
     <div v-if="!loading && items.length === 0 && !error" class="empty">
       暂无反馈数据。操作员在对话中点击 👍/👎 后会显示在这里。
@@ -132,3 +210,100 @@ onMounted(() => load());
     </div>
   </section>
 </template>
+
+<style scoped>
+.insights-panel {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-lg);
+}
+
+.insights-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.insights-header h2 {
+  margin: 0;
+  font-size: var(--font-lg);
+}
+
+.insights-note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+}
+
+.insights-empty {
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+}
+
+.insights-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.insight-item {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.insight-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.insight-count {
+  font-size: var(--font-xs);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
+.insight-count.negative {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.insight-suggestion {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+}
+
+.insight-evidence {
+  margin-top: var(--space-2);
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+}
+
+.insight-evidence summary {
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+}
+
+.insight-evidence ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  display: grid;
+  gap: var(--space-1);
+}
+</style>

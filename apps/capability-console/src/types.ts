@@ -757,7 +757,8 @@ export interface FeedbackEntry {
   turn_id: string;
   subject: string;
   rating: number;
-  correction: string;
+  /** 后端对无纠正的条目返回 null */
+  correction: string | null;
   created_at: string;
 }
 
