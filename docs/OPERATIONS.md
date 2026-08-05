@@ -124,6 +124,7 @@ curl -s http://127.0.0.1:18080/metrics   # Prometheus 指标
 | LLM | `COPILOT_OPENAI_TIMEOUT` / `_RETRY` / `_RETRY_BACKOFF` | 超时/重试/退避 |
 | Prompt | `COPILOT_PROMPTS_DIR` | prompt 模板目录，热加载无需重启 |
 | 能力 | `COPILOT_CAPABILITIES_DIR` | YAML 已发布能力目录；留空则不启用能力管理 |
+| 文档 | `COPILOT_DOCS_DIR` | 「使用手册」markdown 目录；留空取工作目录 `docs/`，生产可挂到只读卷设绝对路径 |
 | 能力市场 | （迁移自动建表） | `/v1/marketplace/capabilities` 团队共享注册表 |
 | MCP | `COPILOT_MCP_SERVERS` | JSON 数组，启动发现外部 MCP 工具 |
 | 告警 | `COPILOT_ALERT_WEBHOOK_SECRET` | webhook HMAC 密钥；**未设则 webhook 路由 503 fail-closed** |
@@ -182,6 +183,7 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（含 prod/staging/de
 | `GET/PUT /v1/admin/prompts*` | **admin** |
 | `GET/POST /v1/admin/knowledge*` · `GET /v1/admin/knowledge/status` | **admin** |
 | `GET/POST /v1/admin/runbook-drafts*` | **admin** |
+| `GET /v1/docs/{name}` | **admin**（读取 docs/ 目录 markdown，供「使用手册」视图；白名单文件名 + 防路径穿越） |
 | `GET/POST/PUT/DELETE /v1/mcp/servers*` · `POST .../reload` | **admin** |
 
 未匹配 → `404`。部分 admin 端点未配置时返回 `{configured:false}`（prompts / runbook-drafts /
@@ -197,7 +199,7 @@ knowledge/status），其余（feedback/knowledge/MCP/marketplace/webhook）返�
 
 ## 5. Web 控制台（capability-console）
 
-单页应用（无路由库，`ref<ActiveView>` 切换），共 **13 个视图**，除 `management` 外均懒加载。
+单页应用（无路由库，`ref<ActiveView>` 切换），共 **14 个视图**，除 `management` 外均懒加载。
 
 **侧栏「运维」**：
 
@@ -221,6 +223,7 @@ knowledge/status），其余（feedback/knowledge/MCP/marketplace/webhook）返�
 | 知识库 | Cmd+7 | RAG 文档列表/摄入/状态 |
 | 用户反馈 | Cmd+8 | 评分/纠正 + 改进建议聚合 + **runbook 草稿生成/启用** |
 | MCP 服务器 | Cmd+9 | MCP 服务器 热 CRUD/reload |
+| 使用手册 | — | 渲染 docs/OPERATIONS.md（admin 只读，`GET /v1/docs/OPERATIONS.md`） |
 
 **鉴权**：开发环境下 Vite 代理注入固定 `VITE_DEV_ADMIN_TOKEN`；生产由前端直接带真实用户
 JWT（CAS 登录跳转 `/v1/auth/config` + `/v1/auth/cas/*`）。
@@ -365,6 +368,7 @@ make web-build         # vue-tsc + vite build
 - [ ] `COPILOT_CAPABILITIES_DIR` 指向审阅通过的已发布能力，确认写能力走确认 executor
 - [ ] LLM 配置就绪（`COPILOT_OPENAI_*`），或明确使用确定性 planner
 - [ ] `COPILOT_PROMPTS_DIR` 指向线上 prompt 模板
+- [ ] `COPILOT_DOCS_DIR` 指向「使用手册」只读卷（留空则取工作目录 `docs/`）
 - [ ] 可选：知识库 RAG（`COPILOT_KNOWLEDGE_EMBEDDER_*`）
 
 **可观测/高可用**

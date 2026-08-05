@@ -46,6 +46,7 @@ async function navigateTo(wrapper: ReturnType<typeof mountApp>, selector: string
     '[data-test="nav-plans"]': '[data-test="plans-entry"]',
     '[data-test="nav-scheduled-tasks"]': '[data-test="scheduled-tasks-entry"]',
     '[data-test="nav-management"]': '[data-test="management-entry"]',
+    '[data-test="nav-docs"]': '[data-test="docs-view"]',
   };
   const targetSelector = viewMap[selector];
   if (targetSelector) {
@@ -527,8 +528,8 @@ describe('Capability Console', () => {
     expect(sections[1].find('[data-test="nav-section-label"]').text()).toBe('管理配置');
     // 运维组包含 5 个 nav-item（assistant/management/plans/scheduled-tasks/inspection-reports）
     expect(sections[0].findAll('.nav-item').length).toBe(5);
-    // 管理配置组包含 8 个 nav-item（audit/executions/incident/marketplace/prompts/knowledge/feedback/mcp-servers）
-    expect(sections[1].findAll('.nav-item').length).toBe(8);
+    // 管理配置组包含 9 个 nav-item（audit/executions/incident/marketplace/prompts/knowledge/feedback/mcp-servers/docs）
+    expect(sections[1].findAll('.nav-item').length).toBe(9);
   });
 
   test('switches views via Cmd+number shortcut', async () => {
@@ -2001,16 +2002,19 @@ describe('Capability Console', () => {
     const managementNav = wrapper.find('[data-test="nav-management"]');
     const plansNav = wrapper.find('[data-test="nav-plans"]');
     const auditNav = wrapper.find('[data-test="nav-audit"]');
+    const docsNav = wrapper.find('[data-test="nav-docs"]');
 
     expect(assistantNav.attributes('data-view')).toBe('assistant');
     expect(managementNav.attributes('data-view')).toBe('management');
     expect(plansNav.attributes('data-view')).toBe('plans');
     expect(auditNav.attributes('data-view')).toBe('audit');
+    expect(docsNav.attributes('data-view')).toBe('docs');
 
     expect(assistantNav.find('[data-test="nav-icon"]').exists()).toBe(true);
     expect(managementNav.find('[data-test="nav-icon"]').exists()).toBe(true);
     expect(plansNav.find('[data-test="nav-icon"]').exists()).toBe(true);
     expect(auditNav.find('[data-test="nav-icon"]').exists()).toBe(true);
+    expect(docsNav.find('[data-test="nav-icon"]').exists()).toBe(true);
   });
 
   test('each view section exposes its identity for accent coloring', async () => {
@@ -2030,6 +2034,9 @@ describe('Capability Console', () => {
 
     await navigateTo(wrapper, '[data-test="nav-audit"]');
     expect(wrapper.find('[data-test="audit-entry"]').attributes('data-view')).toBe('audit');
+
+    await navigateTo(wrapper, '[data-test="nav-docs"]');
+    expect(wrapper.find('[data-test="docs-view"]').attributes('data-view')).toBe('docs');
   });
 
   test('refreshes audit events after an assistant answer response', async () => {

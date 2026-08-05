@@ -12,7 +12,7 @@
  * Icons are simplified from Lucide (ISC/Ishikawa Masashi, MIT-style license).
  * Each path uses stroke="currentColor" so it tints with the parent color.
  */
-type IconName = 'assistant' | 'management' | 'plans' | 'audit' | 'executions' | 'incident' | 'scheduled-tasks' | 'inspection-reports' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers';
+type IconName = 'assistant' | 'management' | 'plans' | 'audit' | 'executions' | 'incident' | 'scheduled-tasks' | 'inspection-reports' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs';
 
 defineProps<{ name: IconName }>();
 </script>
@@ -165,6 +165,17 @@ defineProps<{ name: IconName }>();
     <template v-else-if="name === 'mcp-servers'">
       <path
         d="M9 2v6M15 2v6M7 8h10v3a5 5 0 0 1-10 0V8zM12 16v6"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+    <!-- docs: open book (manual) -->
+    <template v-else-if="name === 'docs'">
+      <path
+        d="M2 4h4a3 3 0 0 1 3 3v11a2 2 0 0 0-2-2H2V4zM22 4h-4a3 3 0 0 0-3 3v11a2 2 0 0 1 2-2h5V4z"
         fill="none"
         stroke="currentColor"
         stroke-width="2"

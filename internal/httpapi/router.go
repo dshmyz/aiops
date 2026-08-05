@@ -460,6 +460,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		r.serveRunbookDrafts(writer, request)
 		return
 	}
+	if strings.HasPrefix(request.URL.Path, "/v1/docs/") {
+		r.serveDocs(writer, request)
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/v1/mcp/") {
 		r.serveMCP(writer, request)
 		return

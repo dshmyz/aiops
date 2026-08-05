@@ -24,6 +24,7 @@ import ManagementView from './views/ManagementView.vue';
 const AdminPromptsView = defineAsyncComponent(() => import('./views/AdminPromptsView.vue'));
 const AdminKnowledgeView = defineAsyncComponent(() => import('./views/AdminKnowledgeView.vue'));
 const FeedbackView = defineAsyncComponent(() => import('./views/FeedbackView.vue'));
+const DocsView = defineAsyncComponent(() => import('./views/DocsView.vue'));
 import AssistantSuggestions from './components/AssistantSuggestions.vue';
 import CapabilityStatusBadge from './components/CapabilityStatusBadge.vue';
 import BlockRenderer from './components/BlockRenderer.vue';
@@ -41,7 +42,7 @@ import type {
   ExecutionResult,
 } from './types';
 
-type ActiveView = 'assistant' | 'management' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers';
+type ActiveView = 'assistant' | 'management' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs';
 
 const activeView = ref<ActiveView>('assistant');
 
@@ -49,7 +50,7 @@ const activeView = ref<ActiveView>('assistant');
 const sidebarCollapsed = ref(false);
 
 // 视图顺序与快捷键映射（Cmd/Ctrl+1..9），顺序与侧栏视觉分组一致
-const viewOrder: ActiveView[] = ['assistant', 'management', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'knowledge', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace'];
+const viewOrder: ActiveView[] = ['assistant', 'management', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'knowledge', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace', 'docs'];
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   // Cmd/Ctrl + 数字 切换视图
@@ -643,6 +644,17 @@ onUnmounted(() => {
           <NavIcon name="mcp-servers" />
           <span v-if="!sidebarCollapsed">MCP 服务器</span>
         </button>
+        <button
+          data-test="nav-docs"
+          data-view="docs"
+          class="nav-item"
+          :class="{ active: activeView === 'docs' }"
+          title="使用手册"
+          @click="activeView = 'docs'"
+        >
+          <NavIcon name="docs" />
+          <span v-if="!sidebarCollapsed">使用手册</span>
+        </button>
       </div>
 
       <div style="flex: 1"></div>
@@ -892,6 +904,8 @@ onUnmounted(() => {
         v-if="activeView === 'mcp-servers'"
         :mcp-servers="mcpServersComposable"
       />
+
+      <DocsView v-if="activeView === 'docs'" />
     </section>
 
   </main>

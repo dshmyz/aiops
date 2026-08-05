@@ -732,6 +732,19 @@ export async function activateRunbookDraft(id: string): Promise<RunbookDraft> {
   });
 }
 
+// ===== 文档（后台"使用手册"）=====
+// 后端 /v1/docs/{name} 仅 admin 读取 docs 目录内白名单 markdown（见 COPILOT_DOCS_DIR）。
+
+export interface DocContent {
+  name: string;
+  content: string;
+}
+
+/** 读取后端 docs 目录中的一份 markdown 文档（当前为使用手册 OPERATIONS.md）。 */
+export async function getDoc(name = 'OPERATIONS.md'): Promise<DocContent> {
+  return request<DocContent>(`/v1/docs/${encodeURIComponent(name)}`);
+}
+
 // ===== MCP 服务器热配置 =====
 // 后端 /v1/mcp/servers CRUD + /v1/mcp/servers/reload 触发增量注册/注销工具。
 // 注意：list 返回直接数组（非 {servers: [...]} 包装）；update 用 PUT（非 PATCH）。
