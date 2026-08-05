@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -347,15 +348,60 @@ func feedbackTurn(intent Intent, out StepOutcome) Turn {
 
 // feedbackText renders the human-visible feedback for an executed step. When
 // present, it includes the step summary so the replanning LLM can see the actual
-// result. The trailing instruction tells the planner to emit final_answer when
-// the returned data already answers the user's question, instead of repeating the
-// same tool.
+// result. When the step is a diagnostic (the step output carries severity,
+// per-observation and per-finding structure), those concrete findings are
+// appended line by line so the replanning LLM — and any later step that must
+// converge into the SOP's "候选根因表/最可能根因" (alert-evidence-checklist) —
+// actually sees the evidence the previous diagnosis surfaced, rather than a
+// one-line summary. The trailing instruction tells the planner to emit
+// final_answer when the returned data already answers the user's question,
+// instead of repeating the same tool.
 func feedbackText(out StepOutcome) string {
+	conclude := "，不要重复执行同域/同资源的相同工具"
 	if out.Tool == "" || out.Summary == "" {
 		return "工具已执行。若结果已回答用户问题，请直接 final_answer: true 总结收尾，不要重复执行已执行过的工具。"
 	}
-	return out.Tool + " 已执行并返回结果：" + out.Summary +
-		"。若此结果已回答用户问题，请直接 final_answer: true 并给出面向用户的中文 summary 收尾；不要重复执行同域/同资源的相同工具。"
+	text := out.Tool + " 已执行并返回结果：" + out.Summary +
+		"。若此结果已回答用户问题，请直接 final_answer: true 并给出面向用户的中文 summary 收尾" + conclude + "。"
+	if extra := diagnosticFeedback(out.Output); extra != "" {
+		text += "\n本次诊断的取证结果如下，供后续步骤引用（涉及候选根因时需据实给出证据链，不得编造）：\n" + extra
+	}
+	return text
+}
+
+// diagnosticFeedback renders the structured findings of a diagnostic step
+// (severity, per-observation and per-finding lines carried in the step output)
+// as a compact evidence block. It returns "" for non-diagnostic steps so the
+// feedback for a plain read stays one line.
+func diagnosticFeedback(output map[string]any) string {
+	if len(output) == 0 {
+		return ""
+	}
+	severity, hasSev := output["severity"].(string)
+	obs, hasObs := output["observations"].([]string)
+	findings, hasFindings := output["findings"].([]string)
+	domains, hasDomains := output["domains"].([]string)
+	if !hasSev && !hasObs && !hasFindings {
+		return ""
+	}
+	var b strings.Builder
+	if hasDomains && len(domains) > 0 {
+		fmt.Fprintf(&b, "- 诊断域：%s\n", strings.Join(domains, ", "))
+	}
+	if hasSev {
+		fmt.Fprintf(&b, "- 综合严重级别：%s\n", severity)
+	}
+	for _, line := range obs {
+		if strings.TrimSpace(line) != "" {
+			fmt.Fprintf(&b, "- 观察：%s\n", line)
+		}
+	}
+	for _, line := range findings {
+		if strings.TrimSpace(line) != "" {
+			fmt.Fprintf(&b, "- 结论：%s\n", line)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // failureTurn wraps a failed advisory step as an assistant Turn signalling the
