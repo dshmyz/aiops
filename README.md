@@ -2,6 +2,9 @@
 
 Go backend foundation for an AI-assisted middleware operations console.
 
+> **上手/上线请看：[docs/OPERATIONS.md](docs/OPERATIONS.md)（使用手册）** — 覆盖本地与生产启动、
+> 配置与安全、HTTP API 与 RBAC、Web 控制台、核心工作流、测试与构建、部署上线与上线前检查清单。
+
 ## What Exists
 
 - Go HTTP service with `GET /healthz`.
