@@ -1,0 +1,37 @@
+# copilot-api — systemd 服务单元示例
+#
+# 放置: /etc/systemd/system/copilot-api.service
+# 用法: sudo systemctl daemon-reload
+#       sudo systemctl enable --now copilot-api
+#
+# 依赖脚本: /path/to/repo/scripts/{start,stop,health}.sh
+# 部署根默认即仓库根; 若打包到别处, 设置 Environment=RUN_ROOT=/opt/aiops。
+# 密钥/DB 配置经 EnvironmentFile=.env 或容器环境注入, 不入 unit 文件。
+
+[Unit]
+Description=AI Operations Copilot API
+Documentation=file:///path/to/repo/docs/OPERATIONS.md
+After=network.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes                        # start.sh 后台起进程后即返回, 由 RemainAfterExit 记 active
+WorkingDirectory=/path/to/repo             # 迁移相对 cwd 读 migrations/
+ExecStart=/path/to/repo/scripts/start.sh
+ExecStop=/path/to/repo/scripts/stop.sh
+ExecReload=/path/to/repo/scripts/stop.sh && /path/to/repo/scripts/start.sh
+
+# 环境文件(可按需; 若用 Secret 注入则删除此行使 unit 可被 daemon 渲染)
+# EnvironmentFile=/path/to/repo/.env
+
+# 探活: 每 30s 跑一次健康检查失败则重启
+Restart=on-failure
+RestartSec=5
+
+# 使用非 root 用户(与脚本生成的二进制一致)
+# User=copilot
+# Group=copilot
+
+[Install]
+WantedBy=multi-user.target

@@ -2,19 +2,41 @@ name: Capability Validation
 
 on:
   pull_request:
-    paths:
-      - 'capabilities/**/*.yaml'
-      - 'capabilities/**/*.yml'
-      - 'examples/capabilities/**/*.yaml'
-      - 'examples/capabilities/**/*.yml'
   push:
     branches:
       - main
-    paths:
-      - 'capabilities/**/*.yaml'
-      - 'capabilities/**/*.yml'
 
 jobs:
+  checks:
+    name: Full checks (make all-checks)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/capability-console/package-lock.json
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Frontend dependencies
+        working-directory: apps/capability-console
+        run: npm ci
+
+      - name: Run make all-checks
+        run: make all-checks
+
   validate:
     name: Validate Capability Files
     runs-on: ubuntu-latest

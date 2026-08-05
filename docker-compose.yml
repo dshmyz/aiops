@@ -18,7 +18,7 @@ services:
       retries: 20
 
   copilot-api:
-    # NOTE: requires Dockerfile in project root (not yet created).
+    # Multi-stage Go build via root Dockerfile.
     build: .
     depends_on:
       mysql:
@@ -34,15 +34,15 @@ services:
       - ./examples/capabilities:/capabilities:ro
 
   capability-console:
-    # NOTE: requires Dockerfile in apps/capability-console (not yet created).
+    # SPA by node build stage + nginx serve/reverse-proxy stage (see
+    # apps/capability-console/Dockerfile + nginx.conf).
     build: ./apps/capability-console
     depends_on:
       copilot-api:
         condition: service_started
     ports:
-      - "5173:5173"
-    environment:
-      VITE_API_BASE_URL: http://copilot-api:18080
+      # nginx:80 托管 SPA 并把 /v1 反代到 copilot-api; 宿主机 8080 暴露
+      - "8080:80"
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest

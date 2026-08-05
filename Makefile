@@ -1,4 +1,4 @@
-.PHONY: test test-integration lint vet cover build docker-build web-build web-test web-typecheck web-check e2e all-checks dev-up dev-down dev-logs dev-verify-trace dev-verify-verification eval
+.PHONY: test test-integration lint vet cover build docker-build web-build web-test web-typecheck web-check e2e all-checks dev-up dev-down dev-logs dev-verify-trace dev-verify-verification eval gen-token compose-up compose-down compose-logs scripts-build scripts-start scripts-stop scripts-status scripts-logs scripts-health scripts-token scripts-nginx
 
 test:
 	go test -race ./...
@@ -39,6 +39,51 @@ docker-build:
 
 web-build:
 	cd apps/capability-console && npm run build
+
+# === Operational tooling ===
+
+# Generate a 24h admin JWT for dev/联调. Sources ./.env so COPILOT_JWT_HMAC_SECRET
+# is picked up; the token is only meant for local testing, not production identity.
+gen-token:
+	@if [ -f .env ]; then set -a; . ./.env; set +a; else echo "WARN: no ./.env — use COPILOT_JWT_HMAC_SECRET env"; fi; \
+	go run ./gen_token.go
+
+# Build & run the full containerized stack (mysql + copilot-api + capability-console)
+# via docker-compose. Requires the two Dockerfiles and a JWT secret.
+compose-up:
+	docker compose up -d --build
+
+compose-down:
+	docker compose down
+
+compose-logs:
+	docker compose logs -f
+
+# === Shell 运维脚本（线上无 Docker 时用 scripts/*.sh）===
+# 透传到 scripts/*.sh；详见 docs/OPERATIONS.md「纯脚本部署」。
+scripts-build:
+	bash scripts/build.sh
+
+scripts-start:
+	bash scripts/start.sh
+
+scripts-stop:
+	bash scripts/stop.sh
+
+scripts-status:
+	bash scripts/status.sh
+
+scripts-logs:
+	bash scripts/logs.sh
+
+scripts-health:
+	bash scripts/health.sh
+
+scripts-token:
+	bash scripts/gen-token.sh
+
+scripts-nginx:
+	bash scripts/nginx.sh generate
 
 # Standalone Vue typecheck (vue-tsc --noEmit). `web-build` also runs it, but this
 # target isolates the check without emitting a production bundle.

@@ -35,3 +35,12 @@ incident-panorama-probe.png
 # Capability validator generated reports
 .capability-validation.json
 validation-report.md
+
+# Runtime artifacts created by scripts/*.sh (build + start stop/status/logs)
+/bin/
+/run/
+/log/
+/web/
+
+# Rendered nginx config (generated from deploy/console-nginx.conf.template by scripts/nginx.sh)
+/deploy/console-nginx.conf

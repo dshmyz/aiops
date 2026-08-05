@@ -1,0 +1,30 @@
+# 依赖与构建缓存
+node_modules/
+.vite/
+dist/
+
+# 本地数据库与备份
+*.db
+*.db.bak
+*.db.bak.*
+
+# 环境文件（可能含密钥，不入镜像）
+.env
+.env.*
+!.env.example
+
+# Git 历史与本地配置
+.git/
+.claude/
+
+# 本地构建产物
+/copilot-api
+
+# 浏览器调试抓取 / 截图
+.playwright-mcp/
+*.png
+
+# 测试 / 校验产物
+validation-report.md
+.capability-validation.json
+coverage.out

@@ -308,6 +308,12 @@ make web-check         # 类型检查 + 单测（提交前端改动前的完整�
 make all-checks        # vet + lint + test + web-check
 make build             # go build -o copilot-api
 make web-build         # vue-tsc + vite build
+
+# 运维/部署
+make gen-token         # 读取 ./.env 生成 24h admin JWT（开发/联调）
+make compose-up        # 构建并启动容器化栈（mysql + copilot-api + console）
+make compose-logs      # 跟踪 compose 服务日志
+make compose-down      # 停止并清理
 ```
 
 > 说明：`make web-test`/`all-checks` 整仓并行跑时，个别 5s 超时用例（如
@@ -339,16 +345,34 @@ make web-build         # vue-tsc + vite build
                 └─ 外部 MCP servers / 飞书 / webhook
 ```
 
-### 8.2 暂未就绪的容器化项（上线前需补齐）
+### 8.2 容器化构建与一键编排
 
-- **根目录 `Dockerfile`（copilot-api）不存在**：`docker-compose.yml` 中 `copilot-api` 与
-  `capability-console` 的 `build:` 均标了 "requires Dockerfile (not yet created)"。上线要么
-  走裸进程/Systemd/K8s 直接部署二进制，要么先补两个 Dockerfile。
-- `docker-compose.yml` 提供 `mysql`、`otel-collector`、`mock-middleware` 等开发辅助服务；
-  `copilot-api` / `capability-console` 容器化后即可一键编排。
-- CI（`.github/workflows/capability-validation.yml`）目前**仅校验能力 YAML**（语法/schema/必填/
-  机密扫描/dry-run + PR 评论），**尚未跑 Go 测试与前端测试**——建议上线前把 `make all-checks`
-  并入 CI。
+根目录 `Dockerfile`（copilot-api，多阶段 Go 构建 → 精简 alpine 运行镜像）与
+`apps/capability-console/Dockerfile`（node 构建 → nginx 托管 SPA + 反代 `/v1`）均已就绪，
+`docker-compose.yml` 可直接编排。Makefile 提供一键目标：
+
+```bash
+make compose-up      # 构建并后台启动 mysql + copilot-api + capability-console
+make compose-logs    # 跟踪三服务日志
+make compose-down    # 停止并清理
+make gen-token       # 读取 ./.env，生成 24h admin JWT（开发/联调用）
+```
+
+镜像说明：
+
+- **copilot-api 镜像**：内置 `migrations/`（MySQL 迁移启动时自动应用）、`prompts/`（热加载模板）、
+  `docs/`（使用手册，`COPILOT_DOCS_DIR=/app/docs`）。配置全走环境变量，密钥经 Secret 注入不入镜像；
+  以非 root 用户运行，监听 `:18080`。
+- **capability-console 镜像**：nginx 以 `:80` 托管构建产物，并把同源 `/v1` 反向代理到
+  `copilot-api:18080`（SPA 用相对 `/v1` fetch，见 [api.ts](../apps/capability-console/src/api.ts)；
+  nginx 关闭缓冲使 SSE 流式对话可实时推送）。compose 将其暴露到宿主机 `8080`。
+
+容器化后即可按需要走裸进程 / Systemd / K8s 部署（反向代理 + TLS 由 Ingress / 网关层承担）。
+
+> **待办说明**：
+> - `make compose-up` 需要 Docker 能拉取 `golang`/`node`/`alpine`/`nginx`/`mysql` 等基础镜像（构建期联网）。
+> - CI（`.github/workflows/capability-validation.yml`）**已新增 `checks` job**：`pull_request`（全路径）与
+>   `push main` 时跑 `make all-checks`（Go vet/lint/test + 前端 typecheck/test），同时保留原有能力 YAML 校验 job。
 
 ### 8.3 启动说明要点
 
@@ -357,6 +381,52 @@ make web-build         # vue-tsc + vite build
 - 审计兜底默认开启：DB 写失败时本地 JSON 落盘 + 后台重放，务必为 `COPILOT_AUDIT_FALLBACK_DIR`
   挂持久卷。
 - 就绪探针 `GET /readyz`（含 DB ping）用于部署健康检查；`/metrics` 供 Prometheus 抓取。
+
+### 8.4 纯脚本 / systemd 部署（无 Docker）
+
+线上**没有 Docker** 时，用 [`scripts/*.sh`](../scripts/) 这套自包含脚本运维（后端 pid 管理 + 前端
+nginx 反代），或配合 systemd 管理。Makefile 提供透传目标（`make scripts-*`）。
+
+**部署根布局**（默认即仓库根；打包到别处用 `RUN_ROOT`/`AIOS_HOME` 覆盖）：
+
+```
+<repo>/
+├── bin/copilot-api      # 后端二进制（scripts/build.sh 产出）
+├── web/                 # 前端静态产物（从 apps/capability-console/dist 拷贝）
+├── run/api.pid          # 后端 pid（start/stop 写入）
+├── log/api.log          # 后端日志
+└── deploy/console-nginx.conf   # 宿主机 nginx 反代配置（scripts/nginx.sh 渲染）
+```
+
+**常用命令**：
+
+```bash
+make scripts-build        # 构建后端 + 前端（bash scripts/build.sh，支持 --backend-only / --web-only）
+make scripts-start        # 启动后端，轮询 /readyz 就绪（幂等；--force 重启；--web 顺带渲染 nginx 配置）
+make scripts-status       # UP / DOWN / STOPPED（UP=0；供监控引用）
+make scripts-health       # 打 /healthz + /readyz + /metrics（--auth 再带 admin JWT 验 /v1/capabilities）
+make scripts-logs         # tail 跟踪日志（可传行数，如 scripts/logs.sh 50）
+make scripts-stop         # 优雅停止后端（TERM → 超时 KILL）
+make scripts-token        # 生成 24h admin JWT（读 ./.env 的 COPILOT_JWT_HMAC_SECRET）
+make scripts-nginx        # 渲染宿主机 nginx 配置到 deploy/console-nginx.conf
+```
+
+> 脚本的 `.env` 加载是**只填充未设置变量**（与后端 `loadDotEnv` 一致，[main.go:1230](cmd/copilot-api/main.go)），
+> 不会覆盖外部注入的真实环境变量。后端监听地址按 `真实环境变量 → .env → 默认 0.0.0.0:18080` 解析，
+> 脚本的健康检查 URL 会自动跟随。
+
+**前端 nginx 反代**：SPA 用相对 `/v1` 调后端，需同源反代。
+[`scripts/nginx.sh`](../scripts/nginx.sh) 从 [`deploy/console-nginx.conf.template`](../deploy/console-nginx.conf.template)
+渲染出 `CONSOLE_PORT`（默认 `8080`；80 需 root，按需覆盖）与 `/v1 → 127.0.0.1:<API端口>` 的配置
+（SSE 已关缓冲）。把渲染出的 `console-nginx.conf` 放进宿主 nginx 的 `conf.d/` 并 `nginx -t && nginx -s reload`
+即可（脚本负责生成 + 校验，nginx 进程由宿主管理）。
+
+**systemd 示例**：见 [`deploy/copilot-api.service.example`](../deploy/copilot-api.service.example)——
+`Type=oneshot` + `RemainAfterExit=yes` 包装 `start.sh`/`stop.sh`，`Restart=on-failure` 兜底，可配
+`EnvironmentFile=.env` 或 Secret 注入。按需复制改路径后 `systemctl enable --now copilot-api`。
+
+> **两套并存**：Dockerfile/compose（§8.2，供有 Docker 的环境与 CI）与 scripts/（无 Docker 场景）都保留；
+> 二者共用同一份 env 配置与产物，不需重复维护业务代码。
 
 ---
 
@@ -389,14 +459,17 @@ make web-build         # vue-tsc + vite build
 
 **质量门禁**
 - [ ] `make all-checks` 全绿
-- [ ] （建议）将 `make all-checks` 并入 CI 主链路
+- [x] `make all-checks` 已并入 CI 主链路（`checks` job，PR 全路径 + push main）
 
 ---
 
 ## 10. 已知限制与注意事项
 
-- **容器镜像未就绪**：`copilot-api` 与 `capability-console` 尚无 Dockerfile；docker-compose 容器化是上线前置项。
-- **CI 覆盖不完整**：现有 CI 只校验能力 YAML，Go/前端测试不在 CI。
+- **两套部署路径并存**：有 Docker 的环境用 §8.2（根 + 前端 Dockerfile / `make compose-up`，需构建期可访问
+  Docker Hub）；**无 Docker** 用 §8.4 的 `scripts/*.sh`（pid 管理 + nginx 反代，或 systemd）。二者共用 env 配置。
+- **CI 全量门禁**：`checks` job 在 PR / push main 跑 `make all-checks`；能力 YAML 校验 job 保留。
+- **CGO 依赖**：SQLite 驱动（go-sqlite3）需要 CGO 编译——`scripts/build.sh` 默认不禁 CGO（本地/测试 OK）；
+  而容器版 `Dockerfile` 用 `CGO_ENABLED=0`（容器只跑 MySQL，静态二进制优先）。两处按发布形态各自取舍。
 - **`.env` 自动加载**：`main.go` 会自动加载 `.env`（已存在的真实环境变量优先），与
   `.env.example` 顶部注释"服务不会自动加载 .env"不一致——以 `.env` 文件描述为准。
 - **SQLite 迁移内嵌列表到 `014`**，市场（`015` 能力市场）在 SQLite 经 `internal/store/db.go`
@@ -424,4 +497,6 @@ make web-build         # vue-tsc + vite build
 | `examples/capabilities/` | 能力示例（discovered / published） |
 | `prompts/` | prompt 模板 |
 | `docs/` | 专项文档 |
+| `scripts/` | shell 运维脚本（build/start/stop/status/logs/health/gen-token/nginx） |
+| `deploy/` | 宿主机 nginx 反代模板 + systemd 服务单元示例 |
 | `tests/e2e/` | Go e2e 测试 |
