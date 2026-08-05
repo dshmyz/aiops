@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -186,15 +187,30 @@ func main() {
 	scheduledTaskStore := store.NewSQLScheduledTaskStore(db)
 	inspectionReportStore := store.NewSQLInspectionReportStore(db)
 	scheduledTaskService := scheduler.NewService(scheduledTaskStore, readService, auditService, nil)
+	// Runbook 存储提前构造：incident.view 需要在此并入 readRunner 链，runbook 是
+	// 其证据来源之一（§借鉴-5 复用）。runbookLookup 适配器留在原处。
+	runbookStore := store.NewSQLRunbookStore(db)
+	if err := store.SeedBuiltinRunbooks(serviceContext, runbookStore); err != nil {
+		logger.Warn("seed builtin runbooks", zap.Error(err))
+	}
 	// §4 工具生态扩展：把数据源直连工具（alert.query / event.query / task.query）
 	// 并入 readRunner 链。event.query 走 audit 数据源，task.query 走定时任务数据源，
 	// 均经 ReadOnlyService 治理边界（Lookup→policy→runner→audit）。
+	incidentRunner := incidentViewReadRunner{
+		alerts:   alertSvc,
+		audit:    auditService,
+		plans:    repository,
+		schedules: scheduledTaskService,
+		runbooks: runbookStore,
+		capabilities: loadedCapabilities,
+	}
 	readRunner = compositeReadRunner{
 		inner: readRunner,
 		byName: map[string]execution.ReadRunner{
-			tools.AlertQuery: alertRunner,
-			tools.EventQuery: eventReadRunner{svc: auditService},
-			tools.TaskQuery:  taskReadRunner{svc: scheduledTaskService},
+			tools.AlertQuery:   alertRunner,
+			tools.EventQuery:   eventReadRunner{svc: auditService},
+			tools.TaskQuery:    taskReadRunner{svc: scheduledTaskService},
+			tools.IncidentView: incidentRunner,
 		},
 	}
 	readService = execution.NewReadOnlyService(readRunner, auditService)
@@ -225,12 +241,7 @@ func main() {
 	}
 	skillLookup := httpapi.NewSkillLookupAdapter(skillStore)
 
-	// 借鉴-5: Runbook / 命令模板复用。播种内置 Runbook，供 assistant 低风险
-	// 自动执行（命中 IntentPattern 的写操作跳过人工确认）。
-	runbookStore := store.NewSQLRunbookStore(db)
-	if err := store.SeedBuiltinRunbooks(serviceContext, runbookStore); err != nil {
-		logger.Warn("seed builtin runbooks", zap.Error(err))
-	}
+	// runbook 存储已在 readRunner 链构建处提前构造；此处仅需复用其 lookup 适配器。
 	runbookLookup := httpapi.NewRunbookLookupAdapter(runbookStore)
 
 	planner, compactor, formatter, promptRegistry, plannerMode, err := assistantPlannerFromEnv(serviceContext, assistant.EnvMapFromLookup(os.Getenv), knowledgeManager, skillLookup, auditService)
@@ -704,9 +715,327 @@ func (r alertReadRunner) Read(ctx context.Context, tool tools.Tool, input map[st
 	}, nil
 }
 
+// incidentViewReadRunner 是 incident.view 元工具的只读 runner（Phase 1）：给定
+// 一个告警/资源身份，把告警本体、相关审计事件、相关定时巡检 run、可跑只读能力
+// 与匹配 runbook 串成一张可回链的 incident 全景。alert 与其余证据无 FK，全部按
+// (domain, resource_type, resource_name, environment, 时间窗) 软匹配。
+type incidentViewReadRunner struct {
+	alerts       *alert.Service
+	audit        *audit.Service
+	plans        store.ActionPlanStore // 反解 action_plan.input_json 确认资源
+	schedules    *scheduler.Service
+	runbooks     interface{ ListEnabledRunbooks(context.Context) ([]store.Runbook, error) }
+	capabilities []capabilities.Capability
+}
+
+func (r incidentViewReadRunner) Read(ctx context.Context, tool tools.Tool, input map[string]any) (map[string]any, error) {
+	if tool.Name != tools.IncidentView {
+		return nil, fmt.Errorf("unsupported tool %q for incident view runner", tool.Name)
+	}
+	pivot, anchor, err := r.resolvePivot(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	// 时间窗：默认 [最早告警 fired_at-1h, 现在]，可被 since/until 覆盖。
+	now := time.Now().UTC()
+	since := now.Add(-1 * time.Hour)
+	if !anchor.FiredAt.IsZero() && anchor.FiredAt.Before(since) {
+		since = anchor.FiredAt.Add(-1 * time.Hour)
+	}
+	if s, ok := input["since"].(string); ok {
+		if t, perr := time.Parse(time.RFC3339, s); perr == nil {
+			since = t
+		}
+	}
+	until := now
+	if s, ok := input["until"].(string); ok {
+		if t, perr := time.Parse(time.RFC3339, s); perr == nil {
+			until = t
+		}
+	}
+
+	// Leg B: 同窗同域审计事件（tool_name 前缀匹配，先取窗再 Go 内过滤）。
+	page, err := r.audit.List(ctx, store.AuditFilter{
+		CreatedAfter:  since,
+		CreatedBefore: until,
+		Limit:         200,
+	})
+	if err != nil {
+		return nil, err
+	}
+	domain := pivot.Domain
+	matchTool := func(name, action string) bool {
+		if name == "" {
+			return false
+		}
+		if action == audit.ActionAlertIngested {
+			return false
+		}
+		return domain == "" || strings.HasPrefix(name, domain+".")
+	}
+
+	relatedAudit := make([]map[string]any, 0, len(page.Events))
+	writeEvents := make([]map[string]any, 0, 8)
+	matchedAuditIDs := make([]string, 0, len(page.Events))
+	for _, e := range page.Events {
+		if !matchTool(e.ToolName, e.Action) {
+			continue
+		}
+		// 资源确认：命中 inspect 的可疑写/读工具需与 pivot.resource_name 对上，
+		// 否则视为"同域异资源"排除。读工具名已知为读（操作 read），写入走 input 反解。
+		resName := pivot.ResourceName
+		if resName != "" && e.PlanID != "" {
+			if ok := r.planHitsResource(ctx, e.PlanID, resName); !ok {
+				continue
+			}
+		}
+		event := map[string]any{
+			"id":                e.ID,
+			"tool_name":         e.ToolName,
+			"action":            e.Action,
+			"decision":          e.Decision,
+			"subject":           e.Subject,
+			"created_at":        e.CreatedAt,
+			"action_plan_id":    e.PlanID,
+			"tool_execution_id": e.ExecutionID,
+			"trace_id":          e.TraceID,
+		}
+		relatedAudit = append(relatedAudit, event)
+		if !r.isReadTool(e.ToolName) {
+			writeEvents = append(writeEvents, event)
+		}
+		matchedAuditIDs = append(matchedAuditIDs, e.ID)
+	}
+
+	// Leg C: 相关定时巡检 run（audit_event_id 桥接，run 表唯一 FK-like 键）。
+	scheduledRuns := r.relatedScheduledRuns(ctx, matchedAuditIDs)
+
+	// Leg D: 可跑只读探测建议（只列不执行）。
+	probes := r.availableProbes(pivot, input)
+
+	// Leg E: runbook 匹配（intent_pattern 命中，按具体度给 confidence）。
+	runbooks := r.matchRunbooks(ctx, pivot)
+
+	return map[string]any{
+		"tool":           tool.Name,
+		"incident_id":    anchor.ID,
+		"pivot":          map[string]any{"domain": pivot.Domain, "resource_type": pivot.ResourceType, "resource_name": pivot.ResourceName},
+		"alert":          anchor,
+		"timeline":       relatedAudit,
+		"scheduled_runs": scheduledRuns,
+		"probes":         probes,
+		"runbooks":       runbooks,
+		"recent_writes":  map[string]any{"count": len(writeEvents), "events": writeEvents},
+		"counts":         map[string]any{"audit": len(relatedAudit), "scheduled_runs": len(scheduledRuns), "probes": len(probes), "runbooks": len(runbooks), "recent_writes": len(writeEvents)},
+	}, nil
+}
+
+// resolvePivot 解析入参到 (domain, resource_type, resource_name) 与一个告警锚点。
+// 支持 incident_id 直达，或按 domain/resource_name/environment 定位最近告警。
+func (r incidentViewReadRunner) resolvePivot(ctx context.Context, input map[string]any) (struct {
+	Domain       string
+	ResourceType string
+	ResourceName string
+}, alert.Alert, error) {
+	var pivot struct {
+		Domain       string
+		ResourceType string
+		ResourceName string
+	}
+	environment, _ := input["environment"].(string)
+	domain, _ := input["domain"].(string)
+	resType, _ := input["resource_type"].(string)
+	resName, _ := input["resource_name"].(string)
+
+	var anchor alert.Alert
+	alerts, aerr := r.alerts.Query(ctx, store.AlertFilter{Domain: domain, Environment: environment, Limit: 50})
+	if aerr != nil {
+		return pivot, alert.Alert{}, aerr
+	}
+	// 定位锚点：优先精确命中 resource_name 的告警；否则取该域最近一条作为锚点，
+	// 让 pivot 的 domain/resource_type/resource_name 跟随告警补全。
+	for _, a := range alerts {
+		if resName == "" || a.ResourceName == resName {
+			anchor = a
+			break
+		}
+	}
+	if anchor.ID == "" && len(alerts) > 0 {
+		anchor = alerts[0]
+	}
+	if domain == "" && anchor.Domain != "" {
+		domain = anchor.Domain
+	}
+	if resType == "" {
+		resType = anchor.ResourceType
+	}
+	if resName == "" {
+		resName = anchor.ResourceName
+	}
+	pivot.Domain = domain
+	pivot.ResourceType = resType
+	pivot.ResourceName = resName
+	return pivot, anchor, nil
+}
+
+// planHitsResource 通过 action_plan.input_json 反解资源字段，确认计划确在
+// pivot.resource_name 上操作。input 里任一字段值 == resource_name 即判定命中。
+func (r incidentViewReadRunner) planHitsResource(ctx context.Context, planID, resourceName string) bool {
+	plan, err := r.plans.GetPlan(ctx, planID)
+	if err != nil || len(plan.InputJSON) == 0 {
+		return true // 无 plan 可反解时不排除（保守放行）
+	}
+	var in map[string]any
+	if err := json.Unmarshal(plan.InputJSON, &in); err != nil {
+		return true
+	}
+	for _, v := range in {
+		if s, ok := v.(string); ok && s == resourceName {
+			return true
+		}
+	}
+	return false
+}
+
+// isReadTool 依据已加载能力目录判断某工具名是否为只读读取（operation==read）。
+// 目录外的工具（如元工具）不算写，避免误报。
+func (r incidentViewReadRunner) isReadTool(name string) bool {
+	for _, c := range r.capabilities {
+		if c.Name == name {
+			return c.Operation == tools.Read
+		}
+	}
+	// 非能力目录工具：静态只读元工具也算读，其余按写保守算（Phase 1）。
+	switch name {
+	case tools.QuerySystemPosture, tools.AlertQuery, tools.EventQuery, tools.TaskQuery, tools.IncidentView:
+		return true
+	}
+	return false
+}
+
+// relatedScheduledRuns 找到 audit_event_id 命中 matchedAuditIDs 的定时巡检 run。
+// 逐任务 ListRuns 收集（任务数量级小，Phase 1 足够）。
+func (r incidentViewReadRunner) relatedScheduledRuns(ctx context.Context, matchedAuditIDs []string) []map[string]any {
+	if len(matchedAuditIDs) == 0 {
+		return nil
+	}
+	want := make(map[string]bool, len(matchedAuditIDs))
+	for _, id := range matchedAuditIDs {
+		want[id] = true
+	}
+	tasks, _ := r.schedules.List(ctx, incidentQueryUser(), store.ScheduledTaskFilter{Limit: 200})
+	out := make([]map[string]any, 0, 8)
+	for _, task := range tasks {
+		runs, err := r.schedules.ListRuns(ctx, incidentQueryUser(), task.ID, 50)
+		if err != nil {
+			continue
+		}
+		for _, run := range runs {
+			if want[run.AuditEventID] {
+				out = append(out, map[string]any{
+					"id":           run.ID,
+					"task_id":      run.TaskID,
+					"status":       run.Status,
+					"started_at":   run.StartedAt,
+					"finished_at":  run.FinishedAt,
+					"audit_event_id": run.AuditEventID,
+				})
+			}
+		}
+	}
+	return out
+}
+
+// availableProbes 从能力目录筛出该 pivot 上可跑的只读探测，resource_name 映射到
+// input_schema 占位。只列建议不执行（守写边界）。
+func (r incidentViewReadRunner) availableProbes(pivot struct {
+	Domain       string
+	ResourceType string
+	ResourceName string
+}, input map[string]any) []map[string]any {
+	if pivot.Domain == "" || pivot.ResourceType == "" {
+		return nil
+	}
+	environment, _ := input["environment"].(string)
+	out := make([]map[string]any, 0, 4)
+	for _, c := range r.capabilities {
+		if c.Domain != pivot.Domain || c.ResourceType != pivot.ResourceType || c.Operation != tools.Read {
+			continue
+		}
+		probe := map[string]any{"tool_name": c.Name, "operation": "read"}
+		fields := make(map[string]any)
+		if environment != "" {
+			fields["environment"] = environment
+		}
+		if pivot.ResourceName != "" {
+			// 把 resource_name 填到最可能的 identity 字段（非 environment 的必填字符串）
+			for k, f := range c.InputSchema {
+				if k == "environment" || f.Type != "string" {
+					continue
+				}
+				fields[k] = pivot.ResourceName
+				break
+			}
+		}
+		probe["input"] = fields
+		out = append(out, probe)
+	}
+	return out
+}
+
+// matchRunbooks 用 intent_pattern（[]string 关键词）命中 pivot 的 domain/资源类型，
+// 命中越具体 confidence 越高（resource_type 命中 > 仅 domain 命中）。
+func (r incidentViewReadRunner) matchRunbooks(ctx context.Context, pivot struct {
+	Domain       string
+	ResourceType string
+	ResourceName string
+}) []map[string]any {
+	runbooks, err := r.runbooks.ListEnabledRunbooks(ctx)
+	if err != nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(runbooks))
+	for _, rb := range runbooks {
+		if len(rb.IntentPattern) == 0 {
+			continue
+		}
+		hitRes := false
+		hitDomain := false
+		for _, kw := range rb.IntentPattern {
+			if pivot.ResourceType != "" && strings.Contains(kw, pivot.ResourceType) {
+				hitRes = true
+			}
+			if pivot.Domain != "" && strings.Contains(kw, pivot.Domain) {
+				hitDomain = true
+			}
+		}
+		if !hitRes && !hitDomain {
+			continue
+		}
+		conf := 0.6
+		if hitRes {
+			conf = 0.9
+		}
+		out = append(out, map[string]any{
+			"slug":       rb.Slug,
+			"name":       rb.Name,
+			"risk_level": rb.RiskLevel,
+			"confidence": conf,
+			"tool_sequence": rb.ToolSequence,
+		})
+	}
+	return out
+}
+
+// incidentQueryUser 是 incident.view 查询数据源时使用的身份（跨用户只读）。
+func incidentQueryUser() identity.CurrentUser {
+	return identity.CurrentUser{Subject: "system:incident-view", Roles: []string{"viewer"}}
+}
+
 // compositeReadRunner 按工具名把数据源直连工具（alert.query / event.query /
-// task.query）路由到专用 runner，其余工具委托给 inner runner。保持非数据源
-// 工具行为不变，避免改动 staticReadRunner。
+// task.query / incident.view）路由到专用 runner，其余工具委托给 inner runner。
+// 保持非数据源工具行为不变，避免改动 staticReadRunner。
 type compositeReadRunner struct {
 	inner  execution.ReadRunner
 	byName map[string]execution.ReadRunner // toolName -> specialized runner

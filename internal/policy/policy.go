@@ -45,6 +45,7 @@ var rolePermissions = map[string]map[string]struct{}{
 		tools.AlertQuery:         {},
 		tools.EventQuery:         {},
 		tools.TaskQuery:          {},
+		tools.IncidentView:       {},
 	},
 	"operator": {
 		tools.ClusterStatusRead:  {},
@@ -52,6 +53,7 @@ var rolePermissions = map[string]map[string]struct{}{
 		tools.AlertQuery:         {},
 		tools.EventQuery:         {},
 		tools.TaskQuery:          {},
+		tools.IncidentView:       {},
 	},
 	"admin": {
 		tools.ClusterStatusRead:  {},
@@ -59,6 +61,7 @@ var rolePermissions = map[string]map[string]struct{}{
 		tools.AlertQuery:         {},
 		tools.EventQuery:         {},
 		tools.TaskQuery:          {},
+		tools.IncidentView:       {},
 	},
 }
 

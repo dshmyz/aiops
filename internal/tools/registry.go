@@ -32,6 +32,10 @@ const (
 	// TaskQuery 是任务中心查询工具（§4 工具生态扩展）：查询定时巡检任务及
 	// 其执行历史。
 	TaskQuery = "task.query"
+	// IncidentView 是告警全景只读元工具：给定一个告警/资源身份，把告警、相关
+	// 审计事件、定时巡检 run、可跑只读能力与匹配 runbook 串成一张可回链的
+	// incident 全景，让 AI 助手能回答"这个告警牵扯了什么、改过什么、怎么处置"。
+	IncidentView = "incident.view"
 )
 
 // Operation describes whether a tool has read-only or write semantics.
@@ -101,6 +105,12 @@ var registeredTools = map[string]Tool{
 		Risk:         Low,
 		Domain:       "task",
 		ResourceType: "task",
+	},
+	// IncidentView 是平台级只读元工具，不绑定单一域（域与资源由入参 pivot 决定）。
+	IncidentView: {
+		Name:      IncidentView,
+		Operation: Read,
+		Risk:      Low,
 	},
 }
 
@@ -388,6 +398,20 @@ func ValidateInput(requested Tool, input map[string]any) error {
 			}
 		}
 		return nil
+	case IncidentView:
+		// 告警全景 pivot：域 / 资源类型 / 资源名 / 环境 均可选字符串，由
+		// incidentViewReadRunner 按任意组合软定位告警锚点后补全。
+		if err := onlyFields(input, "domain", "resource_type", "resource_name", "environment"); err != nil {
+			return err
+		}
+		for _, name := range []string{"domain", "resource_type", "resource_name", "environment"} {
+			if v, ok := input[name]; ok {
+				if _, ok := v.(string); !ok {
+					return fmt.Errorf("parameter %q must be a string", name)
+				}
+			}
+		}
+		return nil
 	default:
 		dynamicMu.RLock()
 		defer dynamicMu.RUnlock()
@@ -548,7 +572,7 @@ func validateToolDefinition(tool Tool) error {
 	if tool.Operation == Write && strings.TrimSpace(tool.RollbackDescription) == "" {
 		return fmt.Errorf("write tool %q requires a rollback description", tool.Name)
 	}
-	if strings.Contains(tool.Name, ".") && tool.Name != ClusterStatusRead && tool.Name != TopicRetentionSet && tool.Name != QuerySystemPosture {
+	if strings.Contains(tool.Name, ".") && tool.Name != ClusterStatusRead && tool.Name != TopicRetentionSet && tool.Name != QuerySystemPosture && tool.Name != IncidentView {
 		if strings.TrimSpace(tool.Domain) == "" || strings.TrimSpace(tool.ResourceType) == "" {
 			return fmt.Errorf("domain tool %q requires domain and resource type", tool.Name)
 		}
