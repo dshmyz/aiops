@@ -1,0 +1,51 @@
+{
+  "zhangsan": {
+    "password": "123456",
+    "displayName": "张三",
+    "mail": "zhangsan@qim.local",
+    "phone": "13800000001",
+    "department": "技术部-前端组"
+  },
+  "lisi": {
+    "password": "123456",
+    "displayName": "李四",
+    "mail": "lisi@qim.local",
+    "phone": "13800000002",
+    "department": "技术部-前端组"
+  },
+  "wangwu": {
+    "password": "123456",
+    "displayName": "王五",
+    "mail": "wangwu@qim.local",
+    "phone": "13800000003",
+    "department": "技术部-后端组"
+  },
+  "zhaoliu": {
+    "password": "123456",
+    "displayName": "赵六",
+    "mail": "zhaoliu@qim.local",
+    "phone": "13800000004",
+    "department": "技术部-后端组"
+  },
+  "sunqi": {
+    "password": "123456",
+    "displayName": "孙七",
+    "mail": "sunqi@qim.local",
+    "phone": "13800000005",
+    "department": "产品部-设计组"
+  },
+  "zhouba": {
+    "password": "123456",
+    "displayName": "周八",
+    "mail": "zhouba@qim.local",
+    "phone": "13800000006",
+    "department": "产品部-运营组"
+  },
+  "admin": {
+    "password": "admin123",
+    "displayName": "系统管理员",
+    "mail": "admin@qim.local",
+    "phone": "13800000000",
+    "department": "管理层"
+  }
+}

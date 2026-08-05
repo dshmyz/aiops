@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  cas-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qim-cas-test
+    ports:
+      - "8443:8443"
+    environment:
+      CAS_PORT: "8443"
+      USERS_FILE: /app/users.json
+    volumes:
+      - ./users.json:/app/users.json:ro
+    restart: unless-stopped
