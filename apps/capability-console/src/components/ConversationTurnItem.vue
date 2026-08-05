@@ -156,7 +156,13 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
           {{ relativeTime }}
         </time>
       </header>
-      <div data-test="conversation-turn-content" class="conversation-turn-content">
+      <!-- 回放的 tool_step turn 没有正文：其步骤摘要以独立步骤区块呈现，这里完全
+           隐藏气泡外壳，避免在顶部渲染出一个空白的对话气泡。 -->
+      <div
+        v-if="!isReplayedToolStep"
+        data-test="conversation-turn-content"
+        class="conversation-turn-content"
+      >
         <span v-if="turn.error" class="error-icon" aria-hidden="true">⚠</span>
         <template v-if="showTypingDots">
           <span class="typing-dots" aria-label="正在生成">
@@ -165,7 +171,7 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
             <span class="typing-dot"></span>
           </span>
         </template>
-        <template v-else-if="!isReplayedToolStep">
+        <template v-else>
           <MarkdownContent :content="turn.content" :raw="!isAssistant" />
           <span v-if="showStreamingCursor" class="streaming-cursor" aria-hidden="true">▌</span>
         </template>

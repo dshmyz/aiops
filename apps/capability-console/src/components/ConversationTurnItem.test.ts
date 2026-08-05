@@ -321,8 +321,8 @@ describe('ConversationTurnItem', () => {
     // 步骤区块渲染，且工具名来自 payload
     expect(wrapper.find('[data-test="assistant-steps"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="assistant-step-item-0"]').text()).toContain('cluster.status.read');
-    // 不回放文字气泡（避免与步骤摘要重复）
-    expect(wrapper.find('[data-test="conversation-turn-content"]').text()).not.toContain('cluster.status.read：green');
+    // 不回放文字气泡（避免与步骤摘要重复）：气泡外壳整体不渲染，而非渲染一个空气泡
+    expect(wrapper.find('[data-test="conversation-turn-content"]').exists()).toBe(false);
   });
 
   test('user turn never renders steps block', () => {
