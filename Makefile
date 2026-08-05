@@ -1,4 +1,4 @@
-.PHONY: test test-integration lint vet cover build docker-build web-build web-test e2e all-checks dev-up dev-down dev-logs dev-verify-trace dev-verify-verification eval
+.PHONY: test test-integration lint vet cover build docker-build web-build web-test web-typecheck web-check e2e all-checks dev-up dev-down dev-logs dev-verify-trace dev-verify-verification eval
 
 test:
 	go test -race ./...
@@ -40,8 +40,18 @@ docker-build:
 web-build:
 	cd apps/capability-console && npm run build
 
+# Standalone Vue typecheck (vue-tsc --noEmit). `web-build` also runs it, but this
+# target isolates the check without emitting a production bundle.
+web-typecheck:
+	cd apps/capability-console && npx vue-tsc --noEmit
+
 web-test:
 	cd apps/capability-console && npx vitest run
+
+# Frontend gate: typecheck + unit tests — the full verification run used before
+# committing console changes.
+web-check: web-typecheck web-test
+	@echo "console typecheck + tests passed"
 
 # === End-to-end ===
 
@@ -50,7 +60,9 @@ e2e:
 
 # === Aggregated checks ===
 
-all-checks: vet lint test web-test
+# Complete local gate before push: Go lint+vet+race tests, then the full
+# console front-end gate (typecheck + unit tests).
+all-checks: vet lint test web-check
 	@echo "all checks passed"
 
 # === Local full-stack dev environment ===
