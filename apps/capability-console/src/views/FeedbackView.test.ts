@@ -83,4 +83,114 @@ describe('FeedbackView', () => {
     const exportBtn = wrapper.find('[data-test="feedback-insights-export"]');
     expect(exportBtn.attributes('disabled')).toBeDefined();
   });
+
+  test('generates runbook draft and shows inferred fields with confirm button', async () => {
+    const feedback = [
+      { id: '1', conversation_id: 'c', turn_id: 't1', subject: 'admin-1', rating: -1, correction: '把保留改成 72 小时时确认流程太绕', created_at: '2026-08-01T00:00:00Z' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/v1/assistant/feedback')) {
+        return ok({ items: feedback, total: 1, limit: 200, offset: 0 });
+      }
+      if (url.startsWith('/v1/admin/runbook-drafts/infer')) {
+        return ok({
+          id: 'draft-1',
+          slug: 'fb-retention-fb-retention-把保留改成',
+          name: '资源保留策略调整',
+          intent_pattern: ['保留', 'retention', '留存', '72 小时', '小时'],
+          tool_sequence: ['topic.retention.set'],
+          risk_level: 'low',
+          topic_key: 'retention',
+          status: 'draft',
+          created_at: '2026-08-01T00:00:00Z',
+        });
+      }
+      return ok({});
+    }));
+    const wrapper = mount(FeedbackView);
+    await flushPromises();
+
+    const genBtn = wrapper.find('[data-test="feedback-draft-runbook"]');
+    expect(genBtn.exists()).toBe(true);
+    await genBtn.trigger('click');
+    await flushPromises();
+
+    const preview = wrapper.find('[data-test="feedback-draft-preview"]');
+    expect(preview.exists()).toBe(true);
+    expect(preview.text()).toContain('topic.retention.set');
+    const activate = wrapper.find('[data-test="feedback-draft-activate"]');
+    expect(activate.exists()).toBe(true);
+    expect(activate.text()).toContain('确认启用');
+  });
+
+  test('activating a draft marks it enabled and hides the preview', async () => {
+    const feedback = [
+      { id: '1', conversation_id: 'c', turn_id: 't1', subject: 'admin-1', rating: -1, correction: '把保留改成 72 小时时确认流程太绕', created_at: '2026-08-01T00:00:00Z' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/v1/assistant/feedback')) {
+        return ok({ items: feedback, total: 1, limit: 200, offset: 0 });
+      }
+      if (url.startsWith('/v1/admin/runbook-drafts/infer')) {
+        return ok({
+          id: 'draft-1', slug: 'fb-retention', name: '资源保留策略调整',
+          intent_pattern: ['保留'], tool_sequence: ['topic.retention.set'],
+          risk_level: 'low', topic_key: 'retention', status: 'draft', created_at: '2026-08-01T00:00:00Z',
+        });
+      }
+      if (url.startsWith('/v1/admin/runbook-drafts/draft-1/activate')) {
+        return ok({
+          id: 'draft-1', slug: 'fb-retention', name: '资源保留策略调整',
+          intent_pattern: ['保留'], tool_sequence: ['topic.retention.set'],
+          risk_level: 'low', topic_key: 'retention', status: 'activated',
+          activated_at: '2026-08-01T00:00:00Z', created_at: '2026-08-01T00:00:00Z',
+        });
+      }
+      return ok({});
+    }));
+    const wrapper = mount(FeedbackView);
+    await flushPromises();
+
+    await wrapper.find('[data-test="feedback-draft-runbook"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-test="feedback-draft-activate"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="feedback-draft-preview"]').exists()).toBe(false);
+    const done = wrapper.find('[data-test="feedback-draft-activated"]');
+    expect(done.exists()).toBe(true);
+    expect(done.text()).toContain('已启用');
+  });
+
+  test('non-runbookable topic shows missing reason and no confirm button', async () => {
+    const feedback = [
+      { id: '1', conversation_id: 'c', turn_id: 't1', subject: 'admin-1', rating: -1, correction: '结果太啰嗦，希望更格式', created_at: '2026-08-01T00:00:00Z' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/v1/assistant/feedback')) {
+        return ok({ items: feedback, total: 1, limit: 200, offset: 0 });
+      }
+      if (url.startsWith('/v1/admin/runbook-drafts/infer')) {
+        return ok({
+          id: 'draft-2', slug: '', name: '', intent_pattern: [], tool_sequence: [],
+          risk_level: '', topic_key: 'format', status: 'draft',
+          missing_reason: '该主题无法落成 runbook，需人工判断', created_at: '2026-08-01T00:00:00Z',
+        });
+      }
+      return ok({});
+    }));
+    const wrapper = mount(FeedbackView);
+    await flushPromises();
+
+    await wrapper.find('[data-test="feedback-draft-runbook"]').trigger('click');
+    await flushPromises();
+
+    const preview = wrapper.find('[data-test="feedback-draft-preview"]');
+    expect(preview.exists()).toBe(true);
+    expect(preview.text()).toContain('无法落成 runbook');
+    expect(wrapper.find('[data-test="feedback-draft-activate"]').exists()).toBe(false);
+  });
 });

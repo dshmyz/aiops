@@ -769,6 +769,36 @@ export interface FeedbackPage {
   offset: number;
 }
 
+// ===== Runbook 草稿（反馈 → 可确认启用的 runbook） =====
+// 后端 /v1/admin/runbook-drafts* 的字面映射。反馈页为可落 runbook 的主题生成
+// 草稿，操作员确认后 activate 写入注册表并被 RunbookRouter 即时命中。
+
+export interface RunbookDraft {
+  id: string;
+  slug: string;
+  name: string;
+  intent_pattern: string[];
+  tool_sequence: string[];
+  risk_level: string;
+  topic_key: string;
+  /** 非空表示该主题无法落成 runbook（草稿不可启用，仅人工判断）。 */
+  missing_reason?: string;
+  status: string;
+  created_at: string;
+  activated_at?: string | null;
+}
+
+export interface RunbookDraftListResponse {
+  drafts: RunbookDraft[];
+  configured?: boolean;
+  hint?: string;
+}
+
+export interface InferRunbookDraftPayload {
+  topic_key: string;
+  examples: string[];
+}
+
 // ===== MCP 服务器热配置 =====
 
 export interface MCPServer {

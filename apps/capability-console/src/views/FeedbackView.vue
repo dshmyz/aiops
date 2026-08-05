@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { listFeedback } from '../api';
-import type { FeedbackEntry } from '../types';
+import { listFeedback, inferRunbookDraft, activateRunbookDraft } from '../api';
+import type { FeedbackEntry, RunbookDraft } from '../types';
 import { buildFeedbackInsights, insightsToMarkdown } from '../composables/useFeedbackInsights';
 import type { FeedbackInsight } from '../composables/useFeedbackInsights';
 
@@ -62,6 +62,44 @@ function exportInsights() {
   a.download = `feedback-建议-${new Date().toISOString().slice(0, 10)}.md`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ===== runbook 草稿：把可落 runbook 的主题"生成 → 确认启用" =====
+// 生成是确定性的（后端关键词→工具序列映射）；前端只触发生成、展示字段并确认启用。
+// 单个主题项一条状态：draft 携带草稿、error 携带失败原因、activated 标记已启用。
+const draftState = ref<Record<string, { loading: boolean; draft?: RunbookDraft; activating?: boolean; activated?: boolean; error?: string }>>({});
+
+async function generateDraft(ins: FeedbackInsight) {
+  const store = draftState.value;
+  if (!store[ins.key]) {
+    store[ins.key] = { loading: false };
+  }
+  const s = store[ins.key];
+  s.loading = true;
+  s.error = undefined;
+  try {
+    s.draft = await inferRunbookDraft({ topic_key: ins.key, examples: ins.examples });
+  } catch (e) {
+    s.error = e instanceof Error ? e.message : '生成草稿失败';
+  } finally {
+    s.loading = false;
+  }
+}
+
+async function activateDraft(ins: FeedbackInsight) {
+  const s = draftState.value[ins.key];
+  if (!s?.draft) return;
+  s.activating = true;
+  s.error = undefined;
+  try {
+    await activateRunbookDraft(s.draft.id);
+    s.draft = undefined;
+    s.activated = true;
+  } catch (e) {
+    s.error = e instanceof Error ? e.message : '启用失败';
+  } finally {
+    s.activating = false;
+  }
 }
 
 function prevPage() {
@@ -167,6 +205,51 @@ onMounted(() => {
               <li v-for="(ex, i) in ins.examples" :key="i">{{ ex }}</li>
             </ul>
           </details>
+
+          <!-- runbook 草稿：可落 runbook 的主题可一键生成 → 人工确认启用 -->
+          <div class="draft-area">
+            <button
+              v-if="!draftState[ins.key]?.draft && !draftState[ins.key]?.activated"
+              data-test="feedback-draft-runbook"
+              class="mini-button"
+              :disabled="draftState[ins.key]?.loading || insightsLoading"
+              @click="generateDraft(ins)"
+            >
+              {{ draftState[ins.key]?.loading ? '生成中…' : '生成 runbook 草稿' }}
+            </button>
+            <button
+              v-if="draftState[ins.key]?.activated"
+              data-test="feedback-draft-activated"
+              class="mini-button"
+              disabled
+            >
+              已启用 ✓
+            </button>
+
+            <p v-if="draftState[ins.key]?.error" class="draft-error" role="alert">{{ draftState[ins.key]?.error }}</p>
+
+            <!-- 已生成草稿：展示推断字段 + 确认启用 -->
+            <div v-if="draftState[ins.key]?.draft" data-test="feedback-draft-preview" class="draft-preview">
+              <template v-if="draftState[ins.key]?.draft?.missing_reason">
+                <p class="draft-missing">{{ draftState[ins.key]?.draft?.missing_reason }}</p>
+              </template>
+              <template v-else>
+                <div class="draft-fields">
+                  <span class="draft-field"><span class="draft-key">意图匹配</span>{{ draftState[ins.key]?.draft?.intent_pattern.join('、') }}</span>
+                  <span class="draft-field"><span class="draft-key">工具序列</span>{{ draftState[ins.key]?.draft?.tool_sequence.join(' → ') }}</span>
+                  <span class="draft-field"><span class="draft-key">风险</span>{{ draftState[ins.key]?.draft?.risk_level }}</span>
+                </div>
+                <button
+                  data-test="feedback-draft-activate"
+                  class="mini-button"
+                  :disabled="draftState[ins.key]?.activating"
+                  @click="activateDraft(ins)"
+                >
+                  {{ draftState[ins.key]?.activating ? '启用中…' : '确认启用' }}
+                </button>
+              </template>
+            </div>
+          </div>
         </li>
       </ul>
     </section>
@@ -305,5 +388,53 @@ onMounted(() => {
   padding-left: var(--space-4);
   display: grid;
   gap: var(--space-1);
+}
+
+.draft-area {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-border);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.draft-preview {
+  padding: var(--space-3);
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.draft-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.draft-field {
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-hover);
+}
+
+.draft-key {
+  font-weight: 600;
+  margin-right: 4px;
+  color: var(--color-text-primary);
+}
+
+.draft-missing {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+}
+
+.draft-error {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-danger);
 }
 </style>

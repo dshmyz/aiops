@@ -40,6 +40,7 @@ import type {
   PendingPlanDetail,
   PendingPlanSummary,
   QuickPublishPayload,
+  RunbookDraft,
   SaveMCPServerPayload,
   ScheduledTask,
   ScheduledTaskRun,
@@ -695,6 +696,40 @@ export async function listFeedback(filter?: { limit?: number; offset?: number })
   const query = params.toString();
   const path = query ? `/v1/assistant/feedback?${query}` : '/v1/assistant/feedback';
   return request<FeedbackPage>(path);
+}
+
+// ===== Runbook 草稿（反馈 → 可确认启用的 runbook） =====
+// 生成是确定性的（后端关键词→工具序列映射），前端只展示 + 确认启用。
+
+export interface RunbookDraftListResponse {
+  drafts: RunbookDraft[];
+  configured?: boolean;
+  hint?: string;
+}
+
+export interface InferRunbookDraftPayload {
+  topic_key: string;
+  examples: string[];
+}
+
+/** 为某个已聚合的反馈主题生成 runbook 草稿（未启用，内存暂存）。 */
+export async function inferRunbookDraft(payload: InferRunbookDraftPayload): Promise<RunbookDraft> {
+  return request<RunbookDraft>('/v1/admin/runbook-drafts/infer', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 列出全部 runbook 草稿（draft + 已启用记录）。 */
+export async function listRunbookDrafts(): Promise<RunbookDraftListResponse> {
+  return request<RunbookDraftListResponse>('/v1/admin/runbook-drafts');
+}
+
+/** 确认启用：把草稿写入 runbook 注册表并即时生效，成功后草稿从列表移除。 */
+export async function activateRunbookDraft(id: string): Promise<RunbookDraft> {
+  return request<RunbookDraft>(`/v1/admin/runbook-drafts/${encodeURIComponent(id)}/activate`, {
+    method: 'POST',
+  });
 }
 
 // ===== MCP 服务器热配置 =====

@@ -291,6 +291,9 @@ func main() {
 	options = append(options, httpapi.WithNotifier(notifier))
 	feedbackStore := store.NewSQLFeedbackStore(db)
 	options = append(options, httpapi.WithFeedback(feedbackStore))
+	// Runbook 意图进化：反馈 → 可确认启用的 runbook 草稿。activate 时经
+	// runbookStore 落 SQL，RunbookRouter 即时命中。
+	options = append(options, httpapi.WithRunbookDrafts(httpapi.NewRunbookDraftService(runbookStore)))
 	options = append(options, httpapi.WithMCPService(httpapi.NewMCPServerService(mcpServerStore, mcpManager)))
 	options = append(options, httpapi.WithAlertWebhook(httpapi.NewAlertWebhookService(alertSvc, auditService)))
 	options = append(options, httpapi.WithAlertWebhookSecret(os.Getenv("COPILOT_ALERT_WEBHOOK_SECRET")))

@@ -140,6 +140,7 @@ type Router struct {
 	notifier           notification.Notifier
 	prompts            *prompt.Registry
 	feedback           FeedbackService
+	runbookDrafts      RunbookDraftService
 	knowledge          KnowledgeService
 	inspectionReports  store.InspectionReportStore
 	mcpService         MCPService
@@ -203,6 +204,15 @@ func WithConversations(service ConversationService) Option {
 func WithFeedback(service FeedbackService) Option {
 	return func(router *Router) {
 		router.feedback = service
+	}
+}
+
+// WithRunbookDrafts wires the runbook-draft service (反馈 → 可确认启用的 runbook)。
+// When unset, /v1/admin/runbook-drafts* returns configured:false. Only admin
+// users can access these endpoints (checked inside serveRunbookDrafts).
+func WithRunbookDrafts(service RunbookDraftService) Option {
+	return func(router *Router) {
+		router.runbookDrafts = service
 	}
 }
 
@@ -444,6 +454,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			return
 		}
 		r.serveAdminKnowledge(writer, request)
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/v1/admin/runbook-drafts") {
+		r.serveRunbookDrafts(writer, request)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/mcp/") {
