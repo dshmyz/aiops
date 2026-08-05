@@ -37,6 +37,7 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/scheduler"
 	"github.com/gracegaoya/ai-operations-copilot/internal/store"
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
+	"github.com/gracegaoya/ai-operations-copilot/internal/webui"
 	"go.uber.org/zap"
 )
 
@@ -637,6 +638,9 @@ func healthHandler(api http.Handler, db *sql.DB, metrics *observability.Metrics,
 		mux.Handle("GET /metrics", metrics.Handler())
 	}
 	mux.Handle("/v1/", api)
+	// Fallback: serve the embedded SPA at the root. /v1/ and the health/metrics
+	// routes win via ServeMux longest-prefix matching, so API 404s stay JSON.
+	mux.Handle("/", webui.WebHandler())
 
 	var handler http.Handler = mux
 	if accessLog != nil {

@@ -20,6 +20,14 @@ node_modules/
 .vite/
 dist/
 
+# Embedded SPA build output — scripts/build.sh overwrites the placeholder in
+# internal/webui/dist with the real Vite build; keep only the placeholder so
+# //go:embed all:dist always compiles. The generic dist/ rule above would ignore
+# this whole dir, so re-include the dir, ignore its contents, then keep index.html.
+!internal/webui/dist/
+internal/webui/dist/*
+!internal/webui/dist/index.html
+
 # OS
 .DS_Store
 

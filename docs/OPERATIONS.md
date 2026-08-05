@@ -382,26 +382,31 @@ make gen-token       # 读取 ./.env，生成 24h admin JWT（开发/联调用�
   挂持久卷。
 - 就绪探针 `GET /readyz`（含 DB ping）用于部署健康检查；`/metrics` 供 Prometheus 抓取。
 
-### 8.4 纯脚本 / systemd 部署（无 Docker）
+### 8.4 纯脚本 / systemd 部署（无 Docker，单二进制为默认）
 
-线上**没有 Docker** 时，用 [`scripts/*.sh`](../scripts/) 这套自包含脚本运维（后端 pid 管理 + 前端
-nginx 反代），或配合 systemd 管理。Makefile 提供透传目标（`make scripts-*`）。
+线上**没有 Docker** 时，用 [`scripts/*.sh`](../scripts/) 这套自包含脚本运维（后端 pid 管理 +
+前端托管 + nginx 反代可选）。Makefile 提供透传目标（`make scripts-*`）。
+
+> **单体默认**：`make scripts-build`（全量）会把前端构建产物内嵌进 `copilot-api` 二进制
+> （`//go:embed`，见 §8.5）。`scripts/start.sh` 起来后**一个进程同时托管 API 与 SPA**，
+> 浏览器直接访问 `http://host:18080` 即可，无需单独 nginx / TLS 也能跑通。
+> `web/` 目录与 `make scripts-nginx` 保留为**可选**——仅当需要 80 端口、TLS、独立静态控制时再启用。
 
 **部署根布局**（默认即仓库根；打包到别处用 `RUN_ROOT`/`AIOS_HOME` 覆盖）：
 
 ```
 <repo>/
-├── bin/copilot-api      # 后端二进制（scripts/build.sh 产出）
-├── web/                 # 前端静态产物（从 apps/capability-console/dist 拷贝）
+├── bin/copilot-api      # 后端二进制（scripts/build.sh 产出；内嵌前端 SPA）
+├── web/                 # 前端静态产物（可选：nginx 独立托管时才需要，从 console/dist 拷贝）
 ├── run/api.pid          # 后端 pid（start/stop 写入）
 ├── log/api.log          # 后端日志
-└── deploy/console-nginx.conf   # 宿主机 nginx 反代配置（scripts/nginx.sh 渲染）
+└── deploy/console-nginx.conf   # 宿主机 nginx 反代配置（可选，scripts/nginx.sh 渲染）
 ```
 
 **常用命令**：
 
 ```bash
-make scripts-build        # 构建后端 + 前端（bash scripts/build.sh，支持 --backend-only / --web-only）
+make scripts-build        # 构建后端（内嵌前端）+ 前端 web/（bash scripts/build.sh，支持 --backend-only / --web-only）
 make scripts-start        # 启动后端，轮询 /readyz 就绪（幂等；--force 重启；--web 顺带渲染 nginx 配置）
 make scripts-status       # UP / DOWN / STOPPED（UP=0；供监控引用）
 make scripts-health       # 打 /healthz + /readyz + /metrics（--auth 再带 admin JWT 验 /v1/capabilities）
@@ -415,7 +420,8 @@ make scripts-nginx        # 渲染宿主机 nginx 配置到 deploy/console-nginx
 > 不会覆盖外部注入的真实环境变量。后端监听地址按 `真实环境变量 → .env → 默认 0.0.0.0:18080` 解析，
 > 脚本的健康检查 URL 会自动跟随。
 
-**前端 nginx 反代**：SPA 用相对 `/v1` 调后端，需同源反代。
+**前端托管（可选）**：**单二进制的默认形态不需要 nginx**——SPA 已被后端直接托管。仅当需要
+TLS / 80 端口 / 更细静态控制时，才启用 nginx 反代：SPA 用相对 `/v1` 调后端，需同源反代。
 [`scripts/nginx.sh`](../scripts/nginx.sh) 从 [`deploy/console-nginx.conf.template`](../deploy/console-nginx.conf.template)
 渲染出 `CONSOLE_PORT`（默认 `8080`；80 需 root，按需覆盖）与 `/v1 → 127.0.0.1:<API端口>` 的配置
 （SSE 已关缓冲）。把渲染出的 `console-nginx.conf` 放进宿主 nginx 的 `conf.d/` 并 `nginx -t && nginx -s reload`
@@ -427,6 +433,20 @@ make scripts-nginx        # 渲染宿主机 nginx 配置到 deploy/console-nginx
 
 > **两套并存**：Dockerfile/compose（§8.2，供有 Docker 的环境与 CI）与 scripts/（无 Docker 场景）都保留；
 > 二者共用同一份 env 配置与产物，不需重复维护业务代码。
+
+### 8.5 单二进制托管前端（Go embed）
+
+`copilot-api` 用 `//go:embed` 把前端构建产物编译进二进制（[`internal/webui`](../internal/webui/)），
+**一个进程同时服务 API 与 SPA**：
+
+- `//go:embed all:dist` 内嵌 `internal/webui/dist/`；源码自带占位 `index.html`，保证 `go build`/
+  `go test` 在无前端产物时也能编译。
+- `scripts/build.sh`（全量）先 `npm run build`，把 `apps/capability-console/dist` **拷贝覆盖**
+  `internal/webui/dist/`，再 `go build` —— 二进制内嵌的即最新前端。`--backend-only` 仍可编译
+  （占位兜底），但发布请走全量。
+- 顶层 ServeMux 用**最长前缀匹配**：`/v1/` 与健康端点优先，`/` 兜底托管静态文件；非 `/v1` 的
+  深链接（SPA 路由）回退 `index.html`，API 404 仍是 JSON 不被掩盖。
+- 访问入口：`http://host:<COPILOT_HTTP_ADDR 端口，默认 18080>/`。
 
 ---
 
@@ -466,7 +486,7 @@ make scripts-nginx        # 渲染宿主机 nginx 配置到 deploy/console-nginx
 ## 10. 已知限制与注意事项
 
 - **两套部署路径并存**：有 Docker 的环境用 §8.2（根 + 前端 Dockerfile / `make compose-up`，需构建期可访问
-  Docker Hub）；**无 Docker** 用 §8.4 的 `scripts/*.sh`（pid 管理 + nginx 反代，或 systemd）。二者共用 env 配置。
+  Docker Hub）；**无 Docker** 用 §8.4 的 `scripts/*.sh`（**单二进制托管前端为默认**，nginx 反代可选）。二者共用 env 配置。
 - **CI 全量门禁**：`checks` job 在 PR / push main 跑 `make all-checks`；能力 YAML 校验 job 保留。
 - **CGO 依赖**：SQLite 驱动（go-sqlite3）需要 CGO 编译——`scripts/build.sh` 默认不禁 CGO（本地/测试 OK）；
   而容器版 `Dockerfile` 用 `CGO_ENABLED=0`（容器只跑 MySQL，静态二进制优先）。两处按发布形态各自取舍。
@@ -492,7 +512,8 @@ make scripts-nginx        # 渲染宿主机 nginx 配置到 deploy/console-nginx
 | `internal/policy/` `internal/audit/` `internal/plans/` | 权限 / 审计 / 计划 |
 | `internal/marketplace/` `internal/capabilities/` `internal/mcp/` | 市场 / 能力 / MCP |
 | `internal/scheduler/` `internal/diagnostics/` `internal/execution/` | 巡检 / 诊断 / 执行 |
-| `apps/capability-console/` | Web 控制台（Vue 3 + TS） |
+| `internal/webui/` | 前端 SPA 内嵌包（`//go:embed all:dist`，placeholder 保编译） |
+| `apps/capability-console/` | Web 控制台（Vue 3 + TS）；构建产物内嵌到 `internal/webui/dist` |
 | `migrations/` | MySQL 迁移 SQL |
 | `examples/capabilities/` | 能力示例（discovered / published） |
 | `prompts/` | prompt 模板 |
