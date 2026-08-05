@@ -379,3 +379,49 @@ func TestRunMultiDomainOrchestrates(t *testing.T) {
 	}
 	runner.mu.Unlock()
 }
+
+// TestOrchestrateMergedPackageCapped verifies that a multi-domain merged package
+// whose observation data exceeds the assistant-response reserve is drained to
+// fit, mirroring the single-domain diagnostics.Service.Run size governance.
+func TestOrchestrateMergedPackageCapped(t *testing.T) {
+	t.Parallel()
+
+	// 每个观察塞入远超预算的原始数据，多域合并后必然超限。
+	bigData := map[string]any{"blob": make([]byte, 256*1024)}
+	bigAlias := func(domain string) diagnostics.Package {
+		p := samplePackage(domain, "prod")
+		p.Observations[0].Data = bigData
+		return p
+	}
+	runner := &fakeRunner{
+		packages: map[string]diagnostics.Package{
+			"kafka":   bigAlias("kafka"),
+			"minio":   bigAlias("minio"),
+			"gluster": bigAlias("gluster"),
+		},
+	}
+	now := time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC)
+	orch := orchestrator.New(runner, 3, func() time.Time { return now })
+
+	requests := []diagnostics.Request{
+		{Domain: "kafka", Environment: "prod", Runbook: "health"},
+		{Domain: "minio", Environment: "prod", Runbook: "health"},
+		{Domain: "gluster", Environment: "prod", Runbook: "health"},
+	}
+
+	pkg, err := orch.Orchestrate(context.Background(), testUser(), requests)
+	if err != nil {
+		t.Fatalf("Orchestrate with oversized sub-packages: %v", err)
+	}
+
+	// 合并包结构仍完整（未被截断破坏）。
+	if len(pkg.Observations) != 3 {
+		t.Fatalf("merged Observations len = %d, want 3", len(pkg.Observations))
+	}
+	// 超限的原生数据被回收为 truncated 标记，而非整包报错或原样透传。
+	for i, obs := range pkg.Observations {
+		if _, ok := obs.Data["truncated"]; !ok {
+			t.Fatalf("merged observation %d Data not drained to truncated marker: %v", i, obs.Data)
+		}
+	}
+}

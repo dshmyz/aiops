@@ -142,7 +142,7 @@ func (s *Service) Run(ctx context.Context, user identity.CurrentUser, request Re
 	if err := ValidatePackage(pkg); err != nil {
 		return Package{}, err
 	}
-	if err := ensurePackageSize(&pkg); err != nil {
+	if err := EnsurePackageSize(&pkg); err != nil {
 		return Package{}, err
 	}
 	return pkg, nil
@@ -221,7 +221,12 @@ func (s *Service) ResolveReadTool(request Request) (string, error) {
 	return toolName, nil
 }
 
-func ensurePackageSize(pkg *Package) error {
+// EnsurePackageSize caps a diagnostic package at
+// maxDiagnosticPackageBytesReservedForAssistantResponse by draining observation
+// data when it is over. It returns nil when the package already fits, or after
+// truncation succeeds. 单域 diagnostics.Service.Run 与多域 orchestrator 合并路径
+// 都调用它，保证任何形态的诊断包都不会撑爆 assistant 响应/上下文。
+func EnsurePackageSize(pkg *Package) error {
 	encoded, err := json.Marshal(pkg)
 	if err != nil {
 		return fmt.Errorf("序列化诊断包失败: %w", err)
@@ -234,16 +239,21 @@ func ensurePackageSize(pkg *Package) error {
 		return errors.New("诊断包没有可截断的观察数据")
 	}
 
-	pkg.Observations[0].Data = map[string]any{"truncated": true}
-	encoded, err = json.Marshal(pkg)
-	if err != nil {
-		return fmt.Errorf("序列化截断后的诊断包失败: %w", err)
+	// 逐步清空各观察的原始 data，直到整包落到保留位以内。单域路径通常
+	// 只需清空第一条；多域合并包（每条观察带多域数据）需逐条回收字节。
+	for i := range pkg.Observations {
+		pkg.Observations[i].Data = map[string]any{"truncated": true}
+		encoded, err = json.Marshal(pkg)
+		if err != nil {
+			return fmt.Errorf("序列化截断后的诊断包失败: %w", err)
+		}
+		if len(encoded) < maxDiagnosticPackageBytesReservedForAssistantResponse {
+			return nil
+		}
 	}
-	if len(encoded) >= maxDiagnosticPackageBytesReservedForAssistantResponse {
-		return fmt.Errorf("诊断包超过 %d 字节限制（截断后）", maxDiagnosticPackageBytesReservedForAssistantResponse)
-	}
-	return nil
+	return fmt.Errorf("诊断包超过 %d 字节限制（截断全部观察数据后仍超限）", maxDiagnosticPackageBytesReservedForAssistantResponse)
 }
+
 
 func sanitizeObservationData(result map[string]any) map[string]any {
 	encoded, err := json.Marshal(result)

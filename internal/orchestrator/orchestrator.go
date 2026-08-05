@@ -220,7 +220,16 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, user identity.CurrentUse
 		return diagnostics.Package{}, fmt.Errorf("orchestrator: all sub-requests failed: %s", strings.Join(failures, "; "))
 	}
 
-	return mergePackages(packages, o.clock()), nil
+	merged := mergePackages(packages, o.clock())
+	// 与单域 diagnostics.Service.Run 对齐：合并包同样过大小治理。
+	// mergePackages 只拼接校验过的子包，结构上假定合法；这里不再重复结构校验
+	//（多域子包可能来自 assistant 的骨架 fixture，强校验会误伤），只回收
+	// 超过 maxDiagnosticPackageBytesReservedForAssistantResponse 的观察数据，
+	// 避免多域无上限拼接撑爆 assistant 响应/上下文。
+	if err := diagnostics.EnsurePackageSize(&merged); err != nil {
+		return diagnostics.Package{}, fmt.Errorf("orchestrator: merged package too large: %w", err)
+	}
+	return merged, nil
 }
 
 // mergePackages 把多个诊断包合并成一个。Domains 去重，其他字段直接拼接。
