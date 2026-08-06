@@ -452,6 +452,10 @@ TLS / 80 端口 / 更细静态控制时，才启用 nginx 反代：SPA 用相对
 
 ## 9. 上线前检查清单
 
+> 逐步骤走查（env 逐项、CAS 注册、密钥轮换、备份、监控告警）见
+> **[生产上线 Checklist → PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md)**。
+> 以下是速查摘要。
+
 **配置/安全**
 - [ ] `COPILOT_JWT_HMAC_SECRET` 设为强随机（`openssl rand -base64 32`），并设定轮换机制（建议 ≤90 天）
 - [ ] `COPILOT_AUTH_MODE` 确定（`jwt` / `cas` / `both`），CAS 场景配好 `_SERVER_URL`/`_SERVICE_URL`
