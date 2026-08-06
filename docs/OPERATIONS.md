@@ -177,6 +177,8 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（含 prod/staging/de
 | `POST/GET /v1/assistant/feedback` | 任一登录用户；admin 可按 subject 过滤 |
 | `GET /v1/action-plans` · `GET /v1/action-plans/{id}` | viewer/operator/admin（+环境白名单） |
 | `POST /v1/action-plans/{id}/confirm` | viewer/operator/admin + 策略/environment |
+| `POST /v1/action-plans/{id}/reject` | viewer/operator/admin + 策略/environment（显式拒绝，离开 pending 队列；幂等） |
+| `GET /v1/overview` | 任一登录用户（执行计数仅 admin，其余字段按需缺省） |
 | `GET /v1/audit-events` · `/v1/audit-events/search` | viewer/operator/admin |
 | `GET /v1/executions` | **admin only** |
 | `GET /v1/identity/me` | 任一登录用户（返回当前 subject + roles，供顶栏"我是谁"） |
@@ -206,7 +208,7 @@ knowledge/status），其余（feedback/knowledge/MCP/marketplace/webhook）返�
 
 ## 5. Web 控制台（capability-console）
 
-单页应用（无路由库，`ref<ActiveView>` 切换），共 **14 个视图**，除 `management` 外均懒加载。
+单页应用（无路由库，`ref<ActiveView>` 切换），共 **15 个视图**，除 `management` 外均懒加载。
 
 **侧栏「运维」**：
 
@@ -214,22 +216,23 @@ knowledge/status），其余（feedback/knowledge/MCP/marketplace/webhook）返�
 |------|--------|------|
 | AI 运维助手 | Cmd+1 | 与 copilot 对话（SSE 流式 + 自治 agent loop 步骤时间线） |
 | 能力接入管理 | Cmd+2 | 能力 YAML 草稿/校验/测试/发布/下架 |
-| 待确认计划 | Cmd+3 | 待人工确认的写 action plan（带未决角标） |
-| 定时巡检 | Cmd+4 | 定时任务 CRUD/触发/运行历史（带失败数角标） |
+| 运维总览 | Cmd+3 | 运维态势聚合：待确认计划/活动告警/定时巡检/今日执行 + 一键拒绝（`GET /v1/overview`） |
+| 待确认计划 | Cmd+4 | 待人工确认的写 action plan（带未决角标） |
+| 定时巡检 | Cmd+5 | 定时任务 CRUD/触发/运行历史（带失败数角标） |
 | 巡检报告 | — | 巡检报告列表/详情 |
 
 **侧栏「管理配置」**：
 
 | 视图 | 快捷键 | 说明 |
 |------|--------|------|
-| 审计记录 | Cmd+5 | 审计事件过滤 + 自然语言搜索 |
+| 审计记录 | Cmd+6 | 审计事件过滤 + 自然语言搜索 |
 | 执行历史 | — | **admin**，含敏感输入/错误、plan→审计跳转 |
 | 告警全景 | — | incident 只读全景（5 条证据源软匹配 join） |
 | 能力市场 | — | 团队共享能力注册表：发布/版本/评分/下载 |
-| Prompt 管理 | Cmd+6 | prompt 模板 hot-reload |
-| 知识库 | Cmd+7 | RAG 文档列表/摄入/状态 |
-| 用户反馈 | Cmd+8 | 评分/纠正 + 改进建议聚合 + **runbook 草稿生成/启用** |
-| MCP 服务器 | Cmd+9 | MCP 服务器 热 CRUD/reload |
+| Prompt 管理 | Cmd+7 | prompt 模板 hot-reload |
+| 知识库 | Cmd+8 | RAG 文档列表/摄入/状态 |
+| 用户反馈 | Cmd+9 | 评分/纠正 + 改进建议聚合 + **runbook 草稿生成/启用** |
+| MCP 服务器 | — | MCP 服务器 热 CRUD/reload |
 | 使用手册 | — | 渲染 docs/OPERATIONS.md（admin 只读，`GET /v1/docs/OPERATIONS.md`） |
 
 **鉴权**：开发环境下 Vite 代理注入固定 `VITE_DEV_ADMIN_TOKEN`；生产由前端直接带真实用户

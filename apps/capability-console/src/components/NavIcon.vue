@@ -12,7 +12,7 @@
  * Icons are simplified from Lucide (ISC/Ishikawa Masashi, MIT-style license).
  * Each path uses stroke="currentColor" so it tints with the parent color.
  */
-type IconName = 'assistant' | 'management' | 'plans' | 'audit' | 'executions' | 'incident' | 'scheduled-tasks' | 'inspection-reports' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs';
+type IconName = 'assistant' | 'management' | 'dashboard' | 'plans' | 'audit' | 'executions' | 'incident' | 'scheduled-tasks' | 'inspection-reports' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs';
 
 defineProps<{ name: IconName }>();
 </script>
@@ -182,6 +182,13 @@ defineProps<{ name: IconName }>();
         stroke-linecap="round"
         stroke-linejoin="round"
       />
+    </template>
+    <!-- dashboard: grid of gauges -->
+    <template v-else-if="name === 'dashboard'">
+      <rect x="3" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
+      <rect x="14" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
+      <rect x="3" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
+      <rect x="14" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
     </template>
     <!-- unknown: placeholder dot -->
     <template v-else>

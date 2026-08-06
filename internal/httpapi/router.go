@@ -56,6 +56,7 @@ type AssistantService interface {
 
 type PlanConfirmationService interface {
 	ConfirmPlan(context.Context, string, uint, string, identity.CurrentUser) (plans.Plan, error)
+	RejectPlan(context.Context, string, uint, identity.CurrentUser) (plans.Plan, error)
 }
 
 type ExecutionService interface {
@@ -523,6 +524,14 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/action-plans/") && strings.HasSuffix(request.URL.Path, "/confirm") {
 		r.serveConfirmActionPlan(writer, request)
+		return
+	}
+	if request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/action-plans/") && strings.HasSuffix(request.URL.Path, "/reject") {
+		r.serveRejectActionPlan(writer, request)
+		return
+	}
+	if request.Method == http.MethodGet && request.URL.Path == "/v1/overview" {
+		r.serveOverview(writer, request)
 		return
 	}
 	if request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/tools/") && strings.HasSuffix(request.URL.Path, "/read") {
@@ -2134,6 +2143,136 @@ func (r *Router) serveConfirmActionPlan(writer http.ResponseWriter, request *htt
 		response["verification"] = executionResult.Verification
 	}
 	writeCappedJSON(writer, response)
+}
+
+// serveRejectActionPlan 处理 POST /v1/action-plans/{id}/reject：运营者显式拒绝
+// 执行一个 pending plan，使其从待确认队列退出（终态 rejected），不执行任何操作。
+// 与 confirm 同权限语义（需策略放行 + RequiresConfirmation），返回 rejected plan。
+func (r *Router) serveRejectActionPlan(writer http.ResponseWriter, request *http.Request) {
+	if r.auth == nil || r.plans == nil || r.actionPlans == nil {
+		writeError(writer, http.StatusInternalServerError, "router is not configured")
+		return
+	}
+	user, request, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	planID := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/action-plans/"), "/reject")
+	if strings.TrimSpace(planID) == "" {
+		writeError(writer, http.StatusNotFound, "action plan not found")
+		return
+	}
+	var body struct {
+		ExpectedVersion uint `json:"expected_version"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
+	if err := decoder.Decode(&body); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON input")
+		return
+	}
+	if body.ExpectedVersion == 0 {
+		writeError(writer, http.StatusBadRequest, "expected_version is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	defer cancel()
+	record, err := r.actionPlans.GetPlan(ctx, planID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(writer, http.StatusNotFound, "action plan not found")
+			return
+		}
+		writeError(writer, http.StatusBadGateway, err.Error())
+		return
+	}
+	tool, input, _, ok := canonicalActionPlan(record)
+	if !ok {
+		writeError(writer, http.StatusNotFound, "action plan not found")
+		return
+	}
+	decision := policy.Evaluate(user, tool, input)
+	if !decision.Allowed || !decision.RequiresConfirmation {
+		r.writeForbidden(writer, request, user, string(decision.Reason), request.URL.Path)
+		return
+	}
+	plan, err := r.plans.RejectPlan(ctx, planID, body.ExpectedVersion, user)
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, plans.ErrRejectConflict) {
+			status = http.StatusConflict
+		}
+		writeError(writer, status, err.Error())
+		return
+	}
+	writeCappedJSON(writer, map[string]any{
+		"type":    "plan_rejected",
+		"plan_id": plan.ID,
+		"status":  string(plan.Status),
+		"version": plan.Version,
+	})
+}
+
+// serveOverview 处理 GET /v1/overview：返回运维总览首屏的轻量统计计数（顶部统计卡）。
+// 每个计数在对应 service 未装配时优雅降级（省略该字段、不报错），且只在登录后返回。
+// 执行相关的计数仅 admin 可见（含敏感执行信息）；其余计数对 viewer/operator/admin 开放。
+func (r *Router) serveOverview(writer http.ResponseWriter, request *http.Request) {
+	if r.auth == nil {
+		writeError(writer, http.StatusInternalServerError, "router is not configured")
+		return
+	}
+	user, request, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	defer cancel()
+
+	overview := map[string]any{}
+
+	// 待确认 plan 数（viewer/operator/admin 均可看，无敏感信息）。
+	if r.actionPlans != nil {
+		page, err := r.actionPlans.ListPlans(ctx, store.PlanFilter{Status: store.PlanPendingConfirmation})
+		if err == nil {
+			overview["pending_plans"] = len(page.Plans)
+		}
+	}
+
+	// 活动告警数：非 resolved 的 firing 告警，仅当告警查询 service 装配时。
+	if r.alertQuery != nil {
+		if alerts, err := r.alertQuery.Query(ctx, store.AlertFilter{Status: "firing"}); err == nil {
+			overview["active_alerts"] = len(alerts)
+		}
+	}
+
+	// 已启用的定时任务数（创建/运行中的任务，非停用）。
+	if r.scheduledTasks != nil {
+		enabled := true
+		if tasks, err := r.scheduledTasks.List(ctx, user, store.ScheduledTaskFilter{Enabled: &enabled}); err == nil {
+			overview["enabled_tasks"] = len(tasks)
+		}
+	}
+
+	// 今日执行成功/失败数：仅 admin（ListExecutions 含敏感输入/错误）。
+	if r.actionPlans != nil && userHasAnyRole(user, "admin") {
+		now := time.Now().UTC()
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		succeeded, failed := 0, 0
+		page, err := r.actionPlans.ListExecutions(ctx, store.ExecutionFilter{StartedAfter: today})
+		if err == nil {
+			for _, exec := range page.Executions {
+				switch exec.Status {
+				case "succeeded":
+					succeeded++
+				case "failed":
+					failed++
+				}
+			}
+			overview["today_executions_succeeded"] = succeeded
+			overview["today_executions_failed"] = failed
+		}
+	}
+
+	writeCappedJSON(writer, overview)
 }
 
 func decodeMap(writer http.ResponseWriter, request *http.Request) (map[string]any, bool) {

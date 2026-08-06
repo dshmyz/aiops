@@ -221,6 +221,29 @@ export interface ConfirmPlanPayload {
   confirmation_token?: string;
 }
 
+/** RejectPlanPayload 显式拒绝一个 pending action plan（POST /reject）。 */
+export interface RejectPlanPayload {
+  expected_version: number;
+}
+
+/** RejectPlanResult 是 reject 端点的响应。 */
+export interface RejectPlanResult {
+  type: 'plan_rejected';
+  plan_id: string;
+  status: string;
+  version: number;
+}
+
+/** OverviewData 是 GET /v1/overview 的顶部统计计数（运维总览首屏）。缺失字段表示
+ *  对应 service 未装配或当前用户无权限查看（执行数仅 admin）。 */
+export interface OverviewData {
+  pending_plans?: number;
+  active_alerts?: number;
+  enabled_tasks?: number;
+  today_executions_succeeded?: number;
+  today_executions_failed?: number;
+}
+
 export type VerificationStatus = 'success' | 'failed' | 'denied';
 
 export interface VerificationResult {

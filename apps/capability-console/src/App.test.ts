@@ -526,8 +526,8 @@ describe('Capability Console', () => {
     expect(sections.length).toBe(2);
     expect(sections[0].find('[data-test="nav-section-label"]').text()).toBe('运维');
     expect(sections[1].find('[data-test="nav-section-label"]').text()).toBe('管理配置');
-    // 运维组包含 5 个 nav-item（assistant/management/plans/scheduled-tasks/inspection-reports）
-    expect(sections[0].findAll('.nav-item').length).toBe(5);
+    // 运维组包含 6 个 nav-item（assistant/management/dashboard/plans/scheduled-tasks/inspection-reports）
+    expect(sections[0].findAll('.nav-item').length).toBe(6);
     // 管理配置组包含 9 个 nav-item（audit/executions/incident/marketplace/prompts/knowledge/feedback/mcp-servers/docs）
     expect(sections[1].findAll('.nav-item').length).toBe(9);
   });

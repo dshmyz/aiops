@@ -41,6 +41,90 @@ func TestConfirmPlanUsesExpectedVersionAndSingleTransition(t *testing.T) {
 	}
 }
 
+func TestRejectPlanTransitionsPendingToRejectedAndIsIdempotent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repository := store.NewMemoryActionPlanStore()
+	service := plans.NewService(repository, fixedClock())
+	plan := createWritePlan(t, ctx, service)
+	if plan.Status != plans.PendingConfirmation {
+		t.Fatalf("initial status = %q, want %q", plan.Status, plans.PendingConfirmation)
+	}
+
+	rejected, err := service.RejectPlan(ctx, plan.ID, plan.Version, user())
+	if err != nil {
+		t.Fatalf("reject plan: %v", err)
+	}
+	if rejected.Status != plans.Rejected {
+		t.Fatalf("status = %q, want %q", rejected.Status, plans.Rejected)
+	}
+	if rejected.Version != plan.Version+1 {
+		t.Fatalf("version = %d, want %d", rejected.Version, plan.Version+1)
+	}
+
+	// 幂等：已 rejected 的 plan 再次拒绝返回当前态，不报错。
+	again, err := service.RejectPlan(ctx, plan.ID, rejected.Version, user())
+	if err != nil {
+		t.Fatalf("idempotent re-reject errored: %v", err)
+	}
+	if again.Status != plans.Rejected {
+		t.Fatalf("after re-reject status = %q, want %q", again.Status, plans.Rejected)
+	}
+}
+
+func TestRejectPlanRejectsStaleVersion(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := plans.NewService(store.NewMemoryActionPlanStore(), fixedClock())
+	plan := createWritePlan(t, ctx, service)
+
+	if _, err := service.RejectPlan(ctx, plan.ID, plan.Version+1, user()); !errors.Is(err, plans.ErrRejectConflict) {
+		t.Fatalf("stale-version reject error = %v, want ErrRejectConflict", err)
+	}
+}
+
+func TestRejectPlanRejectsAlreadyConfirmedPlan(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repository := store.NewMemoryActionPlanStore()
+	service := plans.NewService(repository, fixedClock())
+	plan := createWritePlan(t, ctx, service)
+
+	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.Version, plan.ConfirmationToken, user()); err != nil {
+		t.Fatalf("confirm plan: %v", err)
+	}
+	// 已 confirm 的 plan 不能 reject（终态冲突）。
+	if _, err := service.RejectPlan(ctx, plan.ID, plan.Version+1, user()); !errors.Is(err, plans.ErrRejectConflict) {
+		t.Fatalf("reject confirmed plan error = %v, want ErrRejectConflict", err)
+	}
+}
+
+func TestRejectPlanRecordsRejectedAudit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repository := store.NewMemoryActionPlanStore()
+	service := plans.NewService(repository, fixedClock())
+	plan := createWritePlan(t, ctx, service)
+	rejector := user()
+	rejector.Subject = "operator-2"
+	rejector.RequestID = "reject-request"
+
+	if _, err := service.RejectPlan(ctx, plan.ID, plan.Version, rejector); err != nil {
+		t.Fatalf("reject plan: %v", err)
+	}
+	events := repository.AuditEvents()
+	last := events[len(events)-1]
+	if last.Action != "plan_rejected" {
+		t.Fatalf("last audit action = %q, want plan_rejected", last.Action)
+	}
+	if last.Subject != rejector.Subject || last.RequestID != rejector.RequestID {
+		t.Fatalf("audit subject/requestID = %q/%q, want %q/%q", last.Subject, last.RequestID, rejector.Subject, rejector.RequestID)
+	}
+	if last.PlanID != plan.ID {
+		t.Fatalf("audit plan_id = %q, want %q", last.PlanID, plan.ID)
+	}
+}
+
 func TestCreatePlanStoresCanonicalInputSnapshotAndExpiresInTenMinutes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

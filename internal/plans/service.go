@@ -23,11 +23,15 @@ type Status = store.PlanStatus
 const (
 	PendingConfirmation = store.PlanPendingConfirmation
 	Confirmed           = store.PlanConfirmed
+	Rejected            = store.PlanRejected
 )
 
 var (
 	ErrConfirmationDenied = errors.New("plan confirmation was rejected")
 	ErrPlanNotPermitted   = errors.New("policy decision does not permit a plan")
+	// ErrRejectConflict 表示 reject 的乐观迁移失败：plan 已不在 pending（如已被
+	// confirm / 已过期 / 被别的请求并发拒绝）。调用方应返回 409，提示重载最新态。
+	ErrRejectConflict = errors.New("plan is no longer pending confirmation")
 )
 
 type Clock interface{ Now() time.Time }
@@ -205,6 +209,27 @@ func (s *Service) ConfirmPlan(ctx context.Context, id string, expectedVersion ui
 				return Plan{}, errors.Join(ErrConfirmationDenied, fmt.Errorf("record confirmation rejection audit: %w", auditErr))
 			}
 			return Plan{}, ErrConfirmationDenied
+		}
+		return Plan{}, err
+	}
+	return toPlan(plan), nil
+}
+
+// RejectPlan makes exactly one optimistic transition from pending_confirmation
+// to rejected: the operator explicitly declines to execute, so the plan leaves
+// the pending queue rather than sitting until expiry. Mirrors ConfirmPlan's
+// optimism (status+version bound), but needs no confirmation token. Idempotent:
+// an already-rejected plan returns as-is. A rejected plan can never be executed.
+func (s *Service) RejectPlan(ctx context.Context, id string, expectedVersion uint, user identity.CurrentUser) (Plan, error) {
+	now := s.clock.Now().UTC()
+	existing, err := s.store.GetPlan(ctx, id)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan, err := s.store.RejectPlan(ctx, id, expectedVersion, user.Subject, now, auditEvent(newID(), existing, "plan_rejected", string(policy.Permitted), user.Subject, user.RequestID, now, nil))
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return Plan{}, ErrRejectConflict
 		}
 		return Plan{}, err
 	}

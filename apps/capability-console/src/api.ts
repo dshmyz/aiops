@@ -37,9 +37,12 @@ import type {
   NormalizedResult,
   OpenAPIURLCommitPayload,
   OpenAPIURLCommitResult,
+  OverviewData,
   PendingPlanDetail,
   PendingPlanSummary,
   QuickPublishPayload,
+  RejectPlanPayload,
+  RejectPlanResult,
   RunbookDraft,
   SaveMCPServerPayload,
   ScheduledTask,
@@ -367,6 +370,17 @@ export async function confirmPlan(planID: string, payload: ConfirmPlanPayload): 
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export async function rejectPlan(planID: string, payload: RejectPlanPayload): Promise<RejectPlanResult> {
+  return request<RejectPlanResult>(`/v1/action-plans/${encodeURIComponent(planID)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchOverview(): Promise<OverviewData> {
+  return request<OverviewData>('/v1/overview');
 }
 
 export async function listAuditEvents(filter: AuditEventFilter = {}): Promise<AuditEventPage> {

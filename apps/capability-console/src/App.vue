@@ -27,6 +27,7 @@ const AdminPromptsView = defineAsyncComponent(() => import('./views/AdminPrompts
 const AdminKnowledgeView = defineAsyncComponent(() => import('./views/AdminKnowledgeView.vue'));
 const FeedbackView = defineAsyncComponent(() => import('./views/FeedbackView.vue'));
 const DocsView = defineAsyncComponent(() => import('./views/DocsView.vue'));
+const DashboardView = defineAsyncComponent(() => import('./views/DashboardView.vue'));
 import AssistantSuggestions from './components/AssistantSuggestions.vue';
 import CapabilityStatusBadge from './components/CapabilityStatusBadge.vue';
 import BlockRenderer from './components/BlockRenderer.vue';
@@ -44,7 +45,7 @@ import type {
   ExecutionResult,
 } from './types';
 
-type ActiveView = 'assistant' | 'management' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs';
+type ActiveView = 'assistant' | 'management' | 'dashboard' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs';
 
 const activeView = ref<ActiveView>('assistant');
 
@@ -62,7 +63,7 @@ async function loadCurrentUser() {
 }
 
 // 视图顺序与快捷键映射（Cmd/Ctrl+1..9），顺序与侧栏视觉分组一致
-const viewOrder: ActiveView[] = ['assistant', 'management', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'knowledge', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace', 'docs'];
+const viewOrder: ActiveView[] = ['assistant', 'management', 'dashboard', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'knowledge', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace', 'docs'];
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   // Cmd/Ctrl + 数字 切换视图
@@ -531,11 +532,22 @@ onUnmounted(() => {
           <span v-if="!sidebarCollapsed">能力接入管理</span>
         </button>
         <button
+          data-test="nav-dashboard"
+          data-view="dashboard"
+          class="nav-item"
+          :class="{ active: activeView === 'dashboard' }"
+          :title="'运维总览：待确认计划与运行态势'"
+          @click="activeView = 'dashboard'"
+        >
+          <NavIcon name="dashboard" />
+          <span v-if="!sidebarCollapsed">运维总览</span>
+        </button>
+        <button
           data-test="nav-plans"
           data-view="plans"
           class="nav-item"
           :class="{ active: activeView === 'plans' }"
-          :title="'待确认计划 (Cmd+3)'"
+          :title="'待确认计划 (Cmd+4)'"
           @click="activeView = 'plans'"
         >
           <NavIcon name="plans" />
@@ -547,7 +559,7 @@ onUnmounted(() => {
           data-view="scheduled-tasks"
           class="nav-item"
           :class="{ active: activeView === 'scheduled-tasks' }"
-          :title="'定时巡检 (Cmd+4)'"
+          :title="'定时巡检 (Cmd+5)'"
           @click="activeView = 'scheduled-tasks'"
         >
           <NavIcon name="scheduled-tasks" />
@@ -578,7 +590,7 @@ onUnmounted(() => {
           data-view="audit"
           class="nav-item"
           :class="{ active: activeView === 'audit' }"
-          :title="'审计记录 (Cmd+5)'"
+          :title="'审计记录 (Cmd+6)'"
           @click="activeView = 'audit'"
         >
           <NavIcon name="audit" />
@@ -622,7 +634,7 @@ onUnmounted(() => {
           data-view="prompts"
           class="nav-item"
           :class="{ active: activeView === 'prompts' }"
-          :title="'Prompt 管理 (Cmd+6)'"
+          :title="'Prompt 管理 (Cmd+7)'"
           @click="activeView = 'prompts'"
         >
           <NavIcon name="prompts" />
@@ -633,7 +645,7 @@ onUnmounted(() => {
           data-view="knowledge"
           class="nav-item"
           :class="{ active: activeView === 'knowledge' }"
-          :title="'知识库 (Cmd+7)'"
+          :title="'知识库 (Cmd+8)'"
           @click="activeView = 'knowledge'"
         >
           <NavIcon name="knowledge" />
@@ -644,7 +656,7 @@ onUnmounted(() => {
           data-view="feedback"
           class="nav-item"
           :class="{ active: activeView === 'feedback' }"
-          :title="'用户反馈 (Cmd+8)'"
+          :title="'用户反馈 (Cmd+9)'"
           @click="activeView = 'feedback'"
         >
           <NavIcon name="feedback" />
@@ -655,7 +667,7 @@ onUnmounted(() => {
           data-view="mcp-servers"
           class="nav-item"
           :class="{ active: activeView === 'mcp-servers' }"
-          :title="'MCP 服务器管理 (Cmd+9)'"
+          :title="'MCP 服务器管理'"
           @click="activeView = 'mcp-servers'"
         >
           <NavIcon name="mcp-servers" />
@@ -885,6 +897,8 @@ onUnmounted(() => {
         :capabilities="capabilitiesComposable"
         @ask-ai="handleAskAi"
       />
+
+      <DashboardView v-if="activeView === 'dashboard'" />
 
       <PlansView
         v-if="activeView === 'plans'"

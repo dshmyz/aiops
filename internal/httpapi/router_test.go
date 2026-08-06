@@ -1428,6 +1428,100 @@ func TestConfirmedActionPlanDisappearsFromPendingList(t *testing.T) {
 	}
 }
 
+func TestRejectActionPlanRejectsPendingAndDisappearsFromPendingList(t *testing.T) {
+	t.Parallel()
+	router, repository, planService := testRouterWithPlans(t, &readRunner{})
+	plan := createPendingPlan(t, planService)
+
+	req := signedRequest(t, "/v1/action-plans/"+plan.ID+"/reject", `{"expected_version":1}`, "admin-2", []string{"admin"}, []string{"prod"})
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"type":"plan_rejected"`) || !strings.Contains(res.Body.String(), `"status":"rejected"`) {
+		t.Fatalf("body = %s, want plan_rejected response", res.Body.String())
+	}
+	events := repository.AuditEvents()
+	if !hasAuditAction(events, "plan_rejected") {
+		t.Fatalf("audit events = %+v, want plan_rejected", events)
+	}
+
+	// rejected plan 从待确认列表消失。
+	listRes := httptest.NewRecorder()
+	router.ServeHTTP(listRes, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "admin-2", []string{"admin"}, []string{"prod"}))
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listRes.Code)
+	}
+	if strings.Contains(listRes.Body.String(), plan.ID) {
+		t.Fatalf("body = %s, must not include rejected plan", listRes.Body.String())
+	}
+}
+
+func TestRejectActionPlanRejectsViewer(t *testing.T) {
+	t.Parallel()
+	router, _, planService := testRouterWithPlans(t, &readRunner{})
+	plan := createPendingPlan(t, planService)
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/reject", `{"expected_version":1}`, "viewer-1", []string{"viewer"}, []string{"prod"}))
+
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("status = %d body = %s, want 403", res.Code, res.Body.String())
+	}
+}
+
+func TestRejectActionPlanRejectsAlreadyConfirmedPlan(t *testing.T) {
+	t.Parallel()
+	router, _, planService := testRouterWithPlans(t, &readRunner{})
+	plan := createPendingPlan(t, planService)
+
+	// 先确认。
+	confirmRes := httptest.NewRecorder()
+	router.ServeHTTP(confirmRes, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-2", []string{"admin"}, []string{"prod"}))
+	if confirmRes.Code != http.StatusOK {
+		t.Fatalf("confirm status = %d, want 200", confirmRes.Code)
+	}
+
+	// 已确认的 plan 拒绝 → 乐观冲突 409。
+	rejectRes := httptest.NewRecorder()
+	router.ServeHTTP(rejectRes, signedRequest(t, "/v1/action-plans/"+plan.ID+"/reject", `{"expected_version":2}`, "admin-2", []string{"admin"}, []string{"prod"}))
+	if rejectRes.Code != http.StatusConflict {
+		t.Fatalf("reject confirmed plan status = %d body = %s, want 409", rejectRes.Code, rejectRes.Body.String())
+	}
+}
+
+func TestOverviewReturnsPendingCount(t *testing.T) {
+	t.Parallel()
+	router, _, planService := testRouterWithPlans(t, &readRunner{})
+	createPendingPlan(t, planService)
+	createPendingPlan(t, planService)
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, signedRequest(t, "/v1/overview", "", "admin-2", []string{"admin"}, []string{"prod"}))
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, `"pending_plans":2`) {
+		t.Fatalf("body = %s, want pending_plans=2", body)
+	}
+}
+
+func TestOverviewRequiresAuthentication(t *testing.T) {
+	t.Parallel()
+	router, _ := testRouter(t, &readRunner{})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/overview", nil))
+
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", res.Code)
+	}
+}
+
 func TestListAuditEventsRequiresAuthentication(t *testing.T) {
 	t.Parallel()
 	router, _ := testRouter(t, &readRunner{})

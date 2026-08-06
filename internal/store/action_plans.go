@@ -24,6 +24,10 @@ type PlanStatus string
 const (
 	PlanPendingConfirmation PlanStatus = "pending_confirmation"
 	PlanConfirmed           PlanStatus = "confirmed"
+	// PlanRejected 是显式「拒绝」后的终态：运营者确认非故障但不想执行，让该 plan
+	// 从待确认队列里消失而非等过期。rejected 的 plan 永不执行（execution 端只认
+	// PlanConfirmed）。
+	PlanRejected PlanStatus = "rejected"
 )
 
 type PlanFilter struct {
@@ -210,6 +214,10 @@ type ActionPlanStore interface {
 	GetPlan(context.Context, string) (PlanRecord, error)
 	ListPlans(context.Context, PlanFilter) (PlanPage, error)
 	ConfirmPlan(context.Context, string, uint, string, string, time.Time, AuditEvent) (PlanRecord, error)
+	// RejectPlan 做一次从 pending_confirmation 到 rejected 的乐观迁移（幂等，绑定
+	// status+version+expiry）。返回迁移后的 PlanRecord；冲突返回 ErrConflict。
+	// 与 ConfirmPlan 同一套乐观并发语义，但不需要 confirmation_token_hash。
+	RejectPlan(context.Context, string, uint, string, time.Time, AuditEvent) (PlanRecord, error)
 	// SetPlanDryRun 在 plan 创建后持久化 dry-run 预览结果（结果准 #5）。
 	// dryRun 为 JSON 序列化的 DryRunResult；空则清除。
 	SetPlanDryRun(context.Context, string, []byte) error
@@ -332,6 +340,28 @@ func (s *MemoryActionPlanStore) ConfirmPlan(_ context.Context, id string, versio
 	plan.Version++
 	plan.ConfirmedBy = subject
 	plan.ConfirmedAt = pointerTo(now)
+	plan.UpdatedAt = now
+	s.plans[id] = plan
+	s.audits = append(s.audits, cloneAudit(event))
+	return clonePlan(plan), nil
+}
+
+func (s *MemoryActionPlanStore) RejectPlan(_ context.Context, id string, version uint, subject string, now time.Time, event AuditEvent) (PlanRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	plan, ok := s.plans[id]
+	if !ok {
+		return PlanRecord{}, ErrNotFound
+	}
+	// 幂等：已显式 rejected 的 plan 再次拒绝返回既有结果（不再断言 pending）。
+	if plan.Status == PlanRejected {
+		return clonePlan(plan), nil
+	}
+	if plan.Status != PlanPendingConfirmation || plan.Version != version || plan.ExpiresAt.Before(now) {
+		return PlanRecord{}, ErrConflict
+	}
+	plan.Status = PlanRejected
+	plan.Version++
 	plan.UpdatedAt = now
 	s.plans[id] = plan
 	s.audits = append(s.audits, cloneAudit(event))
@@ -682,6 +712,38 @@ func (s *MySQLActionPlanStore) ConfirmPlan(ctx context.Context, id string, versi
 	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `UPDATE action_plans SET status = ?, version = version + 1, confirmed_by = ?, confirmed_at = ?, updated_at = ?
 		WHERE id = ? AND status = ? AND version = ? AND confirmation_token_hash = ? AND expires_at > ?`, PlanConfirmed, subject, now, now, id, PlanPendingConfirmation, version, tokenHash, now)
+	if err != nil {
+		return PlanRecord{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return PlanRecord{}, err
+	}
+	if affected != 1 {
+		return PlanRecord{}, ErrConflict
+	}
+	if err := insertAudit(ctx, tx, event); err != nil {
+		return PlanRecord{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return PlanRecord{}, err
+	}
+	return s.GetPlan(ctx, id)
+}
+
+func (s *MySQLActionPlanStore) RejectPlan(ctx context.Context, id string, version uint, subject string, now time.Time, event AuditEvent) (PlanRecord, error) {
+	// 先尝试幂等：已 rejected 的 plan 直接返回（无需事务）。并发下仍可能
+	// pending→rejected 竞争，由下面的乐观 UPDATE 兜底。
+	if existing, err := s.GetPlan(ctx, id); err == nil && existing.Status == PlanRejected {
+		return existing, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return PlanRecord{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE action_plans SET status = ?, version = version + 1, updated_at = ?
+		WHERE id = ? AND status = ? AND version = ? AND expires_at > ?`, PlanRejected, now, id, PlanPendingConfirmation, version, now)
 	if err != nil {
 		return PlanRecord{}, err
 	}

@@ -298,6 +298,8 @@ func main() {
 	options = append(options, httpapi.WithMCPService(httpapi.NewMCPServerService(mcpServerStore, mcpManager)))
 	options = append(options, httpapi.WithAlertWebhook(httpapi.NewAlertWebhookService(alertSvc, auditService)))
 	options = append(options, httpapi.WithAlertWebhookSecret(os.Getenv("COPILOT_ALERT_WEBHOOK_SECRET")))
+	// 告警查询：供 /v1/overview 统计活动告警数（*alert.Service 满足 AlertQueryService）。
+	options = append(options, httpapi.WithAlertQuery(alertSvc))
 	// Capability marketplace: a registry of shared, versioned capabilities. The
 	// service probes the dialect so ratings use the right upsert on MySQL vs
 	// SQLite; both engines get their tables from migrations/015 (MySQL) and
