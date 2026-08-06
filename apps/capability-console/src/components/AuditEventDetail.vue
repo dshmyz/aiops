@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { AuditEvent } from '../types';
+import { formatAbsoluteTime } from '../conversationFormat';
 
 const props = defineProps<{
   event: AuditEvent | null;
@@ -66,7 +67,7 @@ function formatValue(value: unknown): string {
       </div>
       <div>
         <dt>时间</dt>
-        <dd class="mono">{{ event.created_at }}</dd>
+        <dd class="mono" :title="event.created_at">{{ formatAbsoluteTime(event.created_at) }}</dd>
       </div>
       <div v-if="event.request_id">
         <dt>Request ID</dt>

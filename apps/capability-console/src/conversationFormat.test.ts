@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { formatDateGroup, formatRelativeTime, formatResponseType } from './conversationFormat';
+import { formatAbsoluteTime, formatCompactDateTime, formatDateGroup, formatRelativeTime, formatResponseType } from './conversationFormat';
 
 describe('formatRelativeTime', () => {
   const now = new Date('2026-07-27T10:30:00Z');
@@ -125,5 +125,44 @@ describe('formatDateGroup', () => {
     // 与 now (2026-07-27T10:30:00Z = 2026-07-27T18:30:00 local) 同一天
     const result = formatDateGroup('2026-07-26T16:00:00Z', now);
     expect(result.label).toBe('今天');
+  });
+});
+
+describe('formatCompactDateTime', () => {
+  test('always includes the year, even when it matches the current year', () => {
+    const iso = '2026-07-21T11:29:30Z'; // 本地年份同样为 2026
+    expect(formatCompactDateTime(iso)).toMatch(/^2026-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+
+  test('prepends a different year for cross-year dates', () => {
+    const iso = '2024-06-01T10:00:00Z';
+    expect(formatCompactDateTime(iso)).toMatch(/^2024-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+
+  test('formats in local time with seconds by default', () => {
+    const iso = new Date(2026, 6, 21, 19, 29, 30).toISOString(); // local 2026-07-21 19:29:30
+    expect(formatCompactDateTime(iso)).toBe('2026-07-21 19:29:30');
+  });
+
+  test('omits seconds when withSeconds is false', () => {
+    const iso = new Date(2026, 6, 21, 19, 29, 30).toISOString();
+    expect(formatCompactDateTime(iso, false)).toBe('2026-07-21 19:29');
+  });
+
+  test('returns the input verbatim on invalid dates', () => {
+    expect(formatCompactDateTime('not-a-date')).toBe('not-a-date');
+  });
+});
+
+describe('formatAbsoluteTime', () => {
+  test('formats a valid ISO string into full local time', () => {
+    // 用本地构造时间，断言与本地时区无关。2026-07-21 为周二。
+    const iso = new Date(2026, 6, 21, 19, 29, 30).toISOString();
+    expect(formatAbsoluteTime(iso)).toBe('2026年07月21日 周二 19:29:30');
+  });
+
+  test('returns the input verbatim on invalid dates', () => {
+    expect(formatAbsoluteTime('not-a-date')).toBe('not-a-date');
+    expect(formatAbsoluteTime('')).toBe('');
   });
 });

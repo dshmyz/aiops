@@ -2,6 +2,7 @@
 import { reactive, ref } from 'vue';
 import type { ExecutionFilter, ExecutionRecord } from '../types';
 import { labelForExecutionStatus } from '../labels';
+import { formatAbsoluteTime, formatCompactDateTime } from '../conversationFormat';
 import { useExecutions } from '../composables/useExecutions';
 
 const {
@@ -128,7 +129,7 @@ function prettyJSON(value: unknown): string {
               :class="{ active: isSelected(record) }"
               @click="selectedID = record.id"
             >
-              <td class="mono">{{ record.created_at }}</td>
+              <td class="mono" :title="record.created_at">{{ formatCompactDateTime(record.created_at) }}</td>
               <td :class="['execution-status', `execution-status-${record.status}`]">
                 {{ labelForExecutionStatus(record.status) }}
               </td>
@@ -189,8 +190,8 @@ function prettyJSON(value: unknown): string {
                 <span v-else>-</span>
               </dd>
             </div>
-            <div><dt>开始时间</dt><dd class="mono">{{ record.started_at || '-' }}</dd></div>
-            <div><dt>完成时间</dt><dd class="mono">{{ record.completed_at || '-' }}</dd></div>
+            <div><dt>开始时间</dt><dd class="mono" :title="record.started_at || undefined">{{ record.started_at ? formatAbsoluteTime(record.started_at) : '-' }}</dd></div>
+            <div><dt>完成时间</dt><dd class="mono" :title="record.completed_at || undefined">{{ record.completed_at ? formatAbsoluteTime(record.completed_at) : '-' }}</dd></div>
           </dl>
 
           <section v-if="record.result_summary" class="detail-block">
@@ -219,6 +220,11 @@ function prettyJSON(value: unknown): string {
   padding: 0 var(--space-6, 1.5rem) var(--space-6, 1.5rem);
   flex: 1;
   min-height: 0;
+}
+
+/* 与其它带顶栏视图一致：entry 已提供 24px 左右内边距，顶栏自身不再叠加左边距。 */
+.executions-entry .topbar {
+  padding: var(--space-5, 1.25rem) 0 var(--space-4, 1rem);
 }
 
 .executions-filters {

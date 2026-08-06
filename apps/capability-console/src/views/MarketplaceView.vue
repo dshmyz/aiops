@@ -420,6 +420,11 @@ async function submitPublish() {
   min-height: 0;
 }
 
+/* 与其它带顶栏视图一致：entry 已提供 24px 左右内边距，顶栏自身不再叠加左边距。 */
+.marketplace-entry .topbar {
+  padding: var(--space-5, 1.25rem) 0 var(--space-4, 1rem);
+}
+
 .mode-tabs {
   display: flex;
   gap: 4px;

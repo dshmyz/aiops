@@ -2,6 +2,7 @@
 import { reactive, ref, watch } from 'vue';
 import type { AuditEvent, AuditEventCursor, AuditEventFilter } from '../types';
 import { downloadAuditCSV } from '../auditExport';
+import { formatCompactDateTime } from '../conversationFormat';
 import AuditEventDetail from './AuditEventDetail.vue';
 
 const props = withDefaults(
@@ -194,7 +195,7 @@ function submitSearch() {
               :class="{ active: event.id === selectedEventID }"
               @click="selectEvent(event)"
             >
-              <td class="mono">{{ event.created_at }}</td>
+              <td class="mono" :title="event.created_at">{{ formatCompactDateTime(event.created_at) }}</td>
               <td class="mono">{{ event.tool_name }}</td>
               <td>{{ event.action }}</td>
               <td :class="['decision', `decision-${event.decision}`]">{{ event.decision }}</td>

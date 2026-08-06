@@ -33,8 +33,9 @@
   --color-danger: #ff453a;
   --color-danger-soft: rgba(255, 69, 58, 0.16);
 
-  /* Gradient - SF Blue → SF Indigo */
-  --gradient-brand: linear-gradient(135deg, #0a84ff 0%, #5e5ce6 100%);
+  /* Gradient - 由 SF Blue 渐变收敛为纯色 brand，消除“腻”感。
+     变量名保留以便引用处不破坏；纯色比双色渐变更克制干净。 */
+  --gradient-brand: #0a84ff;
 
   /* View identity colors - SF-tuned */
   --view-assistant: #0a84ff;
@@ -78,8 +79,8 @@
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --radius-xl: 18px;
-  --radius-2xl: 22px;
+  --radius-xl: 16px;
+  --radius-2xl: 18px;
   --radius-pill: 999px;
 
   /* Apple material - frosted glass（跟随新背景色） */
@@ -88,11 +89,12 @@
   --material-thick: rgba(58, 58, 60, 0.86);
   --material-blur: saturate(180%) blur(20px);
 
-  /* Apple shadows - 深色背景下需要更亮的描边来区分卡片边缘 */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.10);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.12);
-  --shadow-focus: 0 0 0 4px rgba(10, 132, 255, 0.36);
+  /* Shadows - 深色：去掉白色 1px 描边，改用柔和投影 + 细分层背景。
+     卡片靠「稍亮一层的背景」自然浮起，不靠发亮描边，观感更干净。 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-focus: 0 0 0 3px rgba(10, 132, 255, 0.28);
 
   /* Apple motion - spring easing */
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -106,10 +108,10 @@
 
 /* Light theme - macOS Sequoia light */
 :root.light-theme {
-  --color-bg: #f6f6f8;
+  --color-bg: #f2f2f5;
   --color-bg-elevated: #ffffff;
-  --color-bg-hover: #eeeef1;
-  --color-bg-active: rgba(0, 122, 255, 0.08);
+  --color-bg-hover: #ececef;
+  --color-bg-active: rgba(0, 122, 255, 0.06);
 
   --color-border: rgba(0, 0, 0, 0.08);
   --color-border-strong: rgba(0, 0, 0, 0.16);
@@ -130,7 +132,7 @@
   --color-danger: #ff3b30;
   --color-danger-soft: rgba(255, 59, 48, 0.1);
 
-  --gradient-brand: linear-gradient(135deg, #007aff 0%, #5856d6 100%);
+  --gradient-brand: #007aff;
 
   /* View identity colors - SF light */
   --view-assistant: #007aff;
@@ -149,10 +151,12 @@
   --material-regular: rgba(255, 255, 255, 0.72);
   --material-thick: rgba(255, 255, 255, 0.86);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.06);
-  --shadow-focus: 0 0 0 4px rgba(0, 122, 255, 0.24);
+  /* Shadows - 浅色：去掉 1px 描边，改用更真实的柔和投影。
+     白卡片纯靠「灰底上漂浮」的阴影分层，避免描边堆叠造成的“腻感”。 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.05);
+  --shadow-focus: 0 0 0 3px rgba(0, 122, 255, 0.18);
 }
 
 /* ============================================
@@ -475,7 +479,7 @@ code {
 .topbar h1 {
   font-size: var(--font-xl);
   font-weight: 600;
-  color: var(--view-accent);
+  color: var(--color-text-primary);
   letter-spacing: -0.01em;
 }
 
@@ -583,7 +587,7 @@ nav button:focus-visible {
 .primary-inline:active:not(:disabled),
 .runner-primary:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 1px 4px rgba(56, 189, 248, 0.18);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 .btn-secondary:active:not(:disabled),
@@ -609,14 +613,14 @@ nav button:focus-visible {
   background: var(--gradient-brand);
   color: #fff;
   border: none;
-  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.28);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   font-weight: 600;
 }
 
 .btn-primary:hover:not(:disabled),
 .primary-inline:hover:not(:disabled),
 .runner-primary:hover:not(:disabled) {
-  box-shadow: 0 4px 14px rgba(10, 132, 255, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
   transform: translateY(-1px);
 }
 
@@ -934,13 +938,13 @@ nav button:focus-visible {
   background: var(--gradient-brand) !important;
   border: none !important;
   color: #fff !important;
-  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.22) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
 }
 
 .el-button--primary:hover:not(:disabled):not(.is-loading),
 .el-button--success:hover:not(:disabled):not(.is-loading),
 .el-button--danger:hover:not(:disabled):not(.is-loading) {
-  box-shadow: 0 4px 14px rgba(56, 189, 248, 0.38) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14) !important;
   transform: translateY(-1px);
 }
 
@@ -1198,8 +1202,10 @@ nav button:focus-visible {
   overflow: hidden;
   /* Unified breathing room for all four steps. Previously each step picked
      its own padding (32/24/24×32), which made the rhythm feel inconsistent
-     and cramped. */
-  padding: var(--space-8) var(--space-8);
+     and cramped. Left/right use --space-6(24px) so stage content aligns with
+     the topbar title and workflow-rail (also 24px); vertical keeps --space-8
+     for breathing room. */
+  padding: var(--space-8) var(--space-6);
 }
 
 /* ============================================
@@ -3190,22 +3196,22 @@ nav button:focus-visible {
 
 .assistant-hero {
   text-align: center;
-  margin-bottom: var(--space-2);
-  padding: var(--space-4) var(--space-6) var(--space-2);
+  margin-bottom: var(--space-1);
+  padding: var(--space-2) var(--space-6) var(--space-1);
   position: relative;
 }
 
 .assistant-hero__icon {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   margin: 0 auto var(--space-2);
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--gradient-brand);
   color: #fff;
-  box-shadow: 0 6px 18px rgba(10, 132, 255, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   animation: hero-icon-enter 0.6s var(--ease-spring) both;
 }
 

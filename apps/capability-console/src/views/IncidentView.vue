@@ -258,8 +258,15 @@ const severityClass: Record<string, string> = {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  padding: var(--space-4);
+  /* 与其它 topbar 视图一致的水平节奏：左 24px（--space-6），顶底视内容定。
+     此前用 --space-4(16px) 使该视图整体比其它页面左缩 8px。 */
+  padding: 0 var(--space-6) var(--space-6);
   overflow-y: auto;
+}
+
+/* 与其它带顶栏视图一致：entry 已提供 24px 左右内边距，顶栏自身不再叠加左边距。 */
+.incident-entry .topbar {
+  padding: var(--space-5) 0 var(--space-4);
 }
 
 .incident-form {

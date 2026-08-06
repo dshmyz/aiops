@@ -48,8 +48,14 @@ export function formatRelativeTime(iso: string, now: Date = new Date()): string 
   return sameYear ? `${month}月${day}日` : `${then.getFullYear()}年${month}月${day}日`;
 }
 
+/**
+ * formatAbsoluteTime 把 UTC ISO 时间转成完整本地时间。
+ * 例：2026-07-21T11:29:30Z → "2026年07月21日 周二 19:29:30"（本地时区）。
+ * 解析失败（非法输入）时原样返回，避免把坏数据渲染成 NaN 串。
+ */
 export function formatAbsoluteTime(iso: string): string {
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -58,6 +64,26 @@ export function formatAbsoluteTime(iso: string): string {
   const seconds = String(d.getSeconds()).padStart(2, '0');
   const weekday = WEEKDAY_NAMES[d.getDay()];
   return `${year}年${month}月${day}日 ${weekday} ${hours}:${minutes}:${seconds}`;
+}
+
+/**
+ * formatCompactDateTime 把 UTC ISO 时间转成适合密集表格的紧凑本地时间。
+ * 例：2026-07-21T11:29:30.339659Z → "2026-07-21 19:29:30"（本地时区）。
+ * - 秒数可选（withSeconds=false 时省略 `:ss`），用于卡片/概览等次要展示。
+ * - 始终包含完整年份，避免跨年数据歧义（即使与当前年份相同也不省略）。
+ * - 解析失败（非法输入）时原样返回，避免把坏数据吞成空串。
+ */
+export function formatCompactDateTime(iso: string, withSeconds = true): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mm = pad(d.getMinutes());
+  const sec = withSeconds ? `:${pad(d.getSeconds())}` : '';
+  return `${year}-${month}-${day} ${hh}:${mm}${sec}`;
 }
 
 export interface DateGroup {
