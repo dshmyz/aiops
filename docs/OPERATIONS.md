@@ -119,6 +119,7 @@ curl -s http://127.0.0.1:18080/metrics   # Prometheus 指标
 | CORS | `COPILOT_CORS_ALLOWED_ORIGINS` | 逗号分隔；**留空=允许所有 `*`，生产必须限定前端域名** |
 | 鉴权 | `COPILOT_JWT_HMAC_SECRET` | HS256 签名密钥，**生产必设，定期轮换** |
 | 鉴权 | `COPILOT_AUTH_MODE` | `jwt`（默认）/ `cas` / `both` |
+| 鉴权 | `COPILOT_DEV_INJECT_ADMIN` | `1` 时开启 dev admin 身份兜底（未带认证头的 `/v1` 按 admin 处理；**仅开发/联调，生产必须为 0/缺省**） |
 | CAS | `COPILOT_CAS_SERVER_URL` / `_SERVICE_URL` | CAS 服务器与本服务 URL（cas/both 必需） |
 | CAS | `COPILOT_CAS_SESSION_TTL` | 会话 cookie 有效期（Go duration），默认 8h |
 | CAS | `COPILOT_CAS_DEFAULT_ROLES` | CAS 用户默认角色（JSON 数组），默认 `["operator"]` |
@@ -156,6 +157,7 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（含 prod/staging/de
 
 - `COPILOT_JWT_HMAC_SECRET`、`COPILOT_OPENAI_API_KEY`、`COPILOT_KNOWLEDGE_EMBEDDER_API_KEY` 等**严禁入库**，经 K8s Secret / 密钥管理注入。
 - `COPILOT_DEV_EXPOSE_CONFIRMATION_TOKEN` 必须为 `0`。`VITE_DEV_ADMIN_TOKEN` 只用于 dev 代理，勿提交真实 token。
+- `COPILOT_DEV_INJECT_ADMIN` **必须为 `0`/未设**：开启后任意未带认证头的 `/v1` 请求（含写操作）都以 admin 身份执行。只允许在隔离的开发环境置 `1`，严禁生产启用。
 - `COPILOT_CORS_ALLOWED_ORIGINS` 生产限定前端源。
 - 能力市场/能力列表读端点对 viewer/operator/admin 开放，**所有写端点仅 admin**；`GET /v1/executions`（含敏感输入/错误）**仅 admin**，operator/viewer 用 `/v1/audit-events`。
 
@@ -389,7 +391,8 @@ make gen-token       # 读取 ./.env，生成 24h admin JWT（开发/联调用�
 
 > **单体默认**：`make scripts-build`（全量）会把前端构建产物内嵌进 `copilot-api` 二进制
 > （`//go:embed`，见 §8.5）。`scripts/start.sh` 起来后**一个进程同时托管 API 与 SPA**，
-> 浏览器直接访问 `http://host:18080` 即可，无需单独 nginx / TLS 也能跑通。
+> 无需单独 nginx / TLS 也能跑通。SAP 页面的 `/v1` 需要登录态——
+> 浏览器整站直连（无 nginx 反代、前端无状态不带 JWT）时，见下方「浏览器访问」的 dev 开关。
 > `web/` 目录与 `make scripts-nginx` 保留为**可选**——仅当需要 80 端口、TLS、独立静态控制时再启用。
 
 **部署根布局**（默认即仓库根；打包到别处用 `RUN_ROOT`/`AIOS_HOME` 覆盖）：
@@ -402,6 +405,21 @@ make gen-token       # 读取 ./.env，生成 24h admin JWT（开发/联调用�
 ├── log/api.log          # 后端日志
 └── deploy/console-nginx.conf   # 宿主机 nginx 反代配置（可选，scripts/nginx.sh 渲染）
 ```
+
+**浏览器访问（无 nginx，开发/联调）**：前端 SPA 无状态、不携带 `Authorization`，而 jwt 模式后端
+强制要求 JWT（无登录端点），所以裸访问 18080 时 `/v1/*` 会 401。**无 nginx / 不启用反代时**，用
+内置的 dev 身份开关即可让浏览器直连页面正常用：
+
+```bash
+COPILOT_DEV_INJECT_ADMIN=1 make scripts-start   # 起后端（:18080）并开启 dev admin 注入
+# 浏览器打开 http://127.0.0.1:18080 即可 —— 未带 JWT 的 /v1 请求自动按固定 admin 身份处理
+```
+
+> **只用于本地开发/联调**（与 `COPILOT_DEV_EXPOSE_CONFIRMATION_TOKEN` 同属 dev-only 开关）。
+> 开启后**任意未带认证头的 /v1 请求都以 admin 身份执行（可写）**——**生产必须保持关闭**
+> （默认关闭，fail-closed 于 401）。显式携带的 `Authorization` 头不会被吞：非法头仍 401、
+> 合法 JWT 仍走真实身份。生产身份体系请用 nginx/网关把真实 JWT 注入 `/v1`（§8.2/上文），
+> 或接入 CAS 登录。
 
 **常用命令**：
 
@@ -460,6 +478,7 @@ TLS / 80 端口 / 更细静态控制时，才启用 nginx 反代：SPA 用相对
 - [ ] `COPILOT_JWT_HMAC_SECRET` 设为强随机（`openssl rand -base64 32`），并设定轮换机制（建议 ≤90 天）
 - [ ] `COPILOT_AUTH_MODE` 确定（`jwt` / `cas` / `both`），CAS 场景配好 `_SERVER_URL`/`_SERVICE_URL`
 - [ ] `COPILOT_DEV_EXPOSE_CONFIRMATION_TOKEN=0`
+- [ ] `COPILOT_DEV_INJECT_ADMIN` 未设/为 `0`（开启则任意无认证 `/v1` 按 admin 执行，仅限隔离开发）
 - [ ] `COPILOT_CORS_ALLOWED_ORIGINS` 限定前端域名（勿留 `*`）
 - [ ] 密钥/API Key 经 Secret 注入，**不入库**
 - [ ] `COPILOT_ALERT_WEBHOOK_SECRET` 已设（未设则告警 webhook 直接 503）

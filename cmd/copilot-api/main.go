@@ -320,6 +320,10 @@ func main() {
 		logger.Warn("development confirmation tokens are exposed in assistant responses")
 		options = append(options, httpapi.WithDevelopmentConfirmationTokens())
 	}
+	if os.Getenv("COPILOT_DEV_INJECT_ADMIN") == "1" {
+		logger.Warn("development admin identity injection enabled: unauthenticated /v1 requests become admin (dev only, never enable in production)")
+		options = append(options, httpapi.WithDevelopmentAdminIdentity())
+	}
 	authenticator := httpapi.NewHMACAuthenticator([]byte(os.Getenv("COPILOT_JWT_HMAC_SECRET")))
 
 	// Wire environment alias expander: expands canonical environment identifiers

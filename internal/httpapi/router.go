@@ -149,6 +149,7 @@ type Router struct {
 	alertWebhookSecret string
 	marketplace        MarketplaceService
 	devTokens          bool
+	devAdminIdentity   bool
 }
 
 // MCPService 封装 MCP 服务器热配置的 CRUD 和 Reload 操作。
@@ -285,6 +286,23 @@ func WithDevelopmentConfirmationTokens() Option {
 	}
 }
 
+// devAdminSubject 是 dev 注入身份使用的固定 subject；与 gen_token.go 生成的 admin
+// token 一致（roles/admin，允许 prod/staging/dev），便于本地联调与探活。
+const devAdminSubject = "admin-1"
+
+// WithDevelopmentAdminIdentity 开启 dev 身份兜底：当请求未携带可用的认证（无 JWT /
+// 无 CAS 会话，且没有 Authorization 头）时，authenticate 不再返回 401，而是回退到
+// 一个固定的 admin 身份。用于「浏览器直连内嵌 SPA」的开发场景——前端无状态、不携带
+// JWT，靠这个开关把 /v1 自动认定为 dev admin。
+//
+// 仅用于本地开发/联调；生产必须保持关闭（默认关闭，fail-closed 于 401）。
+// 与 WithDevelopmentConfirmationTokens 同属 dev-only 开关。
+func WithDevelopmentAdminIdentity() Option {
+	return func(router *Router) {
+		router.devAdminIdentity = true
+	}
+}
+
 // WithNotifier wires a confirmation notifier. When set, the router delivers
 // pending plan confirmation requests to the notifier after the assistant
 // creates a plan that requires human approval. This is the production-safe
@@ -334,8 +352,19 @@ func WithPromptRegistry(reg *prompt.Registry) Option {
 func (r *Router) authenticate(writer http.ResponseWriter, request *http.Request) (identity.CurrentUser, *http.Request, bool) {
 	user, err := r.auth.Authenticate(request)
 	if err != nil {
-		writeError(writer, http.StatusUnauthorized, "authentication required")
-		return identity.CurrentUser{}, request, false
+		// dev 兜底：开关开启且请求未显式携带 Authorization（浏览器直连内嵌 SPA，
+		// 前端无状态不带 JWT）时，放宽为 dev admin，而不是 401。显式带了但非法的头
+		// 一律仍 401，不吞调用方意图。
+		if r.devAdminIdentity && request.Header.Get("Authorization") == "" {
+			user = identity.CurrentUser{
+				Subject:             devAdminSubject,
+				Roles:               []string{"admin"},
+				AllowedEnvironments: []string{"prod", "staging", "dev"},
+			}
+		} else {
+			writeError(writer, http.StatusUnauthorized, "authentication required")
+			return identity.CurrentUser{}, request, false
+		}
 	}
 	ctx := observability.WithSubject(request.Context(), user.Subject)
 	return user, request.WithContext(ctx), true
