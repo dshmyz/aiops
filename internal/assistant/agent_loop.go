@@ -232,8 +232,10 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 			run.FinalAnswer = intent.Answer
 			return run
 		}
-		// Write intent: stop and hand the pending plan to the human. The loop
-		// never auto-executes a write.
+		// Write intent: execute it. A non-admitted write returns an executive
+		// (handoff) StepOutcome — stop and hand the pending plan to the human.
+		// A low-risk write admitted by the Low-Risk Admission Controller returns
+		// an advisory StepOutcome and the loop continues.
 		if isWriteIntent(intent) {
 			out, execErr := l.execute(intent, step)
 			if execErr != nil {
@@ -241,12 +243,22 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 				run.Err = execErr
 				return run
 			}
-			out.Kind = StepExecutive
 			out.StepIndex = step
-			run.Handoff = &out
+			if out.Kind != StepAdvisory {
+				// 硬禁止默认：写操作不自动执行，交出待确认 plan。
+				out.Kind = StepExecutive
+				run.Handoff = &out
+				run.Steps = append(run.Steps, out)
+				run.Reason = TerminalHandoff
+				return run
+			}
+			// 准入放行的低风险写：作为 advisory 步骤继续循环。
 			run.Steps = append(run.Steps, out)
-			run.Reason = TerminalHandoff
-			return run
+			if key, ok := intentAdvisoryKey(intent); ok {
+				seen[key] = struct{}{}
+			}
+			sequenceTrackTouched(sequenceTouched, l.sequence, out.Tool)
+			continue
 		}
 		// Convergence backstop: a read intent that replays a tool on a resource
 		// already executed this run cannot move the diagnosis forward. Conclude

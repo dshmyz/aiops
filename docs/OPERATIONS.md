@@ -120,6 +120,9 @@ curl -s http://127.0.0.1:18080/metrics   # Prometheus 指标
 | 鉴权 | `COPILOT_JWT_HMAC_SECRET` | HS256 签名密钥，**生产必设，定期轮换** |
 | 鉴权 | `COPILOT_AUTH_MODE` | `jwt`（默认）/ `cas` / `both` |
 | 鉴权 | `COPILOT_DEV_INJECT_ADMIN` | `1` 时开启 dev admin 身份兜底（未带认证头的 `/v1` 按 admin 处理；**仅开发/联调，生产必须为 0/缺省**） |
+| 自治 | `COPILOT_AUTONOMY_ENABLED` | E2 自动执行总开关；`0`/未设 = 一切自动执行禁用（**fail-closed，生产必须保持 0/未设**） |
+| 自治 | `COPILOT_AUTONOMY_DAILY_LIMIT` | 每主体每日自动执行上限（防刷），默认 `100`；`0` = 不限制（不建议生产） |
+| 自治 | `COPILOT_AUTONOMY_LOW_RISK_TOOLS` | 低风险自动执行工具白名单（逗号分隔，仅风险 `low` 写工具）；留空 = 不自动执行任何工具 |
 | CAS | `COPILOT_CAS_SERVER_URL` / `_SERVICE_URL` | CAS 服务器与本服务 URL（cas/both 必需） |
 | CAS | `COPILOT_CAS_SESSION_TTL` | 会话 cookie 有效期（Go duration），默认 8h |
 | CAS | `COPILOT_CAS_DEFAULT_ROLES` | CAS 用户默认角色（JSON 数组），默认 `["operator"]` |
@@ -158,6 +161,7 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（含 prod/staging/de
 - `COPILOT_JWT_HMAC_SECRET`、`COPILOT_OPENAI_API_KEY`、`COPILOT_KNOWLEDGE_EMBEDDER_API_KEY` 等**严禁入库**，经 K8s Secret / 密钥管理注入。
 - `COPILOT_DEV_EXPOSE_CONFIRMATION_TOKEN` 必须为 `0`。`VITE_DEV_ADMIN_TOKEN` 只用于 dev 代理，勿提交真实 token。
 - `COPILOT_DEV_INJECT_ADMIN` **必须为 `0`/未设**：开启后任意未带认证头的 `/v1` 请求（含写操作）都以 admin 身份执行。只允许在隔离的开发环境置 `1`，严禁生产启用。
+- `COPILOT_AUTONOMY_ENABLED` **必须为 `0`/未设**：让 AI 自动执行写操作。开启后同一准入门（低风险工具白名单 + 每日上限）才放行直接 runbook / agent loop 低风险写。**生产默认关闭**；确需开启须先评审白名单工具风险并明确允许的下限。
 - `COPILOT_CORS_ALLOWED_ORIGINS` 生产限定前端源。
 - 能力市场/能力列表读端点对 viewer/operator/admin 开放，**所有写端点仅 admin**；`GET /v1/executions`（含敏感输入/错误）**仅 admin**，operator/viewer 用 `/v1/audit-events`。
 
@@ -260,9 +264,8 @@ JWT（CAS 登录跳转 `/v1/auth/config` + `/v1/auth/cas/*`）。登录后侧栏
   → 全程 audit + trace
 ```
 
-- **低风险 Runbook**（如保留策略调整）可自动执行，返回 `execution_result` + 信息块。
-- **自治 agent loop 只读自转**：多步循环中写操作永远停在 plan 创建 + `confirmation_required`，
-  从不自动执行写（loop 内低风险 Runbook 自动执行也禁用）。
+- **低风险 Runbook 自动执行需显式开启（E2 准入门）**：默认 fail-closed——只有 `COPILOT_AUTONOMY_ENABLED=1` **且** 该工具在 `COPILOT_AUTONOMY_LOW_RISK_TOOLS` 白名单时，低风险 runbook 才自动执行（返回 `execution_result` + 信息块），否则回落 `confirmation_required` 人工确认。原「无条件自动执行」已收回。
+- **自治 agent loop 只读自转**：多步循环中写操作默认停在 plan 创建 + `confirmation_required`，从不自动执行写（fail-closed 默认）。仅当该低风险写通过 E2 准入门时，loop 才把它当已确认写自动执行并以 advisory 步骤继续。
 - 详见 [assistant.md](assistant.md)。
 
 ### 6.2 Runbook 自演化（反馈 → 草稿 → 确认启用）
@@ -482,6 +485,7 @@ TLS / 80 端口 / 更细静态控制时，才启用 nginx 反代：SPA 用相对
 - [ ] `COPILOT_AUTH_MODE` 确定（`jwt` / `cas` / `both`），CAS 场景配好 `_SERVER_URL`/`_SERVICE_URL`
 - [ ] `COPILOT_DEV_EXPOSE_CONFIRMATION_TOKEN=0`
 - [ ] `COPILOT_DEV_INJECT_ADMIN` 未设/为 `0`（开启则任意无认证 `/v1` 按 admin 执行，仅限隔离开发）
+- [ ] `COPILOT_AUTONOMY_ENABLED` 未设/为 `0`（开启则 AI 可自动执行白名单低风险写，仅在有明确评审与白名单时考虑）
 - [ ] `COPILOT_CORS_ALLOWED_ORIGINS` 限定前端域名（勿留 `*`）
 - [ ] 密钥/API Key 经 Secret 注入，**不入库**
 - [ ] `COPILOT_ALERT_WEBHOOK_SECRET` 已设（未设则告警 webhook 直接 503）
@@ -521,6 +525,11 @@ TLS / 80 端口 / 更细静态控制时，才启用 nginx 反代：SPA 用相对
 - **SQLite 迁移内嵌列表到 `014`**，市场（`015` 能力市场）在 SQLite 经 `internal/store/db.go`
   内联 SQL 补齐；**生产走 MySQL 时读取 `migrations/*.sql` 文件**。
 - **runbook 草稿存储为内存态**，重启即清（已启用 runbook 落 SQL 持久化）；如需草稿持久化需另行迭代。
+- **低风险 runbook 自动执行已收回为显式 opt-in（E2）**：`kafka-retention-low-risk` 这类 runbook 命中
+  的写工具 `topic.retention.set` 是 `risk: medium`，不在低风险白名单内——因此即使开启
+  `COPILOT_AUTONOMY_ENABLED` 也不会自动执行，仍走人工确认。要恢复自动执行，须把该工具在
+  YAML 中显式标为 `risk: low` 并加入 `COPILOT_AUTONOMY_LOW_RISK_TOOLS`（有违"低风险才自动执行"的
+  设计意图，不建议）。
 - **连接池参数尚未环境化**（硬编码），需要更细调优时需改源码。
 
 ---

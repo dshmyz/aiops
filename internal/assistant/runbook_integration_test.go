@@ -45,7 +45,11 @@ func (emptyRunbookLookup) ListEnabledRunbooks(context.Context) ([]assistant.Runb
 	return nil, nil
 }
 
-func TestAssistantLowRiskRunbookAutoExecutes(t *testing.T) {
+// TestAssistantLowRiskRunbookFallsBackToConfirmationByDefault: E2 收回现状后，
+// 未装配 Low-Risk Admission Controller（或未开启 COPILOT_AUTONOMY_ENABLED）时，
+// 低风险 runbook **不再无条件自动执行**（fail-closed）——即便工具被运行时注册且
+// 执行器可用，也必须回落 confirmation_required，执行器不得被调用。
+func TestAssistantLowRiskRunbookFallsBackToConfirmationByDefault(t *testing.T) {
 	t.Parallel()
 	service, _ := newAssistant(t, fakePlanner{intent: assistant.Intent{
 		ToolName: tools.TopicRetentionSet,
@@ -60,21 +64,11 @@ func TestAssistantLowRiskRunbookAutoExecutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handle message: %v", err)
 	}
-	if response.Type != "execution_result" {
-		t.Fatalf("type = %q, want execution_result", response.Type)
+	if response.Type != "confirmation_required" {
+		t.Fatalf("type = %q, want confirmation_required (autonomy fail-closed by default)", response.Type)
 	}
-	if !execRunner.called {
-		t.Fatal("execution runner was not called for low-risk runbook")
-	}
-	// dry-run block 应作为信息展示附加
-	var hasRiskBlock bool
-	for _, b := range response.Blocks {
-		if b.Type == assistant.BlockRiskNotice {
-			hasRiskBlock = true
-		}
-	}
-	if !hasRiskBlock {
-		t.Error("execution_result missing informational risk_notice block")
+	if execRunner.called {
+		t.Fatal("execution runner was called without the admission controller admitting the write")
 	}
 }
 

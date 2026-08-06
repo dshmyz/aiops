@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/gracegaoya/ai-operations-copilot/internal/autonomy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/execution"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
@@ -91,6 +92,9 @@ type Service struct {
 	// agent-capable planners (EinoPlanner). Default false preserves single-plan
 	// streaming semantics; enable it in production wiring for LLM planners.
 	agentLoopEnabled bool
+	// autonomy 是 Low-Risk Admission Controller（E2）。为 nil 时自动执行一律禁用
+	// （fail-closed），所有写操作退化为 confirmation_required，与 launch 前的行为一致。
+	autonomy *autonomy.Controller
 }
 
 // ExecutionRunner 自动执行已确认的 plan（低风险 Runbook 路径）。
@@ -209,6 +213,34 @@ func (s *Service) WithExecutionRunner(e ExecutionRunner) *Service {
 func (s *Service) WithAgentLoop(enabled bool) *Service {
 	s.agentLoopEnabled = enabled
 	return s
+}
+
+// WithAutonomy wires the Low-Risk Admission Controller (E2). When set, low-risk
+// auto-execution (direct runbook / agent-loop write) only happens if the
+// controller admits it; when nil (default) all auto-execution is disabled
+// (fail-closed) and writes fall back to confirmation_required.
+func (s *Service) WithAutonomy(c *autonomy.Controller) *Service {
+	s.autonomy = c
+	return s
+}
+
+// admitAutoExec 是 Service 侧对自动执行的统一准入入口（E2）：把一次低风险写请求交给
+// Low-Risk Admission Controller 判定。未装配控制器（nil）视为 fail-closed（拒绝自动
+// 执行，回落人工确认），与登录前行为一致。调用方负责任何驳回都静默退化为普通写路径。
+func (s *Service) admitAutoExec(ctx context.Context, user identity.CurrentUser, tool tools.Tool, decision policy.Decision, source autonomy.Source) bool {
+	if s.autonomy == nil {
+		return false // fail-closed：无控制器即不自动执行
+	}
+	return s.autonomy.Admit(ctx, user, tool, decision) == nil
+}
+
+// recordAutoExec 在自动执行成功后记一次每日上限计数（不阻塞）。控制器未装配或未启用
+// 每日上限时为 no-op。
+func (s *Service) recordAutoExec(ctx context.Context, user identity.CurrentUser) {
+	if s.autonomy == nil {
+		return
+	}
+	s.autonomy.Record(ctx, user)
 }
 
 type Response struct {
@@ -745,8 +777,10 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 	planCtx, createPlanSpan := tracer().Start(ctx, "create_plan",
 		trace.WithAttributes(attribute.String("tool.name", tool.Name)))
 
-	if runbookSlug != "" && runbookRisk == "low" && s.execution != nil {
+	if runbookSlug != "" && runbookRisk == "low" && s.execution != nil && s.admitAutoExec(ctx, user, tool, decision, autonomy.SourceDirect) {
 		// 低风险 Runbook 自动执行：创建已确认 plan → 立即执行 → 返回 execution_result。
+		// E2: 仅当 Low-Risk Admission Controller 放行才自动执行；否则回落
+		// confirmation_required（人工确认），默认 fail-closed。
 		plan, err := s.plans.CreateRunbookPlan(planCtx, user, decision, intent.Input, runbookSlug, "low")
 		createPlanSpan.End()
 		if err != nil {
@@ -756,6 +790,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		if execErr != nil {
 			return Response{}, execErr
 		}
+		s.recordAutoExec(planCtx, user) // 自动执行后记一次每日上限计数（不阻塞）
 		response := Response{
 			Type:   "execution_result",
 			Tool:   tool.Name,

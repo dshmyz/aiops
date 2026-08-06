@@ -141,8 +141,8 @@ func TestAgentLoopStopsOnWriteHandoff(t *testing.T) {
 	w := writeIntent()
 	planner := &scriptedPlanner{intents: []assistant.Intent{readIntent(), w}}
 	exec := &recorderExecute{outcomes: []assistant.StepOutcome{
-		{Summary: "集群健康"},                     // advisory read
-		{PlanID: "plan-1", Status: "pending"}, // write handoff
+		{Summary: "集群健康"},                       // advisory read
+		{Kind: assistant.StepExecutive, PlanID: "plan-1", Status: "pending"}, // write handoff
 	}}
 	loop := assistant.NewAgentLoop(planner, exec.fn(), 8)
 

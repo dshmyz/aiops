@@ -94,13 +94,13 @@ loop:
 **自治 ≠ 无约束**，循环内：
 
 - **只读工具**（advisory）可以**自主链式执行**。
-- **写工具**（executive）自动执行仍需现有审批/action-plan 门槛；循环内写到这一步
-  就**停在 plan 创建 + `confirmation_required`，交还给人确认**，绝不自动批准
-  （`agentWriteStep` 只调 `plans.CreatePlan`，从不调 `CreateRunbookPlan` 或
-  `s.execution`）。
-- **低风险 Runbook 自动执行在循环内主动禁用**：即使低风险 runbook 匹配写意图，
-  循环也停在 `confirmation_required`，让操作员拍板，而不是沿用单步路径的
-  auto-exec。有测试 `TestAgentLoopNeverAutoExecutesLowRiskRunbook` 保证。
+- **写工具**（executive）自动执行仍需 E2 低风险准入门：循环内写默认停在 plan 创建 +
+  `confirmation_required`，交还给人确认（`agentWriteStep` 只调 `plans.CreatePlan`，从不调
+  `s.execution`），**绝不默认自动批准**。
+- **低风险写仅当通过 E2 准入门才在循环内自动执行**：`COPILOT_AUTONOMY_ENABLED=1` 且工具在
+  `COPILOT_AUTONOMY_LOW_RISK_TOOLS` 白名单时，`agentWriteStep` 才会走 `CreateRunbookPlan` +
+  `s.execution` 并作为 advisory 步骤继续；否则保持上述"停在 confirmation_required"的默认。
+  有测试 `TestAgentLoopNeverAutoExecLowRiskWriteByDefault` / `TestAgentLoopAutoExecAdmittedLowRiskWrite` 保证。
 - 硬上限 `maxSteps`、每步超时、LLM 提示词"完成即输出 final_answer"。
 
 ## 中间工具结果持久化（tool_step）
@@ -163,6 +163,6 @@ metadata，让审计能看到每一步的输入/输出/决策归属。
 - `internal/assistant/service_agent_test.go`：`agentFakePlanner`（Plan + PlanStream）
   端到端跑 `HandleMessageStream`——多步链给 step 事件 + final_answer；写停
   `confirmation_required`；持久化 `tool_step` 链 + 审计步骤身份；
-  低风险 runbook 不自动执行。
+  低风险写默认不自动执行、准入放行才自动执行。
 - 前端：`ConversationTurnItem.test.ts`（步骤区块）、`useAssistantStream.test.ts`
   （`event: step` 解析）。

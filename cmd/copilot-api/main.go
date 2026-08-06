@@ -21,6 +21,7 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/alert"
 	"github.com/gracegaoya/ai-operations-copilot/internal/assistant"
 	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
+	"github.com/gracegaoya/ai-operations-copilot/internal/autonomy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/capabilities"
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/execution"
@@ -198,11 +199,11 @@ func main() {
 	// 并入 readRunner 链。event.query 走 audit 数据源，task.query 走定时任务数据源，
 	// 均经 ReadOnlyService 治理边界（Lookup→policy→runner→audit）。
 	incidentRunner := incidentViewReadRunner{
-		alerts:   alertSvc,
-		audit:    auditService,
-		plans:    repository,
-		schedules: scheduledTaskService,
-		runbooks: runbookStore,
+		alerts:       alertSvc,
+		audit:        auditService,
+		plans:        repository,
+		schedules:    scheduledTaskService,
+		runbooks:     runbookStore,
 		capabilities: loadedCapabilities,
 	}
 	readRunner = compositeReadRunner{
@@ -277,6 +278,21 @@ func main() {
 	// plan 并立即执行，跳过人工确认。
 	assistantService.WithRunbookRouter(assistant.NewRunbookRouter(runbookLookup))
 	assistantService.WithExecutionRunner(executionService)
+	// E2: Low-Risk Admission Controller。所有自动执行源（direct runbook / agent
+	// loop 低风险写）共用同一准入门。默认 fail-closed：仅当显式开启
+	// COPILOT_AUTONOMY_ENABLED=1 且工具在 COPILOT_AUTONOMY_LOW_RISK_TOOLS
+	// 白名单时才自动执行；生产必须保持默认（关闭）。
+	autonomyCfg, autonomyErr := autonomy.ConfigFromEnv(os.Getenv)
+	if autonomyErr != nil {
+		logger.Warn("autonomy config invalid; autonomy stays disabled (fail-closed)", zap.Error(autonomyErr))
+	} else {
+		assistantService.WithAutonomy(autonomy.NewController(autonomyCfg, nil))
+		if autonomyCfg.Enabled {
+			logger.Warn("autonomous write execution ENABLED (COPILOT_AUTONOMY_ENABLED=1); verify this is intentional for the deployment")
+		} else {
+			logger.Info("autonomous write execution disabled (fail-closed default)")
+		}
+	}
 	// Wrap the diagnostics service with the orchestrator so multi-domain
 	// requests (e.g. "kafka 和 minio 健康状态") are automatically split into
 	// concurrent sub-diagnostics and merged into a single package. The
@@ -777,11 +793,13 @@ func (r alertReadRunner) Read(ctx context.Context, tool tools.Tool, input map[st
 // 与匹配 runbook 串成一张可回链的 incident 全景。alert 与其余证据无 FK，全部按
 // (domain, resource_type, resource_name, environment, 时间窗) 软匹配。
 type incidentViewReadRunner struct {
-	alerts       *alert.Service
-	audit        *audit.Service
-	plans        store.ActionPlanStore // 反解 action_plan.input_json 确认资源
-	schedules    *scheduler.Service
-	runbooks     interface{ ListEnabledRunbooks(context.Context) ([]store.Runbook, error) }
+	alerts    *alert.Service
+	audit     *audit.Service
+	plans     store.ActionPlanStore // 反解 action_plan.input_json 确认资源
+	schedules *scheduler.Service
+	runbooks  interface {
+		ListEnabledRunbooks(context.Context) ([]store.Runbook, error)
+	}
 	capabilities []capabilities.Capability
 }
 
@@ -991,11 +1009,11 @@ func (r incidentViewReadRunner) relatedScheduledRuns(ctx context.Context, matche
 		for _, run := range runs {
 			if want[run.AuditEventID] {
 				out = append(out, map[string]any{
-					"id":           run.ID,
-					"task_id":      run.TaskID,
-					"status":       run.Status,
-					"started_at":   run.StartedAt,
-					"finished_at":  run.FinishedAt,
+					"id":             run.ID,
+					"task_id":        run.TaskID,
+					"status":         run.Status,
+					"started_at":     run.StartedAt,
+					"finished_at":    run.FinishedAt,
 					"audit_event_id": run.AuditEventID,
 				})
 			}
@@ -1075,10 +1093,10 @@ func (r incidentViewReadRunner) matchRunbooks(ctx context.Context, pivot struct 
 			conf = 0.9
 		}
 		out = append(out, map[string]any{
-			"slug":       rb.Slug,
-			"name":       rb.Name,
-			"risk_level": rb.RiskLevel,
-			"confidence": conf,
+			"slug":          rb.Slug,
+			"name":          rb.Name,
+			"risk_level":    rb.RiskLevel,
+			"confidence":    conf,
 			"tool_sequence": rb.ToolSequence,
 		})
 	}

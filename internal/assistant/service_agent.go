@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gracegaoya/ai-operations-copilot/internal/autonomy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
 	"github.com/gracegaoya/ai-operations-copilot/internal/policy"
@@ -74,21 +75,16 @@ func agentPlannerCapable(planner Planner) bool {
 // the raw result, and only the final aggregated answer is formatted. This keeps
 // a multi-step loop from burning an LLM formatting call per step.
 //
-// Write intents short-circuit to a handoff StepOutcome (a queued plan awaiting
-// human approval); the loop stops and never auto-executes the write.
+// Write intents short-circuit through agentWriteStep: a low-risk write admitted
+// by the Low-Risk Admission Controller auto-executes as an advisory step; all
+// other writes queue a pending plan as a handoff StepOutcome and stop the loop.
 func (s *Service) executeAgentStep(ctx context.Context, user identity.CurrentUser, message string, intent Intent, stepIndex int) (StepOutcome, error) {
 	out := StepOutcome{
 		Intent:    intent,
 		StepIndex: stepIndex,
 	}
 	if isWriteIntent(intent) {
-		handoff, err := s.agentWriteStep(ctx, user, message, intent)
-		if err != nil {
-			return StepOutcome{}, err
-		}
-		out.Kind = StepExecutive
-		out.Tool = intent.ToolName
-		return handoff, nil
+		return s.agentWriteStep(ctx, user, message, intent)
 	}
 	if intent.Diagnostic != nil {
 		return s.agentDiagnosticStep(ctx, user, intent, out)
@@ -169,11 +165,12 @@ func (s *Service) agentDiagnosticStep(ctx context.Context, user identity.Current
 	return out, nil
 }
 
-// agentWriteStep queues a plan for a write intent (confirmation_required) and
-// returns the handoff StepOutcome. It mirrors executeFromIntent's write path:
-// policy is applied, a plan is created, dry-run preview attached. Low-risk
-// runbook auto-execution is intentionally NOT performed from inside the loop —
-// writes in the loop always stop and hand back to the human.
+// agentWriteStep executes a write intent in the loop. Default behavior: queue a
+// pending plan and return the handoff StepOutcome (the loop stops and hands to
+// the human). E2: for a low-risk write admitted by the Low-Risk Admission
+// Controller, it auto-executes instead and returns an advisory-step outcome so
+// the loop continues. It mirrors executeFromIntent's write path: policy is
+// applied, a plan is created, dry-run preview attached.
 func (s *Service) agentWriteStep(ctx context.Context, user identity.CurrentUser, message string, intent Intent) (StepOutcome, error) {
 	if intent.ToolName == "" {
 		return StepOutcome{}, ErrClarificationNeeded
@@ -189,6 +186,55 @@ func (s *Service) agentWriteStep(ctx context.Context, user identity.CurrentUser,
 	if !decision.Allowed {
 		return StepOutcome{}, fmt.Errorf("%w: %s", ErrPolicyDenied, decision.Reason)
 	}
+	// E2: 低风险写若通过准入门则自动执行（已确认 plan → 执行 → advisory 结果），
+	// 否则保持 loop 的硬禁止默认，退回人工确认。
+	if s.admitAutoExec(ctx, user, tool, decision, autonomy.SourceAgentLoop) {
+		return s.agentWriteAutoExec(ctx, user, tool, intent, decision)
+	}
+	return s.agentWriteHandoff(ctx, user, tool, intent, decision)
+}
+
+// agentWriteAutoExec 执行一次被准入门放行的低风险写：创建已确认 plan → 立即执行 →
+// 以 advisory 结果返回（loop 继续），与 executeFromIntent 的直接低风险 runbook 路径
+// 语义一致。
+func (s *Service) agentWriteAutoExec(ctx context.Context, user identity.CurrentUser, tool tools.Tool, intent Intent, decision policy.Decision) (StepOutcome, error) {
+	if s.execution == nil {
+		// 无执行器时回落普通 pending plan（不放行自动执行）。
+		return s.agentWriteHandoff(ctx, user, tool, intent, decision)
+	}
+	plan, err := s.plans.CreateRunbookPlan(ctx, user, decision, intent.Input, "", "low")
+	if err != nil {
+		return StepOutcome{}, err
+	}
+	executionResult, execErr := s.execution.ExecuteConfirmedStoredPlan(ctx, plan.ID)
+	if execErr != nil {
+		return StepOutcome{}, execErr
+	}
+	s.recordAutoExec(ctx, user)
+	out := StepOutcome{
+		Intent:  intent,
+		Kind:    StepAdvisory,
+		Tool:    tool.Name,
+		Input:   intent.Input,
+		Output: map[string]any{
+			"execution_id": executionResult.ID,
+			"status":       executionResult.Status,
+			"reused":       executionResult.Reused,
+			"plan_id":      plan.ID,
+		},
+		Summary: fmt.Sprintf("已自动执行 %s（准入放行）：执行 %s 状态 %s", tool.Name, executionResult.ID, executionResult.Status),
+	}
+	if s.dryRun != nil {
+		if block, _, ok := s.previewWritePlan(ctx, tool.Name, intent.Input); ok {
+			out.Blocks = append(out.Blocks, block)
+		}
+	}
+	return out, nil
+}
+
+// agentWriteHandoff 在自动执行不可用时退回 pending plan 交接（与历史行为一致的
+// 硬禁止默认）。
+func (s *Service) agentWriteHandoff(ctx context.Context, user identity.CurrentUser, tool tools.Tool, intent Intent, decision policy.Decision) (StepOutcome, error) {
 	plan, err := s.plans.CreatePlan(ctx, user, decision, intent.Input)
 	if err != nil {
 		return StepOutcome{}, err
