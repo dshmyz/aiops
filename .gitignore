@@ -20,13 +20,15 @@ node_modules/
 .vite/
 dist/
 
-# Embedded SPA build output — scripts/build.sh overwrites the placeholder in
-# internal/webui/dist with the real Vite build; keep only the placeholder so
-# //go:embed all:dist always compiles. The generic dist/ rule above would ignore
-# this whole dir, so re-include the dir, ignore its contents, then keep index.html.
+# 前端构建产物与 embed 缓存：真实 dist 纳入版本控制，单二进制/部署无需再跑 npm build。
+# 通用 dist/ 规则（上文）会忽略所有 dist 目录；这里放行我们入库的两处：
+#  - apps/capability-console/dist        Vite 真实产物（来源）
+#  - internal/webui/dist                 //go:embed 用的产物缓存（scripts/build.sh 拷贝生成）
+# git 对已忽略目录内的内容无法用 ! 恢复，须先放行目录本身、再放行其全部内容。
+!apps/capability-console/dist/
+!apps/capability-console/dist/**
 !internal/webui/dist/
-internal/webui/dist/*
-!internal/webui/dist/index.html
+!internal/webui/dist/**
 
 # OS
 .DS_Store
