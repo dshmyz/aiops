@@ -49,6 +49,7 @@ func systemUser() identity.CurrentUser {
 type Scheduler struct {
 	store          store.ScheduledTaskStore
 	reads          *execution.ReadOnlyService
+	runbookExec    RunbookExecutor
 	audit          *audit.Service
 	tickInterval   time.Duration
 	now            func() time.Time
@@ -73,6 +74,13 @@ func New(taskStore store.ScheduledTaskStore, reads *execution.ReadOnlyService, a
 		now:            now,
 		reportInterval: 24 * time.Hour,
 	}
+}
+
+// WithRunbookExecutor 注入 run_kind=runbook 的低风险写执行器（E2）。未注入时
+// runbook 任务无法执行（fail-closed）。
+func (s *Scheduler) WithRunbookExecutor(e RunbookExecutor) *Scheduler {
+	s.runbookExec = e
+	return s
 }
 
 // WithReportGeneration 配置巡检报告生成。配置后 Start 会在独立 goroutine 中
@@ -155,13 +163,14 @@ func (s *Scheduler) tickOnce(ctx context.Context) error {
 // panic 会被 recover 并记为 failed，避免调度器崩溃。无论成功失败都更新 next_run_at，
 // 避免任务卡死。返回 store 层错误（capability 错误已内部处理）。
 func (s *Scheduler) executeTask(ctx context.Context, task store.ScheduledTask) (store.ScheduledTaskRun, error) {
-	return executeAndRecord(ctx, s.store, s.reads, s.audit, task, s.now, true)
+	return executeAndRecord(ctx, s.store, s.reads, s.runbookExec, s.audit, task, s.now, true)
 }
 
 // executeAndRecord 执行一次任务并记录结果（run + audit + 更新 task）。
 // updateNextRun=true 时重算 next_run_at（scheduler 定时触发）；
 // updateNextRun=false 时保留原 next_run_at（手动 trigger）。
 // 这是 Scheduler.executeTask 和 Service.Trigger 的共享实现。
+// runbooks 为 run_kind=runbook 的低风险写执行器（E2）；run_kind=read 走 reads。
 //
 // 专项：任务准-并发安全
 //   - updateNextRun=true（scheduler 触发）时先做过期检查 + CAS 认领，防止多实例重复执行
@@ -171,12 +180,13 @@ func (s *Scheduler) executeTask(ctx context.Context, task store.ScheduledTask) (
 // 收口2: nowFn 是时钟函数（而非单个时间快照），startedAt 与 finishedAt
 // 分别调用 nowFn()，使 duration 不再恒为 0。生产用 time.Now 自然推进，
 // 测试用可推进时钟验证 duration > 0。
-func executeAndRecord(ctx context.Context, taskStore store.ScheduledTaskStore, reads *execution.ReadOnlyService, auditService *audit.Service, task store.ScheduledTask, nowFn func() time.Time, updateNextRun bool) (store.ScheduledTaskRun, error) {
+func executeAndRecord(ctx context.Context, taskStore store.ScheduledTaskStore, reads *execution.ReadOnlyService, runbooks RunbookExecutor, auditService *audit.Service, task store.ScheduledTask, nowFn func() time.Time, updateNextRun bool) (store.ScheduledTaskRun, error) {
 	ctx, span := tracer().Start(ctx, "scheduler.executeTask",
 		trace.WithAttributes(
 			attribute.String("task.id", task.ID),
 			attribute.String("task.name", task.Name),
 			attribute.String("task.capability", task.CapabilityName),
+			attribute.String("task.run_kind", task.RunKind),
 		))
 	defer span.End()
 	now := nowFn()
@@ -215,7 +225,9 @@ func executeAndRecord(ctx context.Context, taskStore store.ScheduledTaskStore, r
 	}
 
 	startedAt := nowFn()
-	result, execErr := executeWithRecover(ctx, reads, task)
+	// run_kind 分支：runbook 任务走低风险写执行器（E2，fail-closed），其余走只读 capability。
+	// ErrRunbookDenied 会被判别为 denied（DecisionDenied + autonomy_source），而非普通执行错误。
+	result, execErr := executeTaskBody(ctx, reads, runbooks, task)
 	finishedAt := nowFn()
 	if execErr != nil {
 		span.RecordError(execErr)
@@ -233,7 +245,12 @@ func executeAndRecord(ctx context.Context, taskStore store.ScheduledTaskStore, r
 	if execErr != nil {
 		run.Status = store.ScheduledTaskStatusFailed
 		run.Error = execErr.Error()
-		recordAudit(ctx, auditService, auditEventID, task, user, audit.ActionScheduledTaskFailed, audit.DecisionExecutionError, finishedAt, execErr)
+		if errors.Is(execErr, ErrRunbookDenied) {
+			// E2 准入门拒绝：记为 denied（非静默，见设计 §5.1⑥），run 仍为 failed。
+			recordAudit(ctx, auditService, auditEventID, task, user, audit.ActionScheduledTaskFailed, audit.DecisionDenied, finishedAt, execErr)
+		} else {
+			recordAudit(ctx, auditService, auditEventID, task, user, audit.ActionScheduledTaskFailed, audit.DecisionExecutionError, finishedAt, execErr)
+		}
 	} else {
 		run.Status = store.ScheduledTaskStatusSucceeded
 		run.ResultData = result
@@ -254,6 +271,20 @@ func executeAndRecord(ctx context.Context, taskStore store.ScheduledTaskStore, r
 		return store.ScheduledTaskRun{}, fmt.Errorf("scheduler: append run and update task: %w", err)
 	}
 	return run, nil
+}
+
+// executeTaskBody 按 run_kind 分派执行任务体：
+//   - run_kind=runbook：调用 RunbookExecutor（低风险写，E2 准入门）。执行器未注入时
+//     fail-closed（返回 ErrRunbookDenied 包装）。
+//   - 其他（read / 默认）：调用只读 capability。
+func executeTaskBody(ctx context.Context, reads *execution.ReadOnlyService, runbooks RunbookExecutor, task store.ScheduledTask) (result map[string]any, err error) {
+	if task.RunKind == store.RunKindRunbook {
+		if runbooks == nil {
+			return nil, fmt.Errorf("%w: runbook executor not configured (fail-closed)", ErrRunbookDenied)
+		}
+		return runbooks.Execute(ctx, task)
+	}
+	return executeWithRecover(ctx, reads, task)
 }
 
 // executeWithRecover 调用 ExecuteTrustedRead 并 recover panic，避免调度器崩溃。

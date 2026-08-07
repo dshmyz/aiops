@@ -1,7 +1,7 @@
 # 运维总览 + 渐进自治（D + E）设计
 
 日期：2026-08-07
-状态：已批准（设计评审通过）
+状态：已批准（设计评审通过）· 三阶段均已实现并交付
 
 ## 1. 目标与范围
 
@@ -204,10 +204,12 @@ run_kind: "read"（现状）          |  run_kind: "runbook"（新增）
 
 ## 9. 分期
 
-1. **Phase 1（E1 + D）**：overview + reject 端点 + DashboardView 操作面。低风险，可立即交付。
+1. **Phase 1（E1 + D）**：overview + reject 端点 + DashboardView 操作面。低风险，可立即交付。✅
 2. **Phase 2（E2 准入门）**：`COPILOT_AUTONOMY_ENABLED` + Admission Controller + 收回现状 +
-   agent loop 低风险写。
-3. **Phase 3（E2 定时）**：scheduler `run_kind: runbook` 写触发。
+   agent loop 低风险写。✅
+3. **Phase 3（E2 定时）**：scheduler `run_kind: runbook` 写触发。✅（`internal/scheduler/runbook_executor.go`
+   的 `RunbookAutoExecutor` 命中共用的 `autonomy.Controller`，fail-closed；scheduler / Service / httpapi DTO /
+   store 均新增 `run_kind` + `runbook_slug`，迁移 `016`）
 
 ## 10. 后续可扩展点（非本期）
 

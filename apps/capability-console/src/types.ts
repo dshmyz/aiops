@@ -687,6 +687,8 @@ export interface ScheduledTask {
   name: string;
   subject: string;
   capability_name: string;
+  run_kind?: 'read' | 'runbook';
+  runbook_slug?: string | null;
   input: Record<string, unknown>;
   schedule_kind: ScheduleKind;
   preset: SchedulePreset | null;
@@ -715,6 +717,8 @@ export interface ScheduledTaskRun {
 export interface CreateScheduledTaskPayload {
   name: string;
   capability_name: string;
+  run_kind?: 'read' | 'runbook';
+  runbook_slug?: string | null;
   input: Record<string, unknown>;
   schedule_kind: ScheduleKind;
   preset?: SchedulePreset | null;
@@ -726,6 +730,8 @@ export interface CreateScheduledTaskPayload {
 export interface UpdateScheduledTaskPayload {
   name: string;
   capability_name: string;
+  run_kind?: 'read' | 'runbook';
+  runbook_slug?: string | null;
   input: Record<string, unknown>;
   schedule_kind: ScheduleKind;
   preset?: SchedulePreset | null;

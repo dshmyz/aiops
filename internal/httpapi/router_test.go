@@ -2135,6 +2135,86 @@ func TestScheduledTaskCreateNonAdminReturnsForbidden(t *testing.T) {
 	}
 }
 
+func TestScheduledTaskCreateRunbookSucceeds(t *testing.T) {
+	t.Parallel()
+	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
+	router := scheduledTaskRouter(t, svc)
+	// run_kind=runbook 时只需 runbook_slug，无需 capability_name（低风险 runbook 模板，E2）。
+	body := `{"name":"minio 定时清理","run_kind":"runbook","runbook_slug":"minio-retention-low-risk","input":{"environment":"prod"},"schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
+	}
+	if svc.createCalls != 1 {
+		t.Fatalf("create calls = %d, want 1", svc.createCalls)
+	}
+	if svc.createReq.RunKind != store.RunKindRunbook {
+		t.Fatalf("create request run_kind = %q, want runbook", svc.createReq.RunKind)
+	}
+	if svc.createReq.RunbookSlug != "minio-retention-low-risk" {
+		t.Fatalf("create request runbook_slug = %q, want minio-retention-low-risk", svc.createReq.RunbookSlug)
+	}
+}
+
+func TestScheduledTaskCreateReadTaskMissingCapabilityReturnsBadRequest(t *testing.T) {
+	t.Parallel()
+	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
+	router := scheduledTaskRouter(t, svc)
+	// run_kind=read（默认）必须提供 capability_name。
+	body := `{"name":"巡检","run_kind":"read","schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
+	}
+	if svc.createCalls != 0 {
+		t.Fatalf("create calls = %d, want 0", svc.createCalls)
+	}
+}
+
+func TestScheduledTaskCreateRunbookMissingSlugReturnsBadRequest(t *testing.T) {
+	t.Parallel()
+	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
+	router := scheduledTaskRouter(t, svc)
+	body := `{"name":"清理","run_kind":"runbook","schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
+	}
+	if svc.createCalls != 0 {
+		t.Fatalf("create calls = %d, want 0", svc.createCalls)
+	}
+}
+
+func TestScheduledTaskCreateInvalidRunKindReturnsBadRequest(t *testing.T) {
+	t.Parallel()
+	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
+	router := scheduledTaskRouter(t, svc)
+	body := `{"name":"巡检","run_kind":"garbage","capability_name":"minio.bucket.health.read","schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
+	}
+	if svc.createCalls != 0 {
+		t.Fatalf("create calls = %d, want 0", svc.createCalls)
+	}
+}
+
 func TestScheduledTaskCreateMissingNameReturnsBadRequest(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}

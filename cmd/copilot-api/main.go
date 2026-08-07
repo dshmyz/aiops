@@ -285,14 +285,21 @@ func main() {
 	autonomyCfg, autonomyErr := autonomy.ConfigFromEnv(os.Getenv)
 	if autonomyErr != nil {
 		logger.Warn("autonomy config invalid; autonomy stays disabled (fail-closed)", zap.Error(autonomyErr))
-	} else {
-		assistantService.WithAutonomy(autonomy.NewController(autonomyCfg, nil))
-		if autonomyCfg.Enabled {
-			logger.Warn("autonomous write execution ENABLED (COPILOT_AUTONOMY_ENABLED=1); verify this is intentional for the deployment")
-		} else {
-			logger.Info("autonomous write execution disabled (fail-closed default)")
-		}
 	}
+	// 所有自动执行源（direct runbook / agent loop / scheduler）共用同一 Controller，
+	// 使每日上限与白名单按主体统一计数。
+	autonomyController := autonomy.NewController(autonomyCfg, nil)
+	assistantService.WithAutonomy(autonomyController)
+	if autonomyCfg.Enabled {
+		logger.Warn("autonomous write execution ENABLED (COPILOT_AUTONOMY_ENABLED=1); verify this is intentional for the deployment")
+	} else {
+		logger.Info("autonomous write execution disabled (fail-closed default)")
+	}
+	// E2 Phase 3：定时 runbook 自动执行器。与 agent loop / 直接对话共用同一准入
+	// Controller（fail-closed，见 autonomy/admission.go）。未开启时 runbook 定时任务
+	// 执行会被准入门拒绝（决策 denied + run failed），不会静默放行。
+	runbookExec := scheduler.NewRunbookAutoExecutor(runbookStore, planService, executionService, autonomyController)
+	scheduledTaskService = scheduledTaskService.WithRunbookExecutor(runbookExec)
 	// Wrap the diagnostics service with the orchestrator so multi-domain
 	// requests (e.g. "kafka 和 minio 健康状态") are automatically split into
 	// concurrent sub-diagnostics and merged into a single package. The
@@ -411,7 +418,7 @@ func main() {
 	metrics := observability.NewMetrics()
 	accessLog := observability.NewAccessLog()
 	schedulerInstance := scheduler.New(scheduledTaskStore, readService, auditService, 60*time.Second, nil)
-	schedulerInstance.WithReportGeneration(inspectionReportStore, scheduler.NewReporter(scheduledTaskStore, nil, nil))
+	schedulerInstance.WithRunbookExecutor(runbookExec).WithReportGeneration(inspectionReportStore, scheduler.NewReporter(scheduledTaskStore, nil, nil))
 	go schedulerInstance.Start(serviceContext)
 	if err := serveHTTP(serviceContext, listener, handler, db, metrics, accessLog); err != nil {
 		logger.Fatal("serve HTTP", zap.Error(err))

@@ -22,14 +22,22 @@ const (
 	ScheduledTaskStatusFailed    = "failed"
 )
 
-// ScheduledTask 描述一条定时巡检任务。Subject 用于多租户隔离；
+// ScheduledTask 描述一条定时任务。Subject 用于多租户隔离；
 // ScheduleKind 取 'preset' 或 'cron'，分别对应 Preset / CronExpr 字段。
 // NextRunAt 是调度器断点，进程重启后从此字段恢复。
+//
+// RunKind 区分任务触发的内容类型（见 RunKindRead / RunKindRunbook）：
+//   - RunKindRead（默认）：等价旧语义，用 CapabilityName 调用只读 capability。
+//   - RunKindRunbook：触发一个预先评审过的低风险 runbook 模板；RunbookSlug 指向
+//     runbook 模板，Input 提供该模板首个工具的入参。绝不接受「定时执行任意 tool + input」
+//     （安全边界，见 specs/2026-08-07-ops-overview-autonomy-design.md §5.3）。
 type ScheduledTask struct {
 	ID             string
 	Name           string
 	Subject        string
 	CapabilityName string
+	RunKind        string
+	RunbookSlug    string
 	Input          map[string]any
 	ScheduleKind   string
 	Preset         string
@@ -42,6 +50,14 @@ type ScheduledTask struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
+
+// RunKind 常量。
+const (
+	// RunKindRead 是默认只读巡检语义（旧 scheduled task 行为）。
+	RunKindRead = "read"
+	// RunKindRunbook 触发低风险 runbook 模板（需过 E2 准入门，默认 fail-closed）。
+	RunKindRunbook = "runbook"
+)
 
 // ScheduledTaskRun 是一次执行的不可变记录。Status ∈ {'succeeded', 'failed'}。
 // AuditEventID 关联到对应的 audit 事件，便于回溯。
@@ -342,9 +358,9 @@ func (s *SQLScheduledTaskStore) CreateTask(ctx context.Context, task ScheduledTa
 		return ScheduledTask{}, fmt.Errorf("marshal task input: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO copilot_scheduled_tasks
-		(id, name, subject, capability_name, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.Name, task.Subject, task.CapabilityName, input,
+		(id, name, subject, capability_name, run_kind, runbook_slug, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.ID, task.Name, task.Subject, task.CapabilityName, task.RunKind, task.RunbookSlug, input,
 		task.ScheduleKind, nullableString(task.Preset), nullableString(task.CronExpr),
 		task.Timezone, task.Enabled, nullableTime(task.LastRunAt), nullableString(task.LastStatus),
 		task.NextRunAt, task.CreatedAt, task.UpdatedAt)
@@ -355,7 +371,7 @@ func (s *SQLScheduledTaskStore) CreateTask(ctx context.Context, task ScheduledTa
 }
 
 func (s *SQLScheduledTaskStore) GetTask(ctx context.Context, id, subject string) (ScheduledTask, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, subject, capability_name, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, subject, capability_name, run_kind, runbook_slug, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at
 		FROM copilot_scheduled_tasks WHERE id = ? AND subject = ?`, id, subject)
 	task, err := scanScheduledTask(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -365,7 +381,7 @@ func (s *SQLScheduledTaskStore) GetTask(ctx context.Context, id, subject string)
 }
 
 func (s *SQLScheduledTaskStore) GetTaskByID(ctx context.Context, id string) (ScheduledTask, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, subject, capability_name, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, subject, capability_name, run_kind, runbook_slug, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at
 		FROM copilot_scheduled_tasks WHERE id = ?`, id)
 	task, err := scanScheduledTask(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -375,7 +391,7 @@ func (s *SQLScheduledTaskStore) GetTaskByID(ctx context.Context, id string) (Sch
 }
 
 func (s *SQLScheduledTaskStore) ListTasks(ctx context.Context, filter ScheduledTaskFilter) ([]ScheduledTask, error) {
-	query := `SELECT id, name, subject, capability_name, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at FROM copilot_scheduled_tasks`
+	query := `SELECT id, name, subject, capability_name, run_kind, runbook_slug, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at FROM copilot_scheduled_tasks`
 	conditions := []string{}
 	args := []any{}
 	if filter.Subject != "" {
@@ -426,9 +442,9 @@ func (s *SQLScheduledTaskStore) UpdateTask(ctx context.Context, task ScheduledTa
 		return ScheduledTask{}, fmt.Errorf("marshal task input: %w", err)
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE copilot_scheduled_tasks SET
-		name = ?, capability_name = ?, input = ?, schedule_kind = ?, preset = ?, cron_expr = ?, timezone = ?, enabled = ?, last_run_at = ?, last_status = ?, next_run_at = ?, updated_at = ?
+		name = ?, capability_name = ?, run_kind = ?, runbook_slug = ?, input = ?, schedule_kind = ?, preset = ?, cron_expr = ?, timezone = ?, enabled = ?, last_run_at = ?, last_status = ?, next_run_at = ?, updated_at = ?
 		WHERE id = ? AND subject = ?`,
-		task.Name, task.CapabilityName, input,
+		task.Name, task.CapabilityName, task.RunKind, task.RunbookSlug, input,
 		task.ScheduleKind, nullableString(task.Preset), nullableString(task.CronExpr),
 		task.Timezone, task.Enabled, nullableTime(task.LastRunAt), nullableString(task.LastStatus),
 		task.NextRunAt, task.UpdatedAt, task.ID, task.Subject)
@@ -461,7 +477,7 @@ func (s *SQLScheduledTaskStore) DeleteTask(ctx context.Context, id, subject stri
 }
 
 func (s *SQLScheduledTaskStore) ListDueTasks(ctx context.Context, now time.Time, limit int) ([]ScheduledTask, error) {
-	query := `SELECT id, name, subject, capability_name, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at
+	query := `SELECT id, name, subject, capability_name, run_kind, runbook_slug, input, schedule_kind, preset, cron_expr, timezone, enabled, last_run_at, last_status, next_run_at, created_at, updated_at
 		FROM copilot_scheduled_tasks WHERE enabled = TRUE AND next_run_at <= ?
 		ORDER BY next_run_at ASC, id ASC`
 	args := []any{now}
@@ -556,9 +572,9 @@ func (s *SQLScheduledTaskStore) AppendRunAndUpdateTask(ctx context.Context, run 
 	}
 
 	result, err := tx.ExecContext(ctx, `UPDATE copilot_scheduled_tasks SET
-		name = ?, capability_name = ?, input = ?, schedule_kind = ?, preset = ?, cron_expr = ?, timezone = ?, enabled = ?, last_run_at = ?, last_status = ?, next_run_at = ?, updated_at = ?
+		name = ?, capability_name = ?, run_kind = ?, runbook_slug = ?, input = ?, schedule_kind = ?, preset = ?, cron_expr = ?, timezone = ?, enabled = ?, last_run_at = ?, last_status = ?, next_run_at = ?, updated_at = ?
 		WHERE id = ? AND subject = ? AND updated_at = ?`,
-		task.Name, task.CapabilityName, input,
+		task.Name, task.CapabilityName, task.RunKind, task.RunbookSlug, input,
 		task.ScheduleKind, nullableString(task.Preset), nullableString(task.CronExpr),
 		task.Timezone, task.Enabled, nullableTime(task.LastRunAt), nullableString(task.LastStatus),
 		task.NextRunAt, task.UpdatedAt, task.ID, task.Subject, expectedUpdatedAt)
@@ -622,15 +638,17 @@ type scheduledTaskScanner interface {
 
 func scanScheduledTask(row scheduledTaskScanner) (ScheduledTask, error) {
 	var task ScheduledTask
-	var preset, cronExpr, lastStatus sql.NullString
+	var preset, cronExpr, lastStatus, runKind, runbookSlug sql.NullString
 	var lastRunAt sql.NullTime
 	var input []byte
-	err := row.Scan(&task.ID, &task.Name, &task.Subject, &task.CapabilityName, &input,
+	err := row.Scan(&task.ID, &task.Name, &task.Subject, &task.CapabilityName, &runKind, &runbookSlug, &input,
 		&task.ScheduleKind, &preset, &cronExpr, &task.Timezone, &task.Enabled,
 		&lastRunAt, &lastStatus, &task.NextRunAt, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil {
 		return ScheduledTask{}, err
 	}
+	task.RunKind = runKind.String
+	task.RunbookSlug = runbookSlug.String
 	task.Preset = preset.String
 	task.CronExpr = cronExpr.String
 	task.LastStatus = lastStatus.String

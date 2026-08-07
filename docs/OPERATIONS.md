@@ -266,6 +266,11 @@ JWT（CAS 登录跳转 `/v1/auth/config` + `/v1/auth/cas/*`）。登录后侧栏
 
 - **低风险 Runbook 自动执行需显式开启（E2 准入门）**：默认 fail-closed——只有 `COPILOT_AUTONOMY_ENABLED=1` **且** 该工具在 `COPILOT_AUTONOMY_LOW_RISK_TOOLS` 白名单时，低风险 runbook 才自动执行（返回 `execution_result` + 信息块），否则回落 `confirmation_required` 人工确认。原「无条件自动执行」已收回。
 - **自治 agent loop 只读自转**：多步循环中写操作默认停在 plan 创建 + `confirmation_required`，从不自动执行写（fail-closed 默认）。仅当该低风险写通过 E2 准入门时，loop 才把它当已确认写自动执行并以 advisory 步骤继续。
+- **定时写只做低风险 runbook（E2 Phase 3）**：定时任务通过 `run_kind` 区分 `read`（默认，只读巡检）与
+  `runbook`（写，按 `runbook_slug` 命中低风险 runbook 模板）。`run_kind: runbook` 的到期任务会走同一套
+  E2 准入门（低风险 + 白名单）后创建已确认 plan 并自动执行；未通过准入门则该次 run 记为 `failed` + 审计
+  `denied`（fail-closed，不静默）。定时写**不接受任意 tool+input**，只能触发预先评审过的低风险 runbook。
+  创建/更新入口：`POST/PUT /v1/scheduled-tasks`（写/触发=admin），body 需带 `run_kind` 与 `runbook_slug`。
 - 详见 [assistant.md](assistant.md)。
 
 ### 6.2 Runbook 自演化（反馈 → 草稿 → 确认启用）

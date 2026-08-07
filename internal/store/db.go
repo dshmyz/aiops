@@ -12,7 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql"}
+var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "016_scheduled_tasks_run_kind.sql"}
 
 const defaultSQLiteDSN = "file:copilot-local.db?cache=shared&_foreign_keys=on"
 
@@ -122,6 +122,9 @@ var sqliteColumnBackfills = []struct {
 	{"tool_executions", "verification", "TEXT NULL"},
 	// 结果准 #5: dry-run 预览持久化。
 	{"action_plans", "dry_run", "TEXT NULL"},
+	// E2 Phase 3: 定时任务 run_kind（read/runbook）+ runbook_slug。
+	{"copilot_scheduled_tasks", "run_kind", "TEXT NOT NULL DEFAULT 'read'"},
+	{"copilot_scheduled_tasks", "runbook_slug", "TEXT NULL"},
 }
 
 // sqliteColumnExistsInDB reports whether a column exists on a SQLite table.
@@ -317,6 +320,8 @@ var sqliteMigrations = []string{
 		name TEXT NOT NULL,
 		subject TEXT NOT NULL,
 		capability_name TEXT NOT NULL,
+		run_kind TEXT NOT NULL DEFAULT 'read',
+		runbook_slug TEXT NULL,
 		input TEXT NOT NULL,
 		schedule_kind TEXT NOT NULL,
 		preset TEXT NULL,

@@ -1666,9 +1666,13 @@ func (r *Router) serveArchiveConversation(writer http.ResponseWriter, request *h
 }
 
 // scheduledTaskRequestBody 是 POST/PATCH /v1/scheduled-tasks 的请求体。
+// run_kind 区分只读（read，默认）vs 低风险 runbook 触发（runbook，E2）。
+// run_kind=read 时必须提供 capability_name；runbook 时必须提供 runbook_slug。
 type scheduledTaskRequestBody struct {
 	Name           string         `json:"name"`
 	CapabilityName string         `json:"capability_name"`
+	RunKind        string         `json:"run_kind"`
+	RunbookSlug    string         `json:"runbook_slug"`
 	Input          map[string]any `json:"input"`
 	ScheduleKind   string         `json:"schedule_kind"`
 	Preset         string         `json:"preset"`
@@ -1682,6 +1686,8 @@ type scheduledTaskResponse struct {
 	Name           string         `json:"name"`
 	Subject        string         `json:"subject"`
 	CapabilityName string         `json:"capability_name"`
+	RunKind        string         `json:"run_kind"`
+	RunbookSlug    string         `json:"runbook_slug,omitempty"`
 	Input          map[string]any `json:"input,omitempty"`
 	ScheduleKind   string         `json:"schedule_kind"`
 	Preset         string         `json:"preset,omitempty"`
@@ -1713,6 +1719,8 @@ func shapeScheduledTask(task store.ScheduledTask) scheduledTaskResponse {
 		Name:           task.Name,
 		Subject:        task.Subject,
 		CapabilityName: task.CapabilityName,
+		RunKind:        task.RunKind,
+		RunbookSlug:    task.RunbookSlug,
 		Input:          task.Input,
 		ScheduleKind:   task.ScheduleKind,
 		Preset:         task.Preset,
@@ -1754,13 +1762,28 @@ func writeScheduledTaskError(writer http.ResponseWriter, err error) {
 }
 
 // validateScheduledTaskBody 校验请求体必填字段，返回 true 表示通过。
+// run_kind 决定执行语义与必填字段：read（默认）走 capability_name，
+// runbook 走 runbook_slug（低风险模板，见设计 §5.3 安全边界）。
 func validateScheduledTaskBody(writer http.ResponseWriter, body scheduledTaskRequestBody) bool {
+	kind := body.RunKind
+	if kind == "" {
+		kind = store.RunKindRead
+	}
+	if kind != store.RunKindRead && kind != store.RunKindRunbook {
+		writeError(writer, http.StatusBadRequest, "run_kind must be 'read' or 'runbook'")
+		return false
+	}
 	if strings.TrimSpace(body.Name) == "" {
 		writeError(writer, http.StatusBadRequest, "name is required")
 		return false
 	}
-	if strings.TrimSpace(body.CapabilityName) == "" {
-		writeError(writer, http.StatusBadRequest, "capability_name is required")
+	if kind == store.RunKindRunbook {
+		if strings.TrimSpace(body.RunbookSlug) == "" {
+			writeError(writer, http.StatusBadRequest, "runbook_slug is required when run_kind is 'runbook'")
+			return false
+		}
+	} else if strings.TrimSpace(body.CapabilityName) == "" {
+		writeError(writer, http.StatusBadRequest, "capability_name is required when run_kind is 'read'")
 		return false
 	}
 	if body.ScheduleKind != store.ScheduleKindPreset && body.ScheduleKind != store.ScheduleKindCron {
@@ -1907,6 +1930,8 @@ func (r *Router) handleCreateScheduledTask(writer http.ResponseWriter, request *
 	task, err := r.scheduledTasks.Create(ctx, user, scheduler.CreateRequest{
 		Name:           body.Name,
 		CapabilityName: body.CapabilityName,
+		RunKind:        body.RunKind,
+		RunbookSlug:    body.RunbookSlug,
 		Input:          body.Input,
 		ScheduleKind:   body.ScheduleKind,
 		Preset:         body.Preset,
@@ -1996,6 +2021,8 @@ func (r *Router) handleUpdateScheduledTask(writer http.ResponseWriter, request *
 	task, err := r.scheduledTasks.Update(ctx, user, taskID, scheduler.UpdateRequest{
 		Name:           body.Name,
 		CapabilityName: body.CapabilityName,
+		RunKind:        body.RunKind,
+		RunbookSlug:    body.RunbookSlug,
 		Input:          body.Input,
 		ScheduleKind:   body.ScheduleKind,
 		Preset:         body.Preset,

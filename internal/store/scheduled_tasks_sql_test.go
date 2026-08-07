@@ -298,3 +298,78 @@ func TestSQLScheduledTaskStoreInterfaceConformance(t *testing.T) {
 	t.Parallel()
 	var _ ScheduledTaskStore = (*SQLScheduledTaskStore)(nil)
 }
+
+// TestSQLScheduledTaskStoreRunKindRoundTrip 验证 run_kind/runbook_slug（E2 Phase 3）
+// 在 SQL 中正确往返：read 默认 'read'，runbook 任务保留 slug。
+func TestSQLScheduledTaskStoreRunKindRoundTrip(t *testing.T) {
+	t.Parallel()
+	db := testSQLite(t)
+	if err := ApplySQLiteMigrations(db); err != nil {
+		t.Fatalf("apply sqlite migrations: %v", err)
+	}
+	ctx := context.Background()
+	store := NewSQLScheduledTaskStore(db)
+	now := time.Date(2026, time.July, 27, 10, 0, 0, 0, time.UTC)
+
+	// 1) read 任务（scheduler.Create 经 normalizeRunKind 归一会写显式 'read'）往返
+	readTask := sampleScheduledTask(now)
+	readTask.RunKind = RunKindRead
+	readCreated, err := store.CreateTask(ctx, readTask)
+	if err != nil {
+		t.Fatalf("create read task: %v", err)
+	}
+	if readCreated.RunKind != RunKindRead {
+		t.Fatalf("stored run_kind = %q, want %q", readCreated.RunKind, RunKindRead)
+	}
+	fetched, err := store.GetTask(ctx, readCreated.ID, "alice")
+	if err != nil {
+		t.Fatalf("get read task: %v", err)
+	}
+	if fetched.RunKind != RunKindRead {
+		t.Fatalf("fetched run_kind = %q, want read", fetched.RunKind)
+	}
+	if fetched.RunbookSlug != "" {
+		t.Fatalf("fetched runbook_slug = %q, want empty", fetched.RunbookSlug)
+	}
+
+	// 2) run_kind=runbook ∈ runbook_slug 往返
+	rbTask := sampleScheduledTask(now)
+	rbTask.RunKind = RunKindRunbook
+	rbTask.RunbookSlug = "minio-retention-low-risk"
+	rbTask.CapabilityName = ""
+	rbCreated, err := store.CreateTask(ctx, rbTask)
+	if err != nil {
+		t.Fatalf("create runbook task: %v", err)
+	}
+	if rbCreated.RunKind != RunKindRunbook || rbCreated.RunbookSlug != "minio-retention-low-risk" {
+		t.Fatalf("stored runbook task = %+v", rbCreated)
+	}
+	rbFetched, err := store.GetTask(ctx, rbCreated.ID, "alice")
+	if err != nil {
+		t.Fatalf("get runbook task: %v", err)
+	}
+	if rbFetched.RunKind != RunKindRunbook {
+		t.Fatalf("fetched run_kind = %q, want runbook", rbFetched.RunKind)
+	}
+	if rbFetched.RunbookSlug != "minio-retention-low-risk" {
+		t.Fatalf("fetched runbook_slug = %q, want minio-retention-low-risk", rbFetched.RunbookSlug)
+	}
+
+	// 3) ListDueTasks / ListTasks 也带出 run_kind
+	due, err := store.ListDueTasks(ctx, now.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatalf("list due: %v", err)
+	}
+	found := false
+	for _, dt := range due {
+		if dt.ID == rbCreated.ID {
+			found = true
+			if dt.RunKind != RunKindRunbook {
+				t.Fatalf("due runbook task run_kind = %q, want runbook", dt.RunKind)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("runbook task not found among due tasks")
+	}
+}
