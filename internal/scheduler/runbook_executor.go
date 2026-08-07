@@ -26,8 +26,9 @@ type RunbookExecutor interface {
 	Execute(ctx context.Context, task store.ScheduledTask) (map[string]any, error)
 }
 
-// RunbookAutoExecutor 是生产 RunbookExecutor：解析 runbook 模板 → 取首个工具 →
-// policy 判定 → E2 准入门（SourceScheduler）→ 创建已确认 plan → 执行 → 记每日上限。
+// RunbookAutoExecutor 是生产 RunbookExecutor：遍历 runbook 模板的 ToolSequence，
+// 对每个写工具逐一 policy 判定 → E2 准入门（SourceScheduler）→ 创建已确认 plan →
+// 执行 → 记每日上限。只读工具在调度写路径无独立副作用，跳过。
 //
 // 安全边界（设计 §5.3）：定时任务只允许触发**预先评审过的低风险 runbook 模板**，
 // 工具名来自模板（固定，不可由任务任意指定），参数由 admin 创建任务时提供。
@@ -44,7 +45,21 @@ func NewRunbookAutoExecutor(runbooks store.RunbookStore, planService *plans.Serv
 	return &RunbookAutoExecutor{runbooks: runbooks, plans: planService, exec: execService, admit: controller}
 }
 
-// Execute implements RunbookExecutor.
+// stepResult 是一次写工具执行的结果，用于聚合到 Execute 的返回 map。
+type stepResult struct {
+	Tool        string `json:"tool"`
+	Status      string `json:"status"`
+	PlanID      string `json:"plan_id,omitempty"`
+	ExecutionID string `json:"execution_id,omitempty"`
+	Reused      bool   `json:"reused,omitempty"`
+}
+
+// Execute implements RunbookExecutor. 遍历 ToolSequence：
+//   - 写工具：policy + E2 准入门 + 已确认 plan + 执行（逐一）。任一写步骤被拒 →
+//     返回 ErrRunbookDenied；已执行步骤的结果保留（审计已写）。
+//   - 只读工具：跳过（调度写路径无独立副作用）。
+//
+// 返回的 map 包含 steps（每步结果数组）与 runbook/tool/status 兼容键。
 func (e *RunbookAutoExecutor) Execute(ctx context.Context, task store.ScheduledTask) (map[string]any, error) {
 	if task.RunKind != store.RunKindRunbook {
 		return nil, fmt.Errorf("task run_kind is %q, want %q", task.RunKind, store.RunKindRunbook)
@@ -67,44 +82,82 @@ func (e *RunbookAutoExecutor) Execute(ctx context.Context, task store.ScheduledT
 		return nil, fmt.Errorf("runbook %q risk_level is %q, want low (autonomous scheduled runbook must be low risk)", task.RunbookSlug, rb.RiskLevel)
 	}
 
-	toolName := rb.ToolSequence[0]
-	tool, ok := tools.Lookup(toolName)
-	if !ok {
-		return nil, fmt.Errorf("runbook %q first tool %q not registered", task.RunbookSlug, toolName)
-	}
 	// 定时任务由创建它的 admin 预先授权；调度器以其身份执行，但环境限定为
 	// 任务输入所声明的 environment（不放开「全环境」），写操作仍过 policy + 准入门。
 	user := scheduledAdminIdentity(task)
 
-	decision := policy.Evaluate(user, tool, task.Input)
-	if !decision.Allowed {
-		return nil, fmt.Errorf("policy denies tool %q: %s", toolName, decision.Reason)
-	}
-	if e.admit == nil {
-		return nil, fmt.Errorf("%w: admission controller not configured (fail-closed)", ErrRunbookDenied)
-	}
-	if err := e.admit.Admit(ctx, user, tool, decision); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRunbookDenied, err)
+	// 逐工具执行：只执行写步骤，只读步骤跳过。
+	var writeSteps int
+	steps := make([]stepResult, 0, len(rb.ToolSequence))
+	for _, toolName := range rb.ToolSequence {
+		if toolName == "" {
+			continue
+		}
+		tool, ok := tools.Lookup(toolName)
+		if !ok {
+			return nil, fmt.Errorf("runbook %q tool %q not registered", task.RunbookSlug, toolName)
+		}
+		// 只读工具在调度写路径无独立副作用，跳过（保留在序列中作为覆盖声明）。
+		if tool.Operation != tools.Write {
+			continue
+		}
+		writeSteps++
+
+		decision := policy.Evaluate(user, tool, task.Input)
+		if !decision.Allowed {
+			return nil, fmt.Errorf("policy denies tool %q: %s", toolName, decision.Reason)
+		}
+		if e.admit == nil {
+			return nil, fmt.Errorf("%w: admission controller not configured (fail-closed)", ErrRunbookDenied)
+		}
+		// 走「按模板评审风险」准入：工具自身可 Medium+（仍带 precheck/plan/approval
+		// governance），runbook 模板已被预检为 low 即满足自动化授权。其余门不变。
+		if err := e.admit.AdmitRunbook(ctx, user, tool, decision, rb.RiskLevel == "low"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrRunbookDenied, err)
+		}
+
+		plan, err := e.plans.CreateRunbookPlan(ctx, user, decision, task.Input, task.RunbookSlug, rb.RiskLevel)
+		if err != nil {
+			return nil, fmt.Errorf("create runbook plan: %w", err)
+		}
+		execResult, execErr := e.exec.ExecuteConfirmedStoredPlan(ctx, plan.ID)
+		if execErr != nil {
+			return nil, execErr
+		}
+		e.admit.Record(ctx, user)
+
+		steps = append(steps, stepResult{
+			Tool:        toolName,
+			Status:      execResult.Status,
+			PlanID:      plan.ID,
+			ExecutionID: execResult.ID,
+			Reused:      execResult.Reused,
+		})
 	}
 
-	plan, err := e.plans.CreateRunbookPlan(ctx, user, decision, task.Input, task.RunbookSlug, rb.RiskLevel)
-	if err != nil {
-		return nil, fmt.Errorf("create runbook plan: %w", err)
+	// fail-closed：序列中没有任何写工具时拒绝，避免「只读 runbook 被调度写执行器
+	// 静默跑空」——只会读的任务应声明 run_kind=read，而非 runbook。
+	if writeSteps == 0 {
+		return nil, fmt.Errorf("%w: runbook %q has no write tool in tool_sequence", ErrRunbookDenied, task.RunbookSlug)
 	}
-	execResult, execErr := e.exec.ExecuteConfirmedStoredPlan(ctx, plan.ID)
-	if execErr != nil {
-		return nil, execErr
-	}
-	e.admit.Record(ctx, user)
 
-	return map[string]any{
-		"status":       execResult.Status,
-		"execution_id": execResult.ID,
-		"plan_id":      plan.ID,
-		"runbook":      task.RunbookSlug,
-		"tool":         toolName,
-		"reused":       execResult.Reused,
-	}, nil
+	// 聚合结果：保留此前调用方依赖的 runbook/tool/status 键，并附上 steps。
+	status := "succeeded"
+	if len(steps) == 1 {
+		status = steps[0].Status
+	}
+	result := map[string]any{
+		"status":  status,
+		"runbook": task.RunbookSlug,
+		"steps":   steps,
+	}
+	if len(steps) >= 1 {
+		result["tool"] = steps[0].Tool
+		result["plan_id"] = steps[0].PlanID
+		result["execution_id"] = steps[0].ExecutionID
+		result["reused"] = steps[0].Reused
+	}
+	return result, nil
 }
 
 // scheduledAdminIdentity 构造定时 runbook 执行所用的身份：Subject 用创建任务的

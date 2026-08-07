@@ -148,19 +148,28 @@ func TestSchedulerRunbookEndToEndPermitted(t *testing.T) {
 	}
 }
 
-// TestSchedulerRunbookEndToEndDeniedFailClosed 验证 fail-closed：内置低风险 runbook
-// 其首工具是 medium 风险（topic.retention.set），准入门拒绝 → run 记为 failed +
+// TestSchedulerRunbookEndToEndDeniedFailClosed 验证 fail-closed：runbook 模板为 low，
+// 但其写工具不在 E2 白名单 → 准入门（AdmitRunbook 步 3）拒绝 → run 记为 failed +
 // 审计 denied（非静默退回人工确认）。
 func TestSchedulerRunbookEndToEndDenied(t *testing.T) {
-	// 复用现有中间件工具（topic.retention.set 为 medium 写，只有这一个低风险 runbook
-	// 指向它）。不需要额外注册低风险写工具。
-	ensureMiddlewareTools(t)
+	registerSchedulerLowRiskWriteTool(t)
 	db := openAssistantSQLite(t)
 	repository := store.NewSQLActionPlanStore(db)
 	auditService := audit.NewService(repository)
 	runbookStore := store.NewSQLRunbookStore(db)
 	if err := store.SeedBuiltinRunbooks(context.Background(), runbookStore); err != nil {
 		t.Fatalf("seed builtin runbooks: %v", err)
+	}
+	// low 风险模板指向写工具，但白名单为空 → 工具不在名单 → 准入拒绝。
+	if _, err := runbookStore.CreateRunbook(context.Background(), store.Runbook{
+		Slug:         "minio-retention-low-template",
+		Name:         "MinIO 保留期设置（模板 low）",
+		RiskLevel:    "low",
+		IsBuiltin:    true,
+		IsEnabled:    true,
+		ToolSequence: []string{schedulerRunbookWriteTool},
+	}); err != nil {
+		t.Fatalf("create low-risk runbook: %v", err)
 	}
 
 	readService := execution.NewReadOnlyService(e2eReadRunner{}, auditService)
@@ -171,11 +180,11 @@ func TestSchedulerRunbookEndToEndDenied(t *testing.T) {
 	}
 	executionService := execution.NewServiceWithClock(repository, e2eSchedulerRunbookExecutor{}, fakeNow)
 	planService := plans.NewService(repository, plans.ClockFunc(fakeNow))
-	// 白名单开放所有低风险工具但 topic.retention.set 是 medium → Admit 步 4 直接拒。
+	// 模板 low 但白名单为空 → AdmitRunbook 步 3（工具不在名单）拒绝。
 	controller := autonomy.NewController(autonomy.Config{
 		Enabled:      true,
 		DailyLimit:   100,
-		LowRiskTools: map[string]bool{tools.TopicRetentionSet: true},
+		LowRiskTools: map[string]bool{},
 	}, nil)
 	runbookExec := scheduler.NewRunbookAutoExecutor(runbookStore, planService, executionService, controller)
 	taskService := scheduler.NewService(store.NewSQLScheduledTaskStore(db), readService, auditService, nil).
@@ -189,7 +198,7 @@ func TestSchedulerRunbookEndToEndDenied(t *testing.T) {
 		httpapi.WithRunbooks(runbookStore),
 	)
 
-	createBody := `{"name":"kafka 保留期定时","run_kind":"runbook","runbook_slug":"kafka-retention-low-risk","input":{"environment":"prod","topic":"orders","retention_hours":72},"schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
+	createBody := `{"name":"minio 保留期定时","run_kind":"runbook","runbook_slug":"minio-retention-low-template","input":{"environment":"prod","bucket":"archive","retention_days":90},"schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
 	createReq := schedulerRunbookReq(t, http.MethodPost, "/v1/scheduled-tasks", createBody)
 	createRes := httptest.NewRecorder()
 	router.ServeHTTP(createRes, createReq)
