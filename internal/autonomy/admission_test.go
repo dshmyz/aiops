@@ -95,6 +95,51 @@ func TestAdmitDeniesNonLowRiskTool(t *testing.T) {
 	}
 }
 
+// TestAdmitRunbookAllowsMediumToolOnLowTemplate 验证按模板评审风险：工具自身可为
+// Medium（写能力被验证器强制 Medium+），只要模板评审为 low 即放行。
+func TestAdmitRunbookAllowsMediumToolOnLowTemplate(t *testing.T) {
+	medium := tools.Tool{Name: "demo.lowrisk.write", Operation: tools.Write, Risk: tools.Medium}
+	cfg := enabledConfig()
+	cfg.LowRiskTools = map[string]bool{"demo.lowrisk.write": true}
+	c := NewController(cfg, nil)
+	if err := c.AdmitRunbook(context.Background(), testUser(), medium, permittedDecision(medium), true); err != nil {
+		t.Fatalf("AdmitRunbook = %v, want allow (medium tool, low template)", err)
+	}
+}
+
+// TestAdmitRunbookDeniesMediumTemplate 验证模板风险为 false（模板未评审为 low）时拒绝，
+// 即便工具是 Medium 且在 whitelist——模板评审单元是授权依据。
+func TestAdmitRunbookDeniesMediumTemplate(t *testing.T) {
+	medium := tools.Tool{Name: "demo.lowrisk.write", Operation: tools.Write, Risk: tools.Medium}
+	cfg := enabledConfig()
+	cfg.LowRiskTools = map[string]bool{"demo.lowrisk.write": true}
+	c := NewController(cfg, nil)
+	if err := c.AdmitRunbook(context.Background(), testUser(), medium, permittedDecision(medium), false); !errors.Is(err, ErrDenied) {
+		t.Fatalf("AdmitRunbook = %v, want ErrDenied (template not low)", err)
+	}
+}
+
+// TestAdmitRunbookStillDeniesNonWhitelisted 验证 AdmitRunbook 的其余门仍生效：工具不在
+// 白名单即便模板 low 也拒绝。
+func TestAdmitRunbookStillDeniesNonWhitelisted(t *testing.T) {
+	medium := tools.Tool{Name: "other.write", Operation: tools.Write, Risk: tools.Medium}
+	c := NewController(enabledConfig(), nil)
+	if err := c.AdmitRunbook(context.Background(), testUser(), medium, permittedDecision(medium), true); !errors.Is(err, ErrDenied) {
+		t.Fatalf("AdmitRunbook = %v, want ErrDenied (not whitelisted)", err)
+	}
+}
+
+// TestAdmitRunbookStillDeniesMasterSwitchOff 验证 AdmitRunbook 也受总开关 fail-closed。
+func TestAdmitRunbookStillDeniesMasterSwitchOff(t *testing.T) {
+	cfg := enabledConfig()
+	cfg.Enabled = false
+	c := NewController(cfg, nil)
+	low := lowRiskWriteTool()
+	if err := c.AdmitRunbook(context.Background(), testUser(), low, permittedDecision(low), true); !errors.Is(err, ErrDenied) {
+		t.Fatalf("AdmitRunbook = %v, want ErrDenied (master switch off)", err)
+	}
+}
+
 func TestAdmitDeniesWhenPolicyDenies(t *testing.T) {
 	c := NewController(enabledConfig(), nil)
 	tool := lowRiskWriteTool()

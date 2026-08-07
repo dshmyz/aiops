@@ -227,11 +227,20 @@ func (s *Service) WithAutonomy(c *autonomy.Controller) *Service {
 // admitAutoExec 是 Service 侧对自动执行的统一准入入口（E2）：把一次低风险写请求交给
 // Low-Risk Admission Controller 判定。未装配控制器（nil）视为 fail-closed（拒绝自动
 // 执行，回落人工确认），与登录前行为一致。调用方负责任何驳回都静默退化为普通写路径。
-func (s *Service) admitAutoExec(ctx context.Context, user identity.CurrentUser, tool tools.Tool, decision policy.Decision, source autonomy.Source) bool {
+//
+// templateRiskLow 决定风险门语义：
+//   - nil：裸写（无 runbook 模板评审），用 Admit 严格门——工具自身 risk 必须 low
+//     （agent loop 的裸写路径）。
+//   - 非 nil：有模板评审单元，用 AdmitRunbook——模板评审为 low 即满足自动化授权
+//     （direct / scheduled runbook 路径，工具可 Medium+ 但仍带 governance）。
+func (s *Service) admitAutoExec(ctx context.Context, user identity.CurrentUser, tool tools.Tool, decision policy.Decision, source autonomy.Source, templateRiskLow *bool) bool {
 	if s.autonomy == nil {
 		return false // fail-closed：无控制器即不自动执行
 	}
-	return s.autonomy.Admit(ctx, user, tool, decision) == nil
+	if templateRiskLow == nil {
+		return s.autonomy.Admit(ctx, user, tool, decision) == nil
+	}
+	return s.autonomy.AdmitRunbook(ctx, user, tool, decision, *templateRiskLow) == nil
 }
 
 // recordAutoExec 在自动执行成功后记一次每日上限计数（不阻塞）。控制器未装配或未启用
@@ -242,6 +251,10 @@ func (s *Service) recordAutoExec(ctx context.Context, user identity.CurrentUser)
 	}
 	s.autonomy.Record(ctx, user)
 }
+
+// boolPtr returns a pointer to b, for callers distinguishing "no template"
+// (nil) from a concrete template risk value in admitAutoExec.
+func boolPtr(b bool) *bool { return &b }
 
 type Response struct {
 	Type               string               `json:"type"`
@@ -777,7 +790,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 	planCtx, createPlanSpan := tracer().Start(ctx, "create_plan",
 		trace.WithAttributes(attribute.String("tool.name", tool.Name)))
 
-	if runbookSlug != "" && runbookRisk == "low" && s.execution != nil && s.admitAutoExec(ctx, user, tool, decision, autonomy.SourceDirect) {
+	if runbookSlug != "" && runbookRisk == "low" && s.execution != nil && s.admitAutoExec(ctx, user, tool, decision, autonomy.SourceDirect, boolPtr(runbookRisk == "low")) {
 		// 低风险 Runbook 自动执行：创建已确认 plan → 立即执行 → 返回 execution_result。
 		// E2: 仅当 Low-Risk Admission Controller 放行才自动执行；否则回落
 		// confirmation_required（人工确认），默认 fail-closed。

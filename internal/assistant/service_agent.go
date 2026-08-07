@@ -187,8 +187,9 @@ func (s *Service) agentWriteStep(ctx context.Context, user identity.CurrentUser,
 		return StepOutcome{}, fmt.Errorf("%w: %s", ErrPolicyDenied, decision.Reason)
 	}
 	// E2: 低风险写若通过准入门则自动执行（已确认 plan → 执行 → advisory 结果），
-	// 否则保持 loop 的硬禁止默认，退回人工确认。
-	if s.admitAutoExec(ctx, user, tool, decision, autonomy.SourceAgentLoop) {
+	// 否则保持 loop 的硬禁止默认，退回人工确认。agent loop 无 runbook 模板评审单元，
+	// 走裸写严格门（Admit：工具自身必须 low），模板宽松门（AdmitRunbook）不适用。
+	if s.admitAutoExec(ctx, user, tool, decision, autonomy.SourceAgentLoop, nil) {
 		return s.agentWriteAutoExec(ctx, user, tool, intent, decision)
 	}
 	return s.agentWriteHandoff(ctx, user, tool, intent, decision)
