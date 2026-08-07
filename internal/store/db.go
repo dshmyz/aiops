@@ -12,7 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "016_scheduled_tasks_run_kind.sql"}
+var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "016_scheduled_tasks_run_kind.sql", "017_autonomy_daily_limit.sql"}
 
 const defaultSQLiteDSN = "file:copilot-local.db?cache=shared&_foreign_keys=on"
 
@@ -456,6 +456,15 @@ var sqliteMigrations = []string{
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS copilot_runbooks_slug_idx ON copilot_runbooks (slug)`,
+	// E2 准入：每日上限持久化计数（mirrors migrations/017_autonomy_daily_limit.sql
+	// for SQLite）。PK(subject, day) 保证 upsert 幂等，按自然日滚动。
+	`CREATE TABLE IF NOT EXISTS autonomy_daily_limit (
+		subject TEXT NOT NULL,
+		day TEXT NOT NULL,
+		count INTEGER NOT NULL DEFAULT 0,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (subject, day)
+	)`,
 	// Capability marketplace (mirrors migrations/015_capability_marketplace.sql
 	// for SQLite). These are additive to MySQL; the marketplace service detects
 	// the dialect for the rating upsert so the two engines share one code path.

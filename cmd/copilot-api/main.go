@@ -287,8 +287,14 @@ func main() {
 		logger.Warn("autonomy config invalid; autonomy stays disabled (fail-closed)", zap.Error(autonomyErr))
 	}
 	// 所有自动执行源（direct runbook / agent loop / scheduler）共用同一 Controller，
-	// 使每日上限与白名单按主体统一计数。
-	autonomyController := autonomy.NewController(autonomyCfg, nil)
+	// 使每日上限与白名单按主体统一计数。每日上限用持久化 SQL limiter（autonomy_daily_limit
+	// 表，按自然日滚动），多实例部署下并发自增不丢计数；db 为 nil 时退化为 NopLimiter
+	// （每日上限不生效，但总开关 fail-closed 仍在）。
+	var autonomyLimiter autonomy.DailyLimiter
+	if db != nil {
+		autonomyLimiter = autonomy.NewSQLDailyLimiter(db)
+	}
+	autonomyController := autonomy.NewController(autonomyCfg, autonomyLimiter).WithClock(time.Now)
 	assistantService.WithAutonomy(autonomyController)
 	if autonomyCfg.Enabled {
 		logger.Warn("autonomous write execution ENABLED (COPILOT_AUTONOMY_ENABLED=1); verify this is intentional for the deployment")
