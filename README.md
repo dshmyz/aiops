@@ -69,10 +69,15 @@ executed tool so the console renders an independent "steps performed" timeline,
 and persists each intermediate tool result as a `tool_step` conversation turn
 (full step-level audit, chained via `parent_turn_id`).
 
-Security boundary: the loop only **reads** autonomously. Writes always stop at
-plan creation + `confirmation_required` for human approval — the loop never
-auto-executes a write, and low-risk Runbook auto-execution is disabled inside
-the loop. See [docs/assistant.md](docs/assistant.md) for details.
+Security boundary: the loop **reads** autonomously. Writes always stop at plan
+creation + `confirmation_required` for human approval by default — the loop does
+not auto-approve writes. The one exception mirrors the platform's E2 Low-Risk
+Admission Controller: when `COPILOT_AUTONOMY_ENABLED=1` and the tool is on the
+`COPILOT_AUTONOMY_LOW_RISK_TOOLS` allowlist, a low-risk write admitted by the
+controller auto-executes inside the loop as an advisory step (same semantics as
+direct low-risk Runbook and scheduled runbook auto-execution). Without an
+explicit enable, the loop stays fail-closed and every write hands off for human
+confirmation. See [docs/assistant.md](docs/assistant.md) for details.
 
 ## Middleware Diagnostics
 
