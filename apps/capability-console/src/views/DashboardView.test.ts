@@ -65,6 +65,23 @@ describe('DashboardView', () => {
     expect(wrapper.find('[data-test="stat-today-executions"]').text()).toContain('1');
   });
 
+  test('点击统计卡片 emit navigate 下钻到对应视图', async () => {
+    const wrapper = mount(DashboardView);
+    await flushPromises();
+
+    const cases: Array<[string, string]> = [
+      ['stat-pending-plans', 'plans'],
+      ['stat-active-alerts', 'incident'],
+      ['stat-enabled-tasks', 'scheduled-tasks'],
+      ['stat-today-executions', 'executions'],
+    ];
+    for (const [dataTest, view] of cases) {
+      await wrapper.find(`[data-test="${dataTest}"]`).trigger('click');
+    }
+    const emitted = wrapper.emitted('navigate');
+    expect(emitted?.map((e) => e[0])).toEqual(cases.map(([, view]) => view));
+  });
+
   test('渲染待确认计划列表并可拒绝', async () => {
     const wrapper = mount(DashboardView);
     await flushPromises();

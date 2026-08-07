@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils';
 import { describe, expect, test } from 'vitest';
 import ScheduledTaskForm from './ScheduledTaskForm.vue';
-import type { ManagedCapability, ScheduledTask } from '../types';
+import type { ManagedCapability, Runbook, ScheduledTask } from '../types';
 
 // 构造只读 capability 列表，过滤逻辑由父组件传入，这里直接构造已过滤的列表。
 function makeCapabilities(): ManagedCapability[] {
@@ -59,6 +59,21 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
   };
 }
 
+function makeRunbooks(): Runbook[] {
+  return [
+    {
+      id: 'rb-1',
+      slug: 'minio-retention-set-low',
+      name: 'MinIO 保留期设置（低风险）',
+      intent_pattern: ['设置保留期'],
+      tool_sequence: ['bucket.retention.set'],
+      risk_level: 'low',
+      is_builtin: true,
+      is_enabled: true,
+    },
+  ];
+}
+
 describe('ScheduledTaskForm', () => {
   test('创建模式：渲染空表单 + 提交按钮 disabled', () => {
     const wrapper = mount(ScheduledTaskForm, {
@@ -93,6 +108,8 @@ describe('ScheduledTaskForm', () => {
     expect(events?.[0]?.[0]).toEqual({
       name: 'minio 每日巡检',
       capability_name: 'minio.bucket.capacity.read',
+      run_kind: 'read',
+      runbook_slug: null,
       input: { environment: 'prod', cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'preset',
       preset: 'daily',
@@ -142,6 +159,8 @@ describe('ScheduledTaskForm', () => {
     expect(events?.[0]?.[0]).toEqual({
       name: 'cron 巡检',
       capability_name: 'kafka.topic.lag.read',
+      run_kind: 'read',
+      runbook_slug: null,
       input: { environment: 'prod' },
       schedule_kind: 'cron',
       preset: null,
@@ -268,5 +287,97 @@ describe('ScheduledTaskForm', () => {
     expect(options).toHaveLength(3);
     expect(options[1].attributes('value')).toBe('minio.bucket.capacity.read');
     expect(options[2].attributes('value')).toBe('kafka.topic.lag.read');
+  });
+
+  test('runbook 模式：默认只读，切到 runbook 显示模板下拉并隐藏 capability 下拉', async () => {
+    const wrapper = mount(ScheduledTaskForm, {
+      props: { capabilities: makeCapabilities(), runbooks: makeRunbooks() },
+    });
+
+    // 默认 run_kind=read → capability 下拉可见、runbook 下拉不可见
+    expect(wrapper.find('[data-test="scheduled-task-capability"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="scheduled-task-runbook"]').exists()).toBe(false);
+
+    await wrapper.find('[data-test="scheduled-task-run-kind"]').setValue('runbook');
+
+    expect(wrapper.find('[data-test="scheduled-task-capability"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="scheduled-task-runbook"]').exists()).toBe(true);
+  });
+
+  test('runbook 模式：选模板后提交 run_kind=runbook + runbook_slug', async () => {
+    const wrapper = mount(ScheduledTaskForm, {
+      props: { capabilities: makeCapabilities(), runbooks: makeRunbooks() },
+    });
+
+    await wrapper.find('[data-test="scheduled-task-name"]').setValue('minio 保留期定时设置');
+    await wrapper.find('[data-test="scheduled-task-run-kind"]').setValue('runbook');
+    await wrapper.find('[data-test="scheduled-task-runbook"]').setValue('minio-retention-set-low');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod","cluster":"m1","bucket":"archive"}');
+    await wrapper.find('[data-test="schedule-preset-option"][data-preset="daily"]').trigger('click');
+
+    expect(wrapper.find('[data-test="scheduled-task-submit"]').attributes('disabled')).toBeUndefined();
+
+    await wrapper.find('[data-test="scheduled-task-submit"]').trigger('click');
+
+    const events = wrapper.emitted('submit');
+    expect(events).toBeDefined();
+    expect(events?.[0]?.[0]).toEqual({
+      name: 'minio 保留期定时设置',
+      capability_name: '',
+      run_kind: 'runbook',
+      runbook_slug: 'minio-retention-set-low',
+      input: { environment: 'prod', cluster: 'm1', bucket: 'archive' },
+      schedule_kind: 'preset',
+      preset: 'daily',
+      cron_expr: null,
+    });
+  });
+
+  test('runbook 模式：未选模板时提交按钮 disabled（切回 read 清空 slug）', async () => {
+    const wrapper = mount(ScheduledTaskForm, {
+      props: { capabilities: makeCapabilities(), runbooks: makeRunbooks() },
+    });
+
+    await wrapper.find('[data-test="scheduled-task-name"]').setValue('minio 保留期定时设置');
+    await wrapper.find('[data-test="scheduled-task-run-kind"]').setValue('runbook');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod"}');
+    await wrapper.find('[data-test="schedule-preset-option"][data-preset="daily"]').trigger('click');
+
+    // 未选 runbook → disabled
+    expect(wrapper.find('[data-test="scheduled-task-submit"]').attributes('disabled')).toBeDefined();
+
+    // 选模板后 enabled，再切回 read 应清空 slug
+    await wrapper.find('[data-test="scheduled-task-runbook"]').setValue('minio-retention-set-low');
+    expect(wrapper.find('[data-test="scheduled-task-submit"]').attributes('disabled')).toBeUndefined();
+    await wrapper.find('[data-test="scheduled-task-run-kind"]').setValue('read');
+    expect(wrapper.find('[data-test="scheduled-task-capability"]').exists()).toBe(true);
+  });
+
+  test('没有可用 runbook 模板时 run_kind 下拉禁用', () => {
+    const wrapper = mount(ScheduledTaskForm, {
+      props: { capabilities: makeCapabilities() },
+    });
+
+    const runKindSelect = wrapper.find('[data-test="scheduled-task-run-kind"]').element as HTMLSelectElement;
+    expect(runKindSelect.disabled).toBe(true);
+  });
+
+  test('runbook 模式：列表渲染为模板选项 + 编辑模式预填', () => {
+    const task = makeTask({
+      capability_name: '',
+      run_kind: 'runbook',
+      runbook_slug: 'minio-retention-set-low',
+    } as Partial<ScheduledTask>);
+    const wrapper = mount(ScheduledTaskForm, {
+      props: { capabilities: makeCapabilities(), runbooks: makeRunbooks(), task },
+    });
+
+    // 编辑模式预填 runbook
+    expect(wrapper.find('[data-test="scheduled-task-runbook"]').exists()).toBe(true);
+    expect((wrapper.find('[data-test="scheduled-task-runbook"]').element as HTMLSelectElement).value).toBe('minio-retention-set-low');
+    expect(wrapper.find('[data-test="scheduled-task-capability"]').exists()).toBe(false);
+    const options = wrapper.find('[data-test="scheduled-task-runbook"]').findAll('option');
+    // 占位 + 1 个模板
+    expect(options).toHaveLength(2);
   });
 });

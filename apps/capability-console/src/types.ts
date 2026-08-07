@@ -823,6 +823,27 @@ export interface RunbookDraftListResponse {
   hint?: string;
 }
 
+// ===== Runbook 模板（E2 Phase 3：定时任务 run_kind=runbook 可调度的模板） =====
+// 后端 GET /v1/runbooks 只返回 enabled + risk_level===low 的模板（定时写安全边界）。
+// 定时任务表单「任务类型 = runbook」时下拉其 slug/name。
+
+export interface Runbook {
+  id: string;
+  slug: string;
+  name: string;
+  intent_pattern: string[];
+  tool_sequence: string[];
+  risk_level: string;
+  is_builtin?: boolean;
+  is_enabled: boolean;
+}
+
+export interface RunbookListResponse {
+  configured?: boolean;
+  runbooks: Runbook[];
+  hint?: string;
+}
+
 export interface InferRunbookDraftPayload {
   topic_key: string;
   examples: string[];

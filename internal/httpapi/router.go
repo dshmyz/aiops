@@ -142,6 +142,7 @@ type Router struct {
 	prompts            *prompt.Registry
 	feedback           FeedbackService
 	runbookDrafts      RunbookDraftService
+	runbooks           store.RunbookStore
 	knowledge          KnowledgeService
 	inspectionReports  store.InspectionReportStore
 	mcpService         MCPService
@@ -215,6 +216,15 @@ func WithFeedback(service FeedbackService) Option {
 func WithRunbookDrafts(service RunbookDraftService) Option {
 	return func(router *Router) {
 		router.runbookDrafts = service
+	}
+}
+
+// WithRunbooks wires the runbook store so the UI can list enabled low-risk
+// runbooks as schedulable templates (E2 Phase 3, 定时 runbook 写触发). When
+// unset, /v1/runbooks returns configured:false. Any logged-in user can read.
+func WithRunbooks(store store.RunbookStore) Option {
+	return func(router *Router) {
+		router.runbooks = store
 	}
 }
 
@@ -488,6 +498,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/admin/runbook-drafts") {
 		r.serveRunbookDrafts(writer, request)
+		return
+	}
+	if request.Method == http.MethodGet && request.URL.Path == "/v1/runbooks" {
+		r.serveRunbooks(writer, request)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/docs/") {

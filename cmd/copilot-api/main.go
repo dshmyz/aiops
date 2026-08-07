@@ -318,6 +318,8 @@ func main() {
 	// Runbook 意图进化：反馈 → 可确认启用的 runbook 草稿。activate 时经
 	// runbookStore 落 SQL，RunbookRouter 即时命中。
 	options = append(options, httpapi.WithRunbookDrafts(httpapi.NewRunbookDraftService(runbookStore)))
+	// 可调度的低风险 runbook 列表（E2 Phase 3：定时任务表单 run_kind=runbook 下拉）。
+	options = append(options, httpapi.WithRunbooks(runbookStore))
 	options = append(options, httpapi.WithMCPService(httpapi.NewMCPServerService(mcpServerStore, mcpManager)))
 	options = append(options, httpapi.WithAlertWebhook(httpapi.NewAlertWebhookService(alertSvc, auditService)))
 	options = append(options, httpapi.WithAlertWebhookSecret(os.Getenv("COPILOT_ALERT_WEBHOOK_SECRET")))

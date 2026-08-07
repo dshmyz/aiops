@@ -1,11 +1,28 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue';
 import { ElAlert } from 'element-plus';
+import { listRunbooks } from '../api';
+import type { Runbook } from '../types';
 import ScheduledTaskForm from '../components/ScheduledTaskForm.vue';
 import ScheduledTaskList from '../components/ScheduledTaskList.vue';
 import ScheduledTaskRunHistory from '../components/ScheduledTaskRunHistory.vue';
 import type { UseScheduledTasks } from '../composables/useScheduledTasks';
 
 defineProps<{ scheduledTasks: UseScheduledTasks }>();
+
+// 可调度的低风险 runbook 模板（run_kind=runbook 下拉数据源，来自 GET /v1/runbooks）。
+const schedulableRunbooks = ref<Runbook[]>([]);
+
+onMounted(async () => {
+  try {
+    const res = await listRunbooks();
+    if (res.configured && Array.isArray(res.runbooks)) {
+      schedulableRunbooks.value = res.runbooks;
+    }
+  } catch {
+    // 静默失败：无 runbook 模板则仅支持只读巡检（表单会禁用 runbook 类型）。
+  }
+});
 </script>
 
 <template>
@@ -38,6 +55,7 @@ defineProps<{ scheduledTasks: UseScheduledTasks }>();
       <ScheduledTaskForm
         :task="scheduledTasks.scheduledTaskEditing.value"
         :capabilities="scheduledTasks.readCapabilities.value"
+        :runbooks="schedulableRunbooks"
         @submit="scheduledTasks.save"
         @cancel="scheduledTasks.closeForm"
       />

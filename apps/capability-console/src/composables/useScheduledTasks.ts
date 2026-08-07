@@ -18,6 +18,8 @@ import type {
 export interface SaveScheduledTaskPayload {
   name: string;
   capability_name: string;
+  run_kind?: 'read' | 'runbook';
+  runbook_slug?: string | null;
   input: Record<string, unknown>;
   schedule_kind: 'preset' | 'cron';
   preset: '5m' | '1h' | 'daily' | 'weekly' | null;
@@ -149,6 +151,8 @@ export function useScheduledTasks(options: UseScheduledTasksOptions): UseSchedul
       await updateScheduledTask(id, {
         name: task.name,
         capability_name: task.capability_name,
+        run_kind: task.run_kind,
+        runbook_slug: task.runbook_slug,
         input: task.input,
         schedule_kind: task.schedule_kind,
         preset: task.preset,

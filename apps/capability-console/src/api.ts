@@ -43,7 +43,9 @@ import type {
   QuickPublishPayload,
   RejectPlanPayload,
   RejectPlanResult,
+  Runbook,
   RunbookDraft,
+  RunbookListResponse,
   SaveMCPServerPayload,
   ScheduledTask,
   ScheduledTaskRun,
@@ -744,6 +746,14 @@ export async function activateRunbookDraft(id: string): Promise<RunbookDraft> {
   return request<RunbookDraft>(`/v1/admin/runbook-drafts/${encodeURIComponent(id)}/activate`, {
     method: 'POST',
   });
+}
+
+// ===== Runbook 模板（E2 Phase 3：定时任务可调度的低风险模板） =====
+// GET /v1/runbooks 只返回 enabled + risk_level=low 的模板；定时表单「runbook 类型」下拉用。
+
+/** 列出可调度的低风险 runbook 模板。 */
+export async function listRunbooks(): Promise<RunbookListResponse> {
+  return request<RunbookListResponse>('/v1/runbooks');
 }
 
 // ===== 文档（后台"使用手册"）=====

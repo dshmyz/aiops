@@ -81,6 +81,14 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
+// Dashboard 统计卡片下钻：跳转到目标视图（view 由 DashboardView 按卡片映射发出，
+// 均为 ActiveView 合法值）。
+function onViewNavigateFromDashboard(view: string) {
+  if (viewOrder.includes(view as ActiveView)) {
+    activeView.value = view as ActiveView;
+  }
+}
+
 const capabilitiesComposable = useCapabilities({
   onViewChange: (view) => {
     activeView.value = view;
@@ -898,7 +906,7 @@ onUnmounted(() => {
         @ask-ai="handleAskAi"
       />
 
-      <DashboardView v-if="activeView === 'dashboard'" />
+      <DashboardView v-if="activeView === 'dashboard'" @navigate="onViewNavigateFromDashboard" />
 
       <PlansView
         v-if="activeView === 'plans'"

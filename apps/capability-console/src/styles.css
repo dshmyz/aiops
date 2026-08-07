@@ -5082,6 +5082,22 @@ nav button:focus-visible {
 .stat-card {
   min-width: 0;
 }
+/* 统计卡片下钻：改为 button 后重置浏览器默认按钮样式，并加 hover 聚焦提示 */
+button.stat-card {
+  font: inherit;
+  text-align: center;
+  color: inherit;
+  cursor: pointer;
+  transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+button.stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+button.stat-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
 .stat-value {
   display: inline-flex;
   align-items: baseline;

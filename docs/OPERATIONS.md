@@ -187,6 +187,7 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（含 prod/staging/de
 | `GET /v1/executions` | **admin only** |
 | `GET /v1/identity/me` | 任一登录用户（返回当前 subject + roles，供顶栏"我是谁"） |
 | `GET /v1/scheduled-tasks*` | 任一登录用户（写/触发=admin） |
+| `GET /v1/runbooks` | 任一登录用户（仅返回已启用且低风险的 runbook 模板，供定时表单下拉） |
 | `GET /v1/inspection-reports*` | 任一登录用户 |
 | `GET/POST /v1/marketplace/capabilities*` | 读=任一；发布/评分写=admin |
 | `GET /v1/capabilities{/name}` | viewer/operator/admin（写=admin） |
@@ -271,6 +272,8 @@ JWT（CAS 登录跳转 `/v1/auth/config` + `/v1/auth/cas/*`）。登录后侧栏
   E2 准入门（低风险 + 白名单）后创建已确认 plan 并自动执行；未通过准入门则该次 run 记为 `failed` + 审计
   `denied`（fail-closed，不静默）。定时写**不接受任意 tool+input**，只能触发预先评审过的低风险 runbook。
   创建/更新入口：`POST/PUT /v1/scheduled-tasks`（写/触发=admin），body 需带 `run_kind` 与 `runbook_slug`。
+  **Web 控制台**（定时巡检视图）的任务表单已支持选择任务类型 `read` / `runbook`，`runbook` 模式下从
+  `GET /v1/runbooks`（已启用 + 低风险）下拉选择模板后提交。
 - 详见 [assistant.md](assistant.md)。
 
 ### 6.2 Runbook 自演化（反馈 → 草稿 → 确认启用）

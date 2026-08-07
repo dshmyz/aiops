@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { ManagedCapability, ScheduleKind, SchedulePreset, ScheduledTask } from '../types';
+import type { ManagedCapability, Runbook, ScheduleKind, SchedulePreset, ScheduledTask } from '../types';
 import SchedulePresetPicker from './SchedulePresetPicker.vue';
 import ScheduleCronInput from './ScheduleCronInput.vue';
 
 const props = defineProps<{
   task?: ScheduledTask | null;
   capabilities: ManagedCapability[];
+  /** 可调度的低风险 runbook 模板（run_kind=runbook 时下拉）。可为空：无模板则禁用 runbook 类型。 */
+  runbooks?: Runbook[];
 }>();
 
 const emit = defineEmits<{
   (event: 'submit', payload: {
     name: string;
     capability_name: string;
+    run_kind?: 'read' | 'runbook';
+    runbook_slug?: string | null;
     input: Record<string, unknown>;
     schedule_kind: ScheduleKind;
     preset: SchedulePreset | null;
@@ -21,9 +25,11 @@ const emit = defineEmits<{
   (event: 'cancel'): void;
 }>();
 
-// 内部状态：name / capability_name / inputText (JSON 字符串) / schedule_kind / preset / cron_expr
+// 内部状态：name / run_kind / capability_name 或 runbook_slug / inputText (JSON) / schedule_kind / preset / cron_expr
 const name = ref('');
+const runKind = ref<'read' | 'runbook'>('read');
 const capabilityName = ref('');
+const runbookSlug = ref('');
 const inputText = ref('');
 const scheduleKind = ref<ScheduleKind>('preset');
 const preset = ref<SchedulePreset | null>(null);
@@ -35,7 +41,9 @@ const cronValid = ref(false);
 function applyTask(task: ScheduledTask | null | undefined) {
   if (!task) {
     name.value = '';
+    runKind.value = 'read';
     capabilityName.value = '';
+    runbookSlug.value = '';
     inputText.value = '';
     scheduleKind.value = 'preset';
     preset.value = null;
@@ -43,7 +51,10 @@ function applyTask(task: ScheduledTask | null | undefined) {
     return;
   }
   name.value = task.name;
-  capabilityName.value = task.capability_name;
+  // 仅当 run_kind=runbook 时才切到 runbook 类型；缺省视为 read（向后兼容）。
+  runKind.value = task.run_kind === 'runbook' ? 'runbook' : 'read';
+  capabilityName.value = task.capability_name ?? '';
+  runbookSlug.value = task.runbook_slug ?? '';
   inputText.value = JSON.stringify(task.input ?? {}, null, 2);
   scheduleKind.value = task.schedule_kind;
   preset.value = task.preset;
@@ -75,10 +86,15 @@ function parseInput(text: string): Record<string, unknown> | null {
 
 const parsedInput = computed(() => parseInput(inputText.value));
 
-// 表单校验：name 非空 / capability 非空 / preset 模式 preset 非空 / cron 模式 cron_expr 合法 / input JSON 合法
+// 表单校验：name 非空 / (read: capability 非空 | runbook: slug 非空) / input JSON 合法 / 调度合法。
+// run_kind=runbook 但无可用模板时强制切回 read。
 const canSubmit = computed(() => {
   if (name.value.trim() === '') return false;
-  if (capabilityName.value === '') return false;
+  if (runKind.value === 'runbook') {
+    if (runbookSlug.value === '') return false;
+  } else if (capabilityName.value === '') {
+    return false;
+  }
   if (parsedInput.value === null) return false;
   if (scheduleKind.value === 'preset') {
     return preset.value !== null;
@@ -88,6 +104,16 @@ const canSubmit = computed(() => {
   }
   return false;
 });
+
+// run_kind=runbook 但没有可调度模板时，类型下拉禁用、提交也过不去。
+const hasSchedulableRunbooks = computed(() => (props.runbooks ?? []).length > 0);
+
+function onRunKindChange() {
+  // 切回 read 时清掉 runbook 选择，避免残留 slug 混入 read 任务。
+  if (runKind.value === 'read') {
+    runbookSlug.value = '';
+  }
+}
 
 function onPresetUpdate(value: SchedulePreset) {
   preset.value = value;
@@ -105,9 +131,24 @@ function onSubmit() {
   if (!canSubmit.value) return;
   // input 字段从 JSON 字符串解析；canSubmit 已保证 parsedInput 非 null
   const input = parsedInput.value ?? {};
+  if (runKind.value === 'runbook') {
+    emit('submit', {
+      name: name.value.trim(),
+      capability_name: '',
+      run_kind: 'runbook',
+      runbook_slug: runbookSlug.value,
+      input,
+      schedule_kind: scheduleKind.value,
+      preset: scheduleKind.value === 'preset' ? preset.value : null,
+      cron_expr: scheduleKind.value === 'cron' ? cronExpr.value : null,
+    });
+    return;
+  }
   emit('submit', {
     name: name.value.trim(),
     capability_name: capabilityName.value,
+    run_kind: 'read',
+    runbook_slug: null,
     input,
     schedule_kind: scheduleKind.value,
     preset: scheduleKind.value === 'preset' ? preset.value : null,
@@ -134,11 +175,30 @@ function onCancel() {
     </label>
 
     <label class="form-field">
+      <span class="form-label">任务类型</span>
+      <select data-test="scheduled-task-run-kind" v-model="runKind" class="form-select" :disabled="!hasSchedulableRunbooks" @change="onRunKindChange">
+        <option value="read">只读巡检</option>
+        <option value="runbook" :disabled="!hasSchedulableRunbooks">Runbook 自动执行</option>
+      </select>
+      <span v-if="!hasSchedulableRunbooks" class="form-hint">当前无可用 runbook 模板，仅支持只读巡检。</span>
+    </label>
+
+    <label v-if="runKind === 'read'" class="form-field">
       <span class="form-label">能力</span>
       <select data-test="scheduled-task-capability" v-model="capabilityName" class="form-select">
         <option value="">请选择能力</option>
         <option v-for="capability in capabilities" :key="capability.name" :value="capability.name">
           {{ capability.name }}
+        </option>
+      </select>
+    </label>
+
+    <label v-else class="form-field">
+      <span class="form-label">Runbook 模板</span>
+      <select data-test="scheduled-task-runbook" v-model="runbookSlug" class="form-select">
+        <option value="">请选择 runbook</option>
+        <option v-for="runbook in runbooks" :key="runbook.slug" :value="runbook.slug">
+          {{ runbook.name }}
         </option>
       </select>
     </label>
@@ -202,6 +262,11 @@ function onCancel() {
 
 .form-label {
   color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+}
+
+.form-hint {
+  color: var(--color-text-muted);
   font-size: var(--font-sm);
 }
 

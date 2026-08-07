@@ -2815,6 +2815,8 @@ describe('Capability Console', () => {
     expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
       name: 'minio 每日巡检',
       capability_name: 'minio.bucket.capacity.read',
+      run_kind: 'read',
+      runbook_slug: null,
       input: { environment: 'prod', cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'preset',
       preset: 'daily',
@@ -2949,5 +2951,58 @@ describe('Capability Console', () => {
     expect(patchCall).toBeDefined();
     const body = JSON.parse(String(patchCall?.[1]?.body));
     expect(body.enabled).toBe(false);
+  });
+
+  test('dashboard 统计卡片下钻到对应视图', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/v1/overview') {
+        return ok({
+          pending_plans: 1,
+          active_alerts: 2,
+          enabled_tasks: 3,
+          today_executions_succeeded: 5,
+          today_executions_failed: 1,
+        });
+      }
+      if (url.startsWith('/v1/action-plans?status=pending_confirmation')) {
+        return ok({ plans: [] });
+      }
+      return ok({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const wrapper = mountApp();
+    await flushPromises();
+
+    // 进入 dashboard
+    await wrapper.find('[data-test="nav-dashboard"]').trigger('click');
+    await flushPromises();
+    await vi.waitFor(() => {
+      if (!wrapper.find('[data-test="dashboard-entry"]').exists()) {
+        throw new Error('dashboard-entry not rendered');
+      }
+    }, { timeout: 3000, interval: 20 });
+    await flushPromises();
+
+    // 点「启用的定时巡检」→ 跳到 scheduled-tasks 视图
+    await wrapper.find('[data-test="stat-enabled-tasks"]').trigger('click');
+    await flushPromises();
+    await vi.waitFor(() => {
+      if (!wrapper.find('[data-test="scheduled-tasks-entry"]').exists()) {
+        throw new Error('scheduled-tasks-entry not rendered');
+      }
+    }, { timeout: 3000, interval: 20 });
+
+    // 回 dashboard 再点「活动告警」→ 跳到 incident 视图
+    await wrapper.find('[data-test="nav-dashboard"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-test="stat-active-alerts"]').trigger('click');
+    await flushPromises();
+    await vi.waitFor(() => {
+      if (!wrapper.find('[data-test="incident-entry"]').exists()) {
+        throw new Error('incident-entry not rendered');
+      }
+    }, { timeout: 3000, interval: 20 });
   });
 });
