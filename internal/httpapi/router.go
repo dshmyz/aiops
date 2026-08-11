@@ -556,12 +556,14 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Request) {
-	if r.auth == nil || r.capability == nil {
-		writeError(writer, http.StatusInternalServerError, "router is not configured")
-		return
-	}
 	user, request, ok := r.authenticate(writer, request)
 	if !ok {
+		return
+	}
+	if r.auth == nil || r.capability == nil {
+		// 能力管理未启用（COPILOT_CAPABILITIES_DIR 未配置）。这不是内部实现错误，
+		// 而是明确的功能未启用状态——用户可读的 503，而非误导性的 500 "not configured"。
+		writeError(writer, http.StatusServiceUnavailable, "capability management is not enabled")
 		return
 	}
 	if request.Method == http.MethodGet && request.URL.Path == "/v1/capabilities" {
@@ -775,7 +777,7 @@ func userHasAnyRole(user identity.CurrentUser, roles ...string) bool {
 func writeCapabilityError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, capabilities.ErrCapabilityRootNotConfigured):
-		writeError(writer, http.StatusInternalServerError, err.Error())
+		writeError(writer, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, capabilities.ErrCapabilityNotFound):
 		writeError(writer, http.StatusNotFound, err.Error())
 	case errors.Is(err, capabilities.ErrInvalidCapabilityName), errors.Is(err, capabilities.ErrTestRequiresReadGET), errors.Is(err, capabilities.ErrInvalidOpenAPIURL):
