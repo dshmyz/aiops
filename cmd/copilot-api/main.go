@@ -317,7 +317,7 @@ func main() {
 	diagService := diagnostics.NewService(readService, nil).WithCapabilityResolver(diagnostics.NewCapabilityResolver(loadedCapabilities))
 	assistantService = assistantService.WithDiagnostics(orchestrator.New(diagService, 3, nil))
 	notifier := buildNotifier()
-	options := routerOptions(repository, assistantService, planService, executionService, capabilityManagerFromEnv(capabilityRuntime), auditService)
+	options := routerOptions(repository, assistantService, planService, executionService, capabilityManagerFromEnv(capabilityAdapter, capabilityRuntime), auditService)
 	options = append(options, httpapi.WithConversations(assistantService))
 	options = append(options, httpapi.WithScheduledTasks(scheduledTaskService))
 	options = append(options, httpapi.WithInspectionReports(inspectionReportStore))
@@ -618,17 +618,14 @@ func assistantPlannerFromEnv(ctx context.Context, env map[string]string, aug ass
 	return assistant.NewActionAwarePlanner(capabilityPlanner, router), compactor, formatter, registry, mode + "+capabilities+actions", nil
 }
 
-func capabilityManagerFromEnv(runtime capabilities.PublishedCapabilityRuntime) httpapi.CapabilityManagementService {
+// capabilityManagerFromEnv 构造能力管理 Manager，复用 main 里已按
+// COPILOT_OPENAPI_INSECURE_SKIP_VERIFY 配置好的同一个 adapter（与能力执行共享），
+// 避免预览/导入与执行各自新建 HTTP client 导致证书开关分叉。
+func capabilityManagerFromEnv(adapter *capabilities.HTTPAdapter, runtime capabilities.PublishedCapabilityRuntime) httpapi.CapabilityManagementService {
 	dir := os.Getenv("COPILOT_CAPABILITIES_DIR")
 	if dir == "" {
 		return nil
 	}
-	// 能力管理的 adapter 也遵循 COPILOT_OPENAPI_INSECURE_SKIP_VERIFY 开关，这样
-	// 预览/导入 OpenAPI/Swagger 文档与能力执行统一跳过 TLS 证书校验（对接自签/内网
-	// HTTPS 后端）。执行 runtime 用的 capabilityAdapter 已在 main 里按同一开关构造。
-	adapter := capabilities.NewHTTPAdapterWithConfig(http.DefaultClient, capabilities.AdapterConfig{
-		OpenAPIInsecureSkipVerify: os.Getenv("COPILOT_OPENAPI_INSECURE_SKIP_VERIFY") == "1",
-	})
 	return capabilities.NewManagerWithRuntime(dir, adapter, runtime)
 }
 
