@@ -506,3 +506,142 @@ paths:
 		t.Fatalf("environment input = %+v, want required string", environment)
 	}
 }
+
+func TestImportOpenAPIRequestBodyForWriteOperation(t *testing.T) {
+	// 写操作（POST）参数放在 requestBody 的 JSON schema 里，导入器此前忽略
+	// requestBody 导致该能力缺失 body 参数（调用时"参数不够"）。此用例验证
+	// body 字段被并入 input_schema，且 required 正确。
+	body := []byte(`openapi: 3.0.0
+paths:
+  /api/kafka/clusters/{cluster}/topics/{topic}/retention:
+    post:
+      tags: [kafka]
+      summary: Set topic retention
+      parameters:
+        - name: cluster
+          in: path
+          required: true
+          schema: {type: string}
+        - name: topic
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [retention_hours]
+              properties:
+                retention_hours:
+                  type: integer
+                note:
+                  type: string
+`)
+
+	drafts, err := capabilities.ImportOpenAPI(body)
+	if err != nil {
+		t.Fatalf("ImportOpenAPI returned %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("draft count = %d, want 1", len(drafts))
+	}
+	// path 参数仍保留
+	for _, name := range []string{"cluster", "topic"} {
+		field, ok := drafts[0].InputSchema[name]
+		if !ok || field.Type != "string" || !field.Required {
+			t.Fatalf("%s input = %+v, want required string", name, field)
+		}
+	}
+	// requestBody 字段并入 input_schema
+	retention, ok := drafts[0].InputSchema["retention_hours"]
+	if !ok || retention.Type != "integer" || !retention.Required {
+		t.Fatalf("retention_hours input = %+v, want required integer from requestBody", retention)
+	}
+	// 非必填 body 字段也应导入为可选
+	note, ok := drafts[0].InputSchema["note"]
+	if !ok || note.Type != "string" || note.Required {
+		t.Fatalf("note input = %+v, want optional string from requestBody", note)
+	}
+}
+
+func TestImportOpenAPIRequestBodyCarriesDescriptionAndEnum(t *testing.T) {
+	body := []byte(`openapi: 3.0.0
+paths:
+  /api/kafka/topics/{topic}/retention:
+    post:
+      tags: [kafka]
+      summary: Set topic retention
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          description: 目标 topic 名
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  description: 覆盖模式
+                  enum: [append, replace]
+`)
+
+	drafts, err := capabilities.ImportOpenAPI(body)
+	if err != nil {
+		t.Fatalf("ImportOpenAPI returned %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("draft count = %d, want 1", len(drafts))
+	}
+	topic := drafts[0].InputSchema["topic"]
+	if topic.Description != "目标 topic 名" {
+		t.Fatalf("topic description = %q, want 目标 topic 名", topic.Description)
+	}
+	mode := drafts[0].InputSchema["mode"]
+	if mode.Description != "覆盖模式" {
+		t.Fatalf("mode description = %q, want 覆盖模式", mode.Description)
+	}
+	if len(mode.Enum) != 2 || mode.Enum[0] != "append" || mode.Enum[1] != "replace" {
+		t.Fatalf("mode enum = %v, want [append replace]", mode.Enum)
+	}
+	if !mode.Required {
+		t.Fatalf("mode input = %+v, want required", mode)
+	}
+}
+
+func TestImportOpenAPIRequestBodySkippedForReadOperation(t *testing.T) {
+	// 读操作（GET）无 body，即使文档带空 requestBody 也不应把字段加进 input_schema。
+	body := []byte(`openapi: 3.0.0
+paths:
+  /api/minio/buckets/{bucket}/capacity:
+    get:
+      tags: [minio]
+      summary: Bucket capacity
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema: {type: string}
+`)
+
+	drafts, err := capabilities.ImportOpenAPI(body)
+	if err != nil {
+		t.Fatalf("ImportOpenAPI returned %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("draft count = %d, want 1", len(drafts))
+	}
+	if field, ok := drafts[0].InputSchema["bucket"]; !ok || !field.Required {
+		t.Fatalf("bucket input = %+v, want required string", field)
+	}
+	if len(drafts[0].InputSchema) != 2 { // environment + bucket，无 body 字段
+		t.Fatalf("input_schema keys = %d, want 2 (environment + path var only)", len(drafts[0].InputSchema))
+	}
+}

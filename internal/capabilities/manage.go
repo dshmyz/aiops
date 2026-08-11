@@ -97,9 +97,10 @@ type QuickPublishRequest struct {
 }
 
 type Manager struct {
-	root    string
-	adapter *HTTPAdapter
-	runtime PublishedCapabilityRuntime
+	root     string
+	adapter  *HTTPAdapter
+	runtime  PublishedCapabilityRuntime
+	enricher ImportEnricher
 }
 
 func NewManager(root string, adapter *HTTPAdapter) *Manager {
@@ -110,7 +111,28 @@ func NewManagerWithRuntime(root string, adapter *HTTPAdapter, runtime PublishedC
 	if adapter == nil {
 		adapter = NewHTTPAdapter(nil)
 	}
-	return &Manager{root: strings.TrimSpace(root), adapter: adapter, runtime: runtime}
+	return &Manager{root: strings.TrimSpace(root), adapter: adapter, runtime: runtime, enricher: nopEnricher{}}
+}
+
+// WithEnricher 设置导入草稿的富化器（如 LLM 补参数说明）。传 nil 恢复为不做加工。
+func (m *Manager) WithEnricher(enricher ImportEnricher) *Manager {
+	if enricher == nil {
+		enricher = nopEnricher{}
+	}
+	m.enricher = enricher
+	return m
+}
+
+func (m *Manager) enrichDrafts(ctx context.Context, drafts []Capability) []Capability {
+	enriched, err := m.enricher.Enrich(ctx, drafts)
+	if err != nil {
+		// 富化失败不回退原始草稿，不让一次导入因 LLM 抖机灵而中断。
+		return drafts
+	}
+	if enriched == nil {
+		return drafts
+	}
+	return enriched
 }
 
 func (m *Manager) List(_ context.Context) ([]ManagedCapability, error) {
@@ -241,6 +263,16 @@ func (m *Manager) PreviewOpenAPIFromURL(ctx context.Context, request OpenAPIURLP
 	if err != nil {
 		return ImportPreview{}, err
 	}
+	// LLM 富化候选草稿（补参数说明/示例/枚举、优化摘要），让评审阶段就看到
+	// 更清晰的输入元数据。全程容错：失败保留原始规则草稿。
+	enriched := make([]Capability, 0, len(preview.Candidates))
+	for _, candidate := range preview.Candidates {
+		enriched = append(enriched, candidate.Capability)
+	}
+	enriched = m.enrichDrafts(ctx, enriched)
+	for i := range preview.Candidates {
+		preview.Candidates[i].Capability = enriched[i]
+	}
 	preview.Source.OpenAPIURL = normalizedURL
 	preview.Source.BackendBaseURL = strings.TrimSpace(request.BackendBaseURL)
 	return preview, nil
@@ -336,6 +368,7 @@ func (m *Manager) ImportOpenAPIFromURL(ctx context.Context, request OpenAPIURLIm
 	if err != nil {
 		return nil, err
 	}
+	drafts = m.enrichDrafts(ctx, drafts)
 	imported := make([]ManagedCapability, 0, len(drafts))
 	for _, draft := range drafts {
 		draft.Backend.BaseURL = strings.TrimSpace(request.BackendBaseURL)

@@ -763,3 +763,78 @@ func TestManagerQuickPublishRejectsNameConflict(t *testing.T) {
 		t.Fatalf("error = %v, want ErrCapabilityNameConflict", err)
 	}
 }
+
+// staticEnricher 是把所有草稿字段加上中文说明/示例的测试富化器，验证 Manager 装配
+// WithEnricher 后预览候选被富化。
+type staticEnricher struct{}
+
+func (staticEnricher) Enrich(_ context.Context, drafts []capabilities.Capability) ([]capabilities.Capability, error) {
+	out := make([]capabilities.Capability, len(drafts))
+	for i, d := range drafts {
+		sc := map[string]capabilities.InputField{}
+		for name, f := range d.InputSchema {
+			f.Description = "参数 " + name
+			f.Examples = []string{"ex-" + name}
+			sc[name] = f
+		}
+		d.InputSchema = sc
+		out[i] = d
+	}
+	return out, nil
+}
+
+func TestManagerPreviewEnrichCandidates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`openapi: 3.0.0
+paths:
+  /api/kafka/{cluster}/topics/{topic}/retention:
+    post:
+      operationId: setTopicRetention
+      tags: [kafka]
+      summary: Set topic retention
+      parameters:
+        - name: cluster
+          in: path
+          required: true
+          schema: {type: string}
+        - name: topic
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [retention_hours]
+              properties:
+                retention_hours:
+                  type: integer
+`))
+	}))
+	defer server.Close()
+	manager := capabilities.NewManager(dir, capabilities.NewHTTPAdapter(server.Client())).
+		WithEnricher(staticEnricher{})
+
+	preview, err := manager.PreviewOpenAPIFromURL(context.Background(), capabilities.OpenAPIURLPreviewRequest{
+		OpenAPIURL:     server.URL,
+		BackendBaseURL: "https://middleware.example.com",
+	})
+	if err != nil {
+		t.Fatalf("PreviewOpenAPIFromURL returned %v", err)
+	}
+	if len(preview.Candidates) != 1 {
+		t.Fatalf("candidates = %d, want 1", len(preview.Candidates))
+	}
+	// 富化器把每个字段加上中文说明与示例，验证装配生效。
+	cap := preview.Candidates[0].Capability
+	if cap.InputSchema["cluster"].Description != "参数 cluster" || cap.InputSchema["cluster"].Examples[0] != "ex-cluster" {
+		t.Fatalf("cluster input not enriched: %+v", cap.InputSchema["cluster"])
+	}
+	if cap.InputSchema["retention_hours"].Description != "参数 retention_hours" {
+		t.Fatalf("retention_hours input not enriched: %+v", cap.InputSchema["retention_hours"])
+	}
+}

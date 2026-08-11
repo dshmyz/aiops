@@ -75,6 +75,15 @@ func buildSchemaDescription(inputSchema map[string]tools.DynamicInputField) stri
 		if field.Required {
 			sb.WriteString(" [必填]")
 		}
+		if field.Description != "" {
+			sb.WriteString(fmt.Sprintf(" 说明: %s", field.Description))
+		}
+		if len(field.Enum) > 0 {
+			sb.WriteString(fmt.Sprintf(" 可取值: %s", strings.Join(field.Enum, "/")))
+		}
+		if len(field.Examples) > 0 {
+			sb.WriteString(fmt.Sprintf(" 示例: %s", strings.Join(field.Examples, "/")))
+		}
 		sb.WriteString("\n")
 	}
 	return sb.String()

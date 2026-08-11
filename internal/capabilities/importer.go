@@ -19,17 +19,37 @@ type openAPIDoc struct {
 }
 
 type openAPIOperation struct {
-	OperationID string             `yaml:"operationId"`
-	Tags        []string           `yaml:"tags"`
-	Summary     string             `yaml:"summary"`
-	Parameters  []openAPIParameter `yaml:"parameters"`
+	OperationID string              `yaml:"operationId"`
+	Tags        []string            `yaml:"tags"`
+	Summary     string              `yaml:"summary"`
+	Parameters  []openAPIParameter  `yaml:"parameters"`
+	RequestBody *openAPIRequestBody `yaml:"requestBody"`
 }
 
 type openAPIParameter struct {
-	Name     string        `yaml:"name"`
-	In       string        `yaml:"in"`
-	Required bool          `yaml:"required"`
-	Schema   openAPISchema `yaml:"schema"`
+	Name        string        `yaml:"name"`
+	In          string        `yaml:"in"`
+	Required    bool          `yaml:"required"`
+	Description string        `yaml:"description"`
+	Schema      openAPISchema `yaml:"schema"`
+}
+
+// openAPIRequestBody 是 OpenAPI requestBody 的解析目标。写操作（POST/PUT/PATCH）
+// 的参数通常放在这里，而不是 parameters 列表；此前导入器忽略 requestBody 导致
+// 从 Swagger 导入的写能力缺失 body 参数（表现为调用时"参数不够"）。
+type openAPIRequestBody struct {
+	Required bool                        `yaml:"required"`
+	Content  map[string]openAPIMediaType `yaml:"content"`
+}
+
+type openAPIMediaType struct {
+	Schema openAPIObjectSchema `yaml:"schema"`
+}
+
+type openAPIObjectSchema struct {
+	Type       string                   `yaml:"type"`
+	Required   []string                 `yaml:"required"`
+	Properties map[string]openAPISchema `yaml:"properties"`
 }
 
 type importedOpenAPIOperation struct {
@@ -40,7 +60,9 @@ type importedOpenAPIOperation struct {
 }
 
 type openAPISchema struct {
-	Type string `yaml:"type"`
+	Type        string   `yaml:"type"`
+	Description string   `yaml:"description"`
+	Enum        []string `yaml:"enum"`
 }
 
 func ImportOpenAPI(body []byte) ([]Capability, error) {
@@ -164,6 +186,15 @@ func openAPIParameterKey(parameter openAPIParameter) string {
 	return parameter.Name + "\x00" + parameter.In
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func validateDraftName(name string) error {
 	if name == "." || name == ".." || strings.ContainsAny(name, `/\\`) {
 		return fmt.Errorf("invalid draft name %q: path separators and traversal segments are not allowed", name)
@@ -191,7 +222,7 @@ func inferCapability(method, path string, operation openAPIOperation) Capability
 		}
 		switch parameter.In {
 		case "path":
-			input[parameter.Name] = InputField{Type: normalizeSchemaType(fieldType), Required: parameter.Required}
+			input[parameter.Name] = InputField{Type: normalizeSchemaType(fieldType), Required: parameter.Required, Description: firstNonEmpty(parameter.Description, parameter.Schema.Description), Enum: parameter.Schema.Enum}
 		case "query":
 			// Query parameters are only imported for read (GET)
 			// operations because write operations send a JSON body,
@@ -199,7 +230,7 @@ func inferCapability(method, path string, operation openAPIOperation) Capability
 			if toolOperation != tools.Read {
 				continue
 			}
-			input[parameter.Name] = InputField{Type: normalizeSchemaType(fieldType), Required: parameter.Required, In: "query"}
+			input[parameter.Name] = InputField{Type: normalizeSchemaType(fieldType), Required: parameter.Required, In: "query", Description: firstNonEmpty(parameter.Description, parameter.Schema.Description), Enum: parameter.Schema.Enum}
 		case "header":
 			// Header parameters are not imported: the HTTPAdapter does
 			// not set custom headers from input_schema, and allowing
@@ -208,6 +239,38 @@ func inferCapability(method, path string, operation openAPIOperation) Capability
 		default:
 			// Unknown parameter location; skip.
 			continue
+		}
+	}
+	// requestBody 参数（写操作发 JSON body 时，真正的字段在 body schema 里）。
+	// 只对非只读操作导入 body 字段：读操作（GET）无 body，且 query 已覆盖其参数。
+	if toolOperation != tools.Read && operation.RequestBody != nil {
+		for _, media := range operation.RequestBody.Content {
+			schema := media.Schema
+			if schema.Type != "object" {
+				continue
+			}
+			required := make(map[string]bool, len(schema.Required))
+			for _, name := range schema.Required {
+				required[name] = true
+			}
+			for name, fieldSchema := range schema.Properties {
+				if strings.EqualFold(name, "environment") {
+					continue
+				}
+				if _, exists := input[name]; exists {
+					continue
+				}
+				fieldType := fieldSchema.Type
+				if fieldType == "" {
+					fieldType = "string"
+				}
+				input[name] = InputField{
+					Type:        normalizeSchemaType(fieldType),
+					Required:    required[name],
+					Description: fieldSchema.Description,
+					Enum:        fieldSchema.Enum,
+				}
+			}
 		}
 	}
 	capability := Capability{

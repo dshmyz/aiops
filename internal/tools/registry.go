@@ -138,6 +138,10 @@ type DynamicInputField struct {
 	Required bool
 	Min      *float64
 	Max      *float64
+	// Description/Examples/Enum 供 LLM 参数提取与前端表单使用，帮助理解字段含义。
+	Description string
+	Examples    []string
+	Enum        []string
 }
 
 func init() {

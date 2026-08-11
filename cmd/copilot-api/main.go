@@ -317,7 +317,7 @@ func main() {
 	diagService := diagnostics.NewService(readService, nil).WithCapabilityResolver(diagnostics.NewCapabilityResolver(loadedCapabilities))
 	assistantService = assistantService.WithDiagnostics(orchestrator.New(diagService, 3, nil))
 	notifier := buildNotifier()
-	options := routerOptions(repository, assistantService, planService, executionService, capabilityManagerFromEnv(capabilityAdapter, capabilityRuntime), auditService)
+	options := routerOptions(repository, assistantService, planService, executionService, capabilityManagerFromEnv(capabilityAdapter, capabilityRuntime, importEnricher(planner)), auditService)
 	options = append(options, httpapi.WithConversations(assistantService))
 	options = append(options, httpapi.WithScheduledTasks(scheduledTaskService))
 	options = append(options, httpapi.WithInspectionReports(inspectionReportStore))
@@ -618,15 +618,30 @@ func assistantPlannerFromEnv(ctx context.Context, env map[string]string, aug ass
 	return assistant.NewActionAwarePlanner(capabilityPlanner, router), compactor, formatter, registry, mode + "+capabilities+actions", nil
 }
 
+// importEnricher 构造能力导入的 LLM 富化器。仅当 planner 是 eino（有 chat model）
+// 时启用；否则返回 nil（导入走纯规则，不富化）。富化全程容错，不阻塞导入。
+func importEnricher(planner assistant.Planner) capabilities.ImportEnricher {
+	ep, ok := planner.(*assistant.EinoPlanner)
+	if !ok || ep == nil || ep.ChatModel() == nil {
+		return nil
+	}
+	return capabilities.NewLLMImportEnricher(assistant.NewChatCompleter(ep.ChatModel()))
+}
+
 // capabilityManagerFromEnv 构造能力管理 Manager，复用 main 里已按
 // COPILOT_OPENAPI_INSECURE_SKIP_VERIFY 配置好的同一个 adapter（与能力执行共享），
-// 避免预览/导入与执行各自新建 HTTP client 导致证书开关分叉。
-func capabilityManagerFromEnv(adapter *capabilities.HTTPAdapter, runtime capabilities.PublishedCapabilityRuntime) httpapi.CapabilityManagementService {
+// 避免预览/导入与执行各自新建 HTTP client 导致证书开关分叉。可选的 importEnricher
+// 在导入阶段用 LLM 补参数说明/示例/枚举（为 nil 则跳过富化）。
+func capabilityManagerFromEnv(adapter *capabilities.HTTPAdapter, runtime capabilities.PublishedCapabilityRuntime, enricher capabilities.ImportEnricher) httpapi.CapabilityManagementService {
 	dir := os.Getenv("COPILOT_CAPABILITIES_DIR")
 	if dir == "" {
 		return nil
 	}
-	return capabilities.NewManagerWithRuntime(dir, adapter, runtime)
+	manager := capabilities.NewManagerWithRuntime(dir, adapter, runtime)
+	if enricher != nil {
+		manager = manager.WithEnricher(enricher)
+	}
+	return manager
 }
 
 func routerOptions(repository httpapi.ActionPlanQueryService, assistantService httpapi.AssistantService, planService httpapi.PlanConfirmationService, executionService httpapi.ExecutionService, capabilityService httpapi.CapabilityManagementService, auditService httpapi.AuditService) []httpapi.Option {

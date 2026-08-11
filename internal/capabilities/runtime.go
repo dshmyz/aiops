@@ -53,10 +53,13 @@ func RegisterPublishedCapability(capability Capability) error {
 	schema := make(map[string]tools.DynamicInputField, len(capability.InputSchema))
 	for name, field := range capability.InputSchema {
 		schema[name] = tools.DynamicInputField{
-			Type:     field.Type,
-			Required: field.Required,
-			Min:      field.Min,
-			Max:      field.Max,
+			Type:        field.Type,
+			Required:    field.Required,
+			Min:         field.Min,
+			Max:         field.Max,
+			Description: field.Description,
+			Examples:    field.Examples,
+			Enum:        field.Enum,
 		}
 	}
 	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{Tool: tool, InputSchema: schema}}); err != nil {

@@ -86,6 +86,12 @@ type InputField struct {
 	In       string   `yaml:"in,omitempty" json:"in,omitempty"`
 	Min      *float64 `yaml:"min,omitempty" json:"min,omitempty"`
 	Max      *float64 `yaml:"max,omitempty" json:"max,omitempty"`
+	// Description 是人（及 LLM）可读的字段说明，帮助判断该参数含义与填什么。
+	// Examples 提供可选示例值。Enum 声明该参数的合法取值（UI 渲染为下拉，LLM
+	// 据此收敛取值）。
+	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Examples    []string `yaml:"examples,omitempty" json:"examples,omitempty"`
+	Enum        []string `yaml:"enum,omitempty" json:"enum,omitempty"`
 }
 
 type OutputSpec struct {

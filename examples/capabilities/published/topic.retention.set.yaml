@@ -15,14 +15,21 @@ input_schema:
     environment:
         type: string
         required: true
+        description: 目标环境
+        enum: [prod, staging, dev]
+        examples: [prod]
     topic:
         type: string
         required: true
+        description: 要调整保留期的 Kafka topic 名
+        examples: [orders, payments]
     retention_hours:
         type: integer
         required: true
         min: 1
         max: 8760
+        description: 保留时长（小时）
+        examples: [72, 168]
 output:
     kind: confirmation
     severity_path: ""
