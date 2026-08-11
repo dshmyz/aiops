@@ -623,7 +623,13 @@ func capabilityManagerFromEnv(runtime capabilities.PublishedCapabilityRuntime) h
 	if dir == "" {
 		return nil
 	}
-	return capabilities.NewManagerWithRuntime(dir, capabilities.NewHTTPAdapter(http.DefaultClient), runtime)
+	// 能力管理的 adapter 也遵循 COPILOT_OPENAPI_INSECURE_SKIP_VERIFY 开关，这样
+	// 预览/导入 OpenAPI/Swagger 文档与能力执行统一跳过 TLS 证书校验（对接自签/内网
+	// HTTPS 后端）。执行 runtime 用的 capabilityAdapter 已在 main 里按同一开关构造。
+	adapter := capabilities.NewHTTPAdapterWithConfig(http.DefaultClient, capabilities.AdapterConfig{
+		OpenAPIInsecureSkipVerify: os.Getenv("COPILOT_OPENAPI_INSECURE_SKIP_VERIFY") == "1",
+	})
+	return capabilities.NewManagerWithRuntime(dir, adapter, runtime)
 }
 
 func routerOptions(repository httpapi.ActionPlanQueryService, assistantService httpapi.AssistantService, planService httpapi.PlanConfirmationService, executionService httpapi.ExecutionService, capabilityService httpapi.CapabilityManagementService, auditService httpapi.AuditService) []httpapi.Option {
