@@ -7,14 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -97,7 +93,7 @@ type QuickPublishRequest struct {
 }
 
 type Manager struct {
-	root     string
+	store    CapabilityStore
 	adapter  *HTTPAdapter
 	runtime  PublishedCapabilityRuntime
 	enricher ImportEnricher
@@ -111,7 +107,14 @@ func NewManagerWithRuntime(root string, adapter *HTTPAdapter, runtime PublishedC
 	if adapter == nil {
 		adapter = NewHTTPAdapter(nil)
 	}
-	return &Manager{root: strings.TrimSpace(root), adapter: adapter, runtime: runtime, enricher: nopEnricher{}}
+	return &Manager{store: NewFileCapabilityStore(root), adapter: adapter, runtime: runtime, enricher: nopEnricher{}}
+}
+
+// WithStore 允许外部注入自定义 CapabilityStore（如 SQLCapabilityStore），覆盖默认的
+// 文件实现。使用方式：manager.WithStore(NewSQLCapabilityStore(db))。
+func (m *Manager) WithStore(store CapabilityStore) *Manager {
+	m.store = store
+	return m
 }
 
 // WithEnricher 设置导入草稿的富化器（如 LLM 补参数说明）。传 nil 恢复为不做加工。
@@ -135,68 +138,16 @@ func (m *Manager) enrichDrafts(ctx context.Context, drafts []Capability) []Capab
 	return enriched
 }
 
-func (m *Manager) List(_ context.Context) ([]ManagedCapability, error) {
-	if err := m.configured(); err != nil {
-		return nil, err
-	}
-	items := []ManagedCapability{}
-	for _, source := range []string{SourceDiscovered, SourcePublished} {
-		dir := filepath.Join(m.root, source)
-		paths, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
-		if err != nil {
-			return nil, err
-		}
-		sort.Strings(paths)
-		for _, path := range paths {
-			item, err := m.readPath(path, source)
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, item)
-		}
-	}
-	sort.SliceStable(items, func(left, right int) bool {
-		if items[left].Source != items[right].Source {
-			return sourceRank(items[left].Source) < sourceRank(items[right].Source)
-		}
-		return items[left].Name < items[right].Name
-	})
-	return items, nil
+func (m *Manager) List(ctx context.Context) ([]ManagedCapability, error) {
+	return m.store.ListAll(ctx)
 }
 
-func (m *Manager) Get(_ context.Context, name string) (ManagedCapability, error) {
-	if err := m.configured(); err != nil {
-		return ManagedCapability{}, err
-	}
-	for _, source := range []string{SourceDiscovered, SourcePublished} {
-		path, err := m.pathFor(source, name)
-		if err != nil {
-			return ManagedCapability{}, err
-		}
-		if _, err := os.Stat(path); err == nil {
-			return m.readPath(path, source)
-		} else if !os.IsNotExist(err) {
-			return ManagedCapability{}, err
-		}
-	}
-	return ManagedCapability{}, ErrCapabilityNotFound
+func (m *Manager) Get(ctx context.Context, name string) (ManagedCapability, error) {
+	return m.store.Get(ctx, name)
 }
 
-func (m *Manager) SaveDraft(_ context.Context, capability Capability) (ManagedCapability, error) {
-	if err := m.configured(); err != nil {
-		return ManagedCapability{}, err
-	}
-	if err := validateManagedCapabilityName(capability.Name); err != nil {
-		return ManagedCapability{}, err
-	}
-	path, err := m.pathFor(SourceDiscovered, capability.Name)
-	if err != nil {
-		return ManagedCapability{}, err
-	}
-	if err := writeCapabilityFile(path, capability); err != nil {
-		return ManagedCapability{}, err
-	}
-	return m.readPath(path, SourceDiscovered)
+func (m *Manager) SaveDraft(ctx context.Context, capability Capability) (ManagedCapability, error) {
+	return m.store.SaveDraft(ctx, capability)
 }
 
 func (m *Manager) ValidateCapability(capability Capability) ValidationResult {
@@ -245,7 +196,7 @@ func (m *Manager) fetchOpenAPIFromURL(ctx context.Context, openAPIURL string) ([
 }
 
 func (m *Manager) PreviewOpenAPIFromURL(ctx context.Context, request OpenAPIURLPreviewRequest) (ImportPreview, error) {
-	if err := m.configured(); err != nil {
+	if err := m.store.Configured(); err != nil {
 		return ImportPreview{}, err
 	}
 	if err := validatePublishedBaseURL(request.BackendBaseURL); err != nil {
@@ -279,7 +230,7 @@ func (m *Manager) PreviewOpenAPIFromURL(ctx context.Context, request OpenAPIURLP
 }
 
 func (m *Manager) CommitOpenAPIFromURL(ctx context.Context, request OpenAPIURLCommitRequest) (OpenAPIURLCommitResult, error) {
-	if err := m.configured(); err != nil {
+	if err := m.store.Configured(); err != nil {
 		return OpenAPIURLCommitResult{}, err
 	}
 	if err := validatePublishedBaseURL(request.BackendBaseURL); err != nil {
@@ -354,7 +305,7 @@ func (m *Manager) CommitOpenAPIFromURL(ctx context.Context, request OpenAPIURLCo
 }
 
 func (m *Manager) ImportOpenAPIFromURL(ctx context.Context, request OpenAPIURLImportRequest) ([]ManagedCapability, error) {
-	if err := m.configured(); err != nil {
+	if err := m.store.Configured(); err != nil {
 		return nil, err
 	}
 	if err := validatePublishedBaseURL(request.BackendBaseURL); err != nil {
@@ -381,65 +332,43 @@ func (m *Manager) ImportOpenAPIFromURL(ctx context.Context, request OpenAPIURLIm
 	return imported, nil
 }
 
-func (m *Manager) Publish(_ context.Context, name string) (ManagedCapability, error) {
-	if err := m.configured(); err != nil {
-		return ManagedCapability{}, err
+func (m *Manager) Publish(ctx context.Context, name string) (ManagedCapability, error) {
+	if _, exists := tools.Lookup(name); exists {
+		return ManagedCapability{}, fmt.Errorf("%w: %q conflicts with an existing tool", ErrCapabilityNameConflict, name)
 	}
-	sourcePath, err := m.pathFor(SourceDiscovered, name)
+	published, err := m.store.MoveDraftToPublished(ctx, name)
 	if err != nil {
 		return ManagedCapability{}, err
 	}
-	item, err := m.readPath(sourcePath, SourceDiscovered)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return ManagedCapability{}, ErrCapabilityNotFound
-		}
-		return ManagedCapability{}, err
-	}
-	capability := item.Capability
-	capability.Status = StatusPublished
-	return m.publishCapability(capability, sourcePath)
+	return m.registerPublished(published)
 }
 
-func (m *Manager) QuickPublish(_ context.Context, request QuickPublishRequest) (ManagedCapability, error) {
-	if err := m.configured(); err != nil {
-		return ManagedCapability{}, err
-	}
+func (m *Manager) QuickPublish(ctx context.Context, request QuickPublishRequest) (ManagedCapability, error) {
 	if err := validateQuickPublishRequest(request); err != nil {
 		return ManagedCapability{}, err
 	}
 	capability := buildQuickPublishCapability(request)
-	return m.publishCapability(capability, "")
-}
-
-func (m *Manager) publishCapability(capability Capability, removeSourcePath string) (ManagedCapability, error) {
 	if _, exists := tools.Lookup(capability.Name); exists {
 		return ManagedCapability{}, fmt.Errorf("%w: %q conflicts with an existing tool", ErrCapabilityNameConflict, capability.Name)
+	}
+	if exists, err := m.store.Has(ctx, SourcePublished, capability.Name); err != nil {
+		return ManagedCapability{}, err
+	} else if exists {
+		return ManagedCapability{}, fmt.Errorf("%w: %q is already published, unpublish the old version first", ErrCapabilityNameConflict, capability.Name)
 	}
 	if err := Validate(capability); err != nil {
 		return ManagedCapability{}, err
 	}
-	targetPath, err := m.pathFor(SourcePublished, capability.Name)
+	published, err := m.store.SavePublished(ctx, capability)
 	if err != nil {
 		return ManagedCapability{}, err
 	}
-	if _, err := os.Stat(targetPath); err == nil {
-		return ManagedCapability{}, fmt.Errorf("%w: %q is already published, unpublish the old version first", ErrCapabilityNameConflict, capability.Name)
-	} else if !os.IsNotExist(err) {
-		return ManagedCapability{}, err
-	}
-	if err := writeCapabilityFile(targetPath, capability); err != nil {
-		return ManagedCapability{}, err
-	}
-	if removeSourcePath != "" {
-		if err := os.Remove(removeSourcePath); err != nil {
-			return ManagedCapability{}, err
-		}
-	}
-	published, err := m.readPath(targetPath, SourcePublished)
-	if err != nil {
-		return ManagedCapability{}, err
-	}
+	return m.registerPublished(published)
+}
+
+// registerPublished 在 publish/quick-publish 后把能力注册到运行时工具表，使执行路径
+// 可以立即看到新能力。
+func (m *Manager) registerPublished(published ManagedCapability) (ManagedCapability, error) {
 	if m.runtime != nil {
 		if err := RegisterPublishedCapability(published.Capability); err != nil {
 			return ManagedCapability{}, err
@@ -449,6 +378,10 @@ func (m *Manager) publishCapability(capability Capability, removeSourcePath stri
 		}
 	}
 	return published, nil
+}
+
+func (m *Manager) Unpublish(ctx context.Context, name string) (ManagedCapability, error) {
+	return m.store.MovePublishedToDraft(ctx, name)
 }
 
 func validateQuickPublishRequest(request QuickPublishRequest) error {
@@ -513,117 +446,6 @@ func buildQuickPublishCapability(request QuickPublishRequest) Capability {
 	}
 }
 
-func (m *Manager) Unpublish(_ context.Context, name string) (ManagedCapability, error) {
-	if err := m.configured(); err != nil {
-		return ManagedCapability{}, err
-	}
-	sourcePath, err := m.pathFor(SourcePublished, name)
-	if err != nil {
-		return ManagedCapability{}, err
-	}
-	item, err := m.readPath(sourcePath, SourcePublished)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return ManagedCapability{}, ErrCapabilityNotFound
-		}
-		return ManagedCapability{}, err
-	}
-	capability := item.Capability
-	capability.Status = StatusNeedsReview
-	targetPath, err := m.pathFor(SourceDiscovered, capability.Name)
-	if err != nil {
-		return ManagedCapability{}, err
-	}
-	if _, err := os.Stat(targetPath); err == nil {
-		return ManagedCapability{}, fmt.Errorf("%w: %q already exists as a draft, remove the draft first", ErrCapabilityNameConflict, capability.Name)
-	} else if !os.IsNotExist(err) {
-		return ManagedCapability{}, err
-	}
-	if err := writeCapabilityFile(targetPath, capability); err != nil {
-		return ManagedCapability{}, err
-	}
-	if err := os.Remove(sourcePath); err != nil {
-		return ManagedCapability{}, err
-	}
-	return m.readPath(targetPath, SourceDiscovered)
-}
-
-func (m *Manager) configured() error {
-	if m == nil || strings.TrimSpace(m.root) == "" {
-		return ErrCapabilityRootNotConfigured
-	}
-	return nil
-}
-
-func (m *Manager) pathFor(source, name string) (string, error) {
-	if err := validateManagedCapabilityName(name); err != nil {
-		return "", err
-	}
-	if source != SourceDiscovered && source != SourcePublished {
-		return "", fmt.Errorf("unknown capability source %q", source)
-	}
-	return filepath.Join(m.root, source, name+".yaml"), nil
-}
-
-func (m *Manager) readPath(path, source string) (ManagedCapability, error) {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return ManagedCapability{}, err
-	}
-	var capability Capability
-	if err := yaml.Unmarshal(body, &capability); err != nil {
-		return ManagedCapability{}, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return ManagedCapability{}, err
-	}
-	return ManagedCapability{
-		Capability: capability,
-		Source:     source,
-		Path:       path,
-		ModifiedAt: info.ModTime(),
-		Validation: m.ValidateCapability(capability),
-	}, nil
-}
-
-func validateManagedCapabilityName(name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
-		return ErrInvalidCapabilityName
-	}
-	return nil
-}
-
-func writeCapabilityFile(path string, capability Capability) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	body, err := yaml.Marshal(capability)
-	if err != nil {
-		return err
-	}
-	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tempName := temp.Name()
-	if _, err := temp.Write(body); err != nil {
-		_ = temp.Close()
-		_ = os.Remove(tempName)
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		_ = os.Remove(tempName)
-		return err
-	}
-	if err := os.Rename(tempName, path); err != nil {
-		_ = os.Remove(tempName)
-		return err
-	}
-	return nil
-}
-
 func validationFields(err error) map[string]string {
 	if err == nil {
 		return nil
@@ -645,15 +467,4 @@ func validationFields(err error) map[string]string {
 		fields["capability"] = message
 	}
 	return fields
-}
-
-func sourceRank(source string) int {
-	switch source {
-	case SourceDiscovered:
-		return 0
-	case SourcePublished:
-		return 1
-	default:
-		return 2
-	}
 }
