@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue';
 import type { ComputedRef, Ref, WritableComputedRef } from 'vue';
+import { ElMessage } from 'element-plus';
 import {
   commitOpenAPIURLImport,
   listCapabilities,
@@ -482,8 +483,15 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     try {
       validation.value = await validateCapability(toCapability(selected.value));
       selected.value.validation = validation.value;
+      if (validation.value.valid) {
+        ElMessage.success('校验通过');
+      } else {
+        ElMessage.error(validation.value.error ?? '校验失败');
+      }
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '校验 Capability 失败';
+      const msg = err instanceof Error ? err.message : '校验 Capability 失败';
+      error.value = msg;
+      ElMessage.error(msg);
     }
   }
 
@@ -493,7 +501,9 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
       const input = JSON.parse(testInputText.value) as Record<string, unknown>;
       preview.value = await testCapability(toCapability(selected.value), input);
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '测试 Capability 失败';
+      const msg = err instanceof Error ? err.message : '测试 Capability 失败';
+      error.value = msg;
+      ElMessage.error(msg);
     }
   }
 
