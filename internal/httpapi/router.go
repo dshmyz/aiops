@@ -561,9 +561,14 @@ func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	if r.auth == nil || r.capability == nil {
-		// 能力管理未启用（COPILOT_CAPABILITIES_DIR 未配置）。这不是内部实现错误，
-		// 而是明确的功能未启用状态——用户可读的 503，而非误导性的 500 "not configured"。
-		writeError(writer, http.StatusServiceUnavailable, "capability management is not enabled")
+		// 能力管理未启用（无 DB 且 COPILOT_CAPABILITIES_DIR 未配置）。
+		// GET 返回空列表 200（UI 可正常加载管理页面）；
+		// 写操作返回 503（无存储后端，无法保存/发布）。
+		if request.Method == http.MethodGet && request.URL.Path == "/v1/capabilities" {
+			writeJSONWithLimit(writer, map[string]any{"capabilities": []any{}, "total": 0}, maxCapabilityResponseBytes)
+			return
+		}
+		writeError(writer, http.StatusServiceUnavailable, "capability storage is not configured")
 		return
 	}
 	if request.Method == http.MethodGet && request.URL.Path == "/v1/capabilities" {
