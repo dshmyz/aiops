@@ -3,6 +3,7 @@ package capabilities
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,10 @@ type AdapterConfig struct {
 	MaxBackoff       time.Duration
 	FailureThreshold int
 	ResetTimeout     time.Duration
+	// OpenAPIInsecureSkipVerify 仅为**抓取外部 OpenAPI/Swagger 文档**放开 TLS
+	// 证书校验（用于对接自签/内网 HTTPS 文档源）。能力执行始终走受信 client，
+	// 不受此开关影响。生产默认 false（校验证书）。
+	OpenAPIInsecureSkipVerify bool
 }
 
 type circuitState int
@@ -88,9 +93,21 @@ func (cb *circuitBreaker) recordFailure() {
 }
 
 type HTTPAdapter struct {
-	client *http.Client
-	cfg    AdapterConfig
-	cb     *circuitBreaker
+	client        *http.Client
+	openAPIClient *http.Client
+	cfg           AdapterConfig
+	cb            *circuitBreaker
+}
+
+// openapiClient returns the client used to fetch external OpenAPI/Swagger
+// documents. When OpenAPIInsecureSkipVerify is set it is a transport that skips
+// TLS certificate validation (only for this document-fetch path, never for
+// capability execution).
+func (a *HTTPAdapter) openapiClient() *http.Client {
+	if a.openAPIClient != nil {
+		return a.openAPIClient
+	}
+	return a.client
 }
 
 func defaultAdapterConfig() AdapterConfig {
@@ -136,10 +153,28 @@ func NewHTTPAdapterWithConfig(client *http.Client, cfg AdapterConfig) *HTTPAdapt
 	if cfg.ResetTimeout <= 0 {
 		cfg.ResetTimeout = 30 * time.Second
 	}
+	var openAPIClient *http.Client
+	if cfg.OpenAPIInsecureSkipVerify {
+		base := client
+		if base == nil {
+			base = newDefaultClient()
+		}
+		transport, _ := base.Transport.(*http.Transport)
+		if transport == nil {
+			transport = &http.Transport{}
+		}
+		tr := transport.Clone()
+		if tr.TLSClientConfig == nil {
+			tr.TLSClientConfig = &tls.Config{}
+		}
+		tr.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec // dev-only document fetch
+		openAPIClient = &http.Client{Transport: tr}
+	}
 	return &HTTPAdapter{
-		client: client,
-		cfg:    cfg,
-		cb:     newCircuitBreaker(cfg.FailureThreshold, cfg.ResetTimeout),
+		client:        client,
+		openAPIClient: openAPIClient,
+		cfg:           cfg,
+		cb:            newCircuitBreaker(cfg.FailureThreshold, cfg.ResetTimeout),
 	}
 }
 
