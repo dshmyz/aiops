@@ -450,31 +450,17 @@ func main() {
 	schedulerInstance.WithRunbookExecutor(runbookExec).WithReportGeneration(inspectionReportStore, scheduler.NewReporter(scheduledTaskStore, nil, nil))
 	go schedulerInstance.Start(serviceContext)
 	// MCP Server：把已发布的能力作为 MCP 工具对外暴露，供外部 AI 客户端调用。
-	// 启用条件：COPILOT_MCP_SERVER_ENABLED=1；端口 COPILOT_MCP_SERVER_PORT（默认 18081）。
+	// 启用条件：COPILOT_MCP_SERVER_ENABLED=1；与主 API 共享端口（挂载在 /mcp）。
+	var mcpHandler http.Handler
 	if mcpCfg := mcp.MCPServerEnvConfigFromEnv(); mcpCfg.Enabled {
 		mcpSrv := mcp.NewMCPServer(capStore, readRunner, auditService)
 		if initErr := mcpSrv.Init(serviceContext); initErr != nil {
 			logger.Warn("mcp server init", zap.Error(initErr))
 		}
-		mcpListener, mcpErr := net.Listen("tcp", fmt.Sprintf(":%d", mcpCfg.Port))
-		if mcpErr != nil {
-			logger.Warn("mcp server listen", zap.Error(mcpErr), zap.Int("port", mcpCfg.Port))
-		} else {
-			mcpHTTPServer := &http.Server{Handler: mcpSrv.Handler(), ReadHeaderTimeout: 5 * time.Second}
-			go func() {
-				logger.Info("mcp server started", zap.Int("port", mcpCfg.Port))
-				if err := mcpHTTPServer.Serve(mcpListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					logger.Warn("mcp server stopped", zap.Error(err))
-				}
-			}()
-			defer func() {
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				_ = mcpHTTPServer.Shutdown(shutdownCtx)
-			}()
-		}
+		mcpHandler = mcpSrv.Handler()
+		logger.Info("mcp server enabled", zap.String("path", "/mcp"))
 	}
-	if err := serveHTTP(serviceContext, listener, handler, db, metrics, accessLog); err != nil {
+	if err := serveHTTP(serviceContext, listener, handler, db, metrics, accessLog, mcpHandler); err != nil {
 		logger.Fatal("serve HTTP", zap.Error(err))
 	}
 	// 优雅退出：先停 audit 重放 goroutine（它依赖 db），再让 deferred db.Close 执行。
@@ -714,7 +700,7 @@ func httpAddress() string {
 	return ":18080"
 }
 
-func healthHandler(api http.Handler, db *sql.DB, metrics *observability.Metrics, accessLog *observability.AccessLog) http.Handler {
+func healthHandler(api http.Handler, db *sql.DB, metrics *observability.Metrics, accessLog *observability.AccessLog, mcpHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		_, _ = writer.Write([]byte("ok\n"))
@@ -737,6 +723,9 @@ func healthHandler(api http.Handler, db *sql.DB, metrics *observability.Metrics,
 	})
 	if metrics != nil {
 		mux.Handle("GET /metrics", metrics.Handler())
+	}
+	if mcpHandler != nil {
+		mux.Handle("/mcp", mcpHandler)
 	}
 	mux.Handle("/v1/", api)
 	// Fallback: serve the embedded SPA at the root. /v1/ and the health/metrics
@@ -783,9 +772,9 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func serveHTTP(ctx context.Context, listener net.Listener, api http.Handler, db *sql.DB, metrics *observability.Metrics, accessLog *observability.AccessLog) error {
+func serveHTTP(ctx context.Context, listener net.Listener, api http.Handler, db *sql.DB, metrics *observability.Metrics, accessLog *observability.AccessLog, mcpHandler http.Handler) error {
 	server := &http.Server{
-		Handler:           healthHandler(api, db, metrics, accessLog),
+		Handler:           healthHandler(api, db, metrics, accessLog, mcpHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

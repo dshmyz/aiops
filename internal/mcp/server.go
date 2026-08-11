@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -185,21 +183,14 @@ func formatMCPResult(toolName string, result map[string]any) string {
 }
 
 // MCPServerEnvConfig 从环境变量读取 MCP Server 配置。
+// 端口与主 API 共享（/mcp 路径），无需单独配置端口。
 type MCPServerEnvConfig struct {
 	Enabled bool
-	Port    int
 }
 
 // MCPServerEnvConfigFromEnv 从环境变量构造配置。
 func MCPServerEnvConfigFromEnv() MCPServerEnvConfig {
-	port := 18081
-	if p := strings.TrimSpace(os.Getenv("COPILOT_MCP_SERVER_PORT")); p != "" {
-		if n, err := strconv.Atoi(p); err == nil && n > 0 {
-			port = n
-		}
-	}
 	return MCPServerEnvConfig{
 		Enabled: os.Getenv("COPILOT_MCP_SERVER_ENABLED") == "1",
-		Port:    port,
 	}
 }

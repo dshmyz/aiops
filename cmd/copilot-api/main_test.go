@@ -84,7 +84,7 @@ func TestServeHTTPServesHealthAndStopsAfterCancellation(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- serveHTTP(ctx, listener, http.NotFoundHandler(), nil, nil, nil)
+		errCh <- serveHTTP(ctx, listener, http.NotFoundHandler(), nil, nil, nil, nil)
 	}()
 
 	response := waitForHealth(t, "http://"+listener.Addr().String()+"/healthz")
@@ -114,7 +114,7 @@ func TestServeHTTPServesHealthAndStopsAfterCancellation(t *testing.T) {
 func TestHealthHandlerMountsAPIUnderV1(t *testing.T) {
 	handler := healthHandler(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.WriteHeader(http.StatusAccepted)
-	}), nil, nil, nil)
+	}), nil, nil, nil, nil)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/v1/tools/cluster.status.read/read", nil)
 
