@@ -253,10 +253,16 @@ const assistantToolAnswer = computed<{ tool: string; answer: Record<string, unkn
     return null;
   }
   const tool = response.tool;
-  if (tool !== 'event.query' && tool !== 'task.query') {
+  if (!tool) {
     return null;
   }
-  return { tool, answer: (response.answer ?? {}) as Record<string, unknown> };
+  const answer = (response.answer ?? {}) as Record<string, unknown>;
+  // 至少有一个非 message 的 key 才显示，避免展示空的或只有 message 的 answer
+  const keys = Object.keys(answer).filter(k => k !== 'message');
+  if (keys.length === 0) {
+    return null;
+  }
+  return { tool, answer };
 });
 
 async function selectConversation(conversationID: string) {

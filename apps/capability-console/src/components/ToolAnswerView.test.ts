@@ -59,14 +59,20 @@ describe('ToolAnswerView', () => {
     expect(rows[0].text()).toContain('minio 巡检');
   });
 
-  test('renders nothing for non-data-source tools', () => {
+  test('renders generic key-value table for non-special tools', () => {
     const wrapper = mount(ToolAnswerView, {
       props: {
         tool: 'glusterfs.volume.health.read',
-        answer: { status: 'ok' },
+        answer: { status: 'ok', online_bricks: 3, heal_backlog: 0 },
       },
     });
 
-    expect(wrapper.find('[data-test="tool-answer-view"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="tool-answer-view"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="tool-answer-header"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="tool-answer-header"]').text()).toContain('glusterfs.volume.health.read');
+    const rows = wrapper.findAll('[data-test="tool-answer-row"]');
+    expect(rows.length).toBe(3); // status, online_bricks, heal_backlog
+    expect(rows[0].text()).toContain('status');
+    expect(rows[0].text()).toContain('ok');
   });
 });
