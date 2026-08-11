@@ -317,7 +317,25 @@ func main() {
 	diagService := diagnostics.NewService(readService, nil).WithCapabilityResolver(diagnostics.NewCapabilityResolver(loadedCapabilities))
 	assistantService = assistantService.WithDiagnostics(orchestrator.New(diagService, 3, nil))
 	notifier := buildNotifier()
-	options := routerOptions(repository, assistantService, planService, executionService, capabilityManagerFromEnv(capabilityAdapter, capabilityRuntime, importEnricher(planner)), auditService)
+	// 构造能力存储：DB 可用时用 SQLCapabilityStore（多节点一致），否则退化为
+	// FileCapabilityStore（单机文件模式，现有行为）。SeedFromYAML 仅在 DB 模式
+	// 首次启动时执行（幂等，跳过已存在）。
+	var capStore capabilities.CapabilityStore
+	capDir := os.Getenv("COPILOT_CAPABILITIES_DIR")
+	if db != nil {
+		sqlCapStore := capabilities.NewSQLCapabilityStore(db)
+		capStore = sqlCapStore
+		if capDir != "" {
+			if count, err := sqlCapStore.SeedFromYAML(serviceContext, capDir+"/published"); err != nil {
+				logger.Warn("seed capabilities from YAML to DB", zap.Error(err))
+			} else if count > 0 {
+				logger.Info("seeded capabilities from YAML to DB", zap.Int("count", count))
+			}
+		}
+	} else if capDir != "" {
+		capStore = capabilities.NewFileCapabilityStore(capDir)
+	}
+	options := routerOptions(repository, assistantService, planService, executionService, capabilityManagerFromEnv(capStore, capabilityAdapter, capabilityRuntime, importEnricher(planner)), auditService)
 	options = append(options, httpapi.WithConversations(assistantService))
 	options = append(options, httpapi.WithScheduledTasks(scheduledTaskService))
 	options = append(options, httpapi.WithInspectionReports(inspectionReportStore))
@@ -628,16 +646,16 @@ func importEnricher(planner assistant.Planner) capabilities.ImportEnricher {
 	return capabilities.NewLLMImportEnricher(assistant.NewChatCompleter(ep.ChatModel()))
 }
 
-// capabilityManagerFromEnv 构造能力管理 Manager，复用 main 里已按
-// COPILOT_OPENAPI_INSECURE_SKIP_VERIFY 配置好的同一个 adapter（与能力执行共享），
-// 避免预览/导入与执行各自新建 HTTP client 导致证书开关分叉。可选的 importEnricher
-// 在导入阶段用 LLM 补参数说明/示例/枚举（为 nil 则跳过富化）。
-func capabilityManagerFromEnv(adapter *capabilities.HTTPAdapter, runtime capabilities.PublishedCapabilityRuntime, enricher capabilities.ImportEnricher) httpapi.CapabilityManagementService {
-	dir := os.Getenv("COPILOT_CAPABILITIES_DIR")
-	if dir == "" {
+// capabilityManagerFromEnv 构造能力管理 Manager。传入的 store 决定持久化后端：
+//   - SQLCapabilityStore（db != nil）→ 多节点一致的运行时事实源
+//   - FileCapabilityStore（db == nil）→ 单机文件模式（现有行为）
+//
+// 种子逻辑（SeedFromYAML）由 main() 在此处之外调用，因为需要 logger/serviceContext。
+func capabilityManagerFromEnv(store capabilities.CapabilityStore, adapter *capabilities.HTTPAdapter, runtime capabilities.PublishedCapabilityRuntime, enricher capabilities.ImportEnricher) httpapi.CapabilityManagementService {
+	if store == nil {
 		return nil
 	}
-	manager := capabilities.NewManagerWithRuntime(dir, adapter, runtime)
+	manager := capabilities.NewManagerWithStore(store, adapter, runtime)
 	if enricher != nil {
 		manager = manager.WithEnricher(enricher)
 	}

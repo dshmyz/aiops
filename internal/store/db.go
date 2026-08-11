@@ -12,7 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "016_scheduled_tasks_run_kind.sql", "017_autonomy_daily_limit.sql"}
+var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "016_scheduled_tasks_run_kind.sql", "017_autonomy_daily_limit.sql", "018_capabilities.sql"}
 
 const defaultSQLiteDSN = "file:copilot-local.db?cache=shared&_foreign_keys=on"
 
@@ -571,4 +571,29 @@ var sqliteMigrations = []string{
 		FOREIGN KEY (capability_id) REFERENCES capability_registry (id) ON DELETE CASCADE,
 		FOREIGN KEY (depends_on_capability_id) REFERENCES capability_registry (id) ON DELETE CASCADE
 	)`,
+	// 能力管理运行时事实源（mirrors migrations/018_capabilities.sql for SQLite）。
+	`CREATE TABLE IF NOT EXISTS capabilities (
+		name TEXT NOT NULL,
+		source TEXT NOT NULL DEFAULT 'discovered',
+		status TEXT NOT NULL DEFAULT 'needs_review',
+		domain TEXT NOT NULL DEFAULT '',
+		resource_type TEXT NOT NULL DEFAULT '',
+		operation TEXT NOT NULL DEFAULT '',
+		risk TEXT NOT NULL DEFAULT 'low',
+		schema_version INTEGER NOT NULL DEFAULT 1,
+		backend TEXT NULL,
+		input_schema TEXT NULL,
+		output TEXT NULL,
+		governance TEXT NULL,
+		auth TEXT NULL,
+		ai TEXT NULL,
+		verify TEXT NULL,
+		depends_on TEXT NULL,
+		path TEXT NULL,
+		modified_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (name, source)
+	)`,
+	`CREATE INDEX IF NOT EXISTS capabilities_status_idx ON capabilities (status)`,
+	`CREATE INDEX IF NOT EXISTS capabilities_domain_idx ON capabilities (domain)`,
 }

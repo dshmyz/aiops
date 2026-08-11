@@ -110,6 +110,15 @@ func NewManagerWithRuntime(root string, adapter *HTTPAdapter, runtime PublishedC
 	return &Manager{store: NewFileCapabilityStore(root), adapter: adapter, runtime: runtime, enricher: nopEnricher{}}
 }
 
+// NewManagerWithStore 用指定的 CapabilityStore（如 SQLCapabilityStore）构造 Manager，
+// 跳过默认的 FileCapabilityStore 创建。多节点部署时由 main 传入 DB store。
+func NewManagerWithStore(store CapabilityStore, adapter *HTTPAdapter, runtime PublishedCapabilityRuntime) *Manager {
+	if adapter == nil {
+		adapter = NewHTTPAdapter(nil)
+	}
+	return &Manager{store: store, adapter: adapter, runtime: runtime, enricher: nopEnricher{}}
+}
+
 // WithStore 允许外部注入自定义 CapabilityStore（如 SQLCapabilityStore），覆盖默认的
 // 文件实现。使用方式：manager.WithStore(NewSQLCapabilityStore(db))。
 func (m *Manager) WithStore(store CapabilityStore) *Manager {

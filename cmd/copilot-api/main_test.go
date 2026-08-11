@@ -152,8 +152,8 @@ func TestRouterOptionsWireActionPlanQueries(t *testing.T) {
 func TestCapabilityManagerFromEnvIsOptional(t *testing.T) {
 	t.Setenv("COPILOT_CAPABILITIES_DIR", "")
 
-	if manager := capabilityManagerFromEnv(nil, nil, nil); manager != nil {
-		t.Fatalf("capabilityManagerFromEnv() = %#v, want nil when root is not configured", manager)
+	if manager := capabilityManagerFromEnv(nil, nil, nil, nil); manager != nil {
+		t.Fatalf("capabilityManagerFromEnv(nil store) = %#v, want nil", manager)
 	}
 }
 
@@ -164,7 +164,7 @@ func TestRouterOptionsWireCapabilityManagementWhenConfigured(t *testing.T) {
 	handler := httpapi.NewRouter(
 		stubAuthenticator{},
 		nil,
-		routerOptions(repository, nil, nil, nil, capabilityManagerFromEnv(nil, nil, nil), nil)...,
+		routerOptions(repository, nil, nil, nil, capabilityManagerFromEnv(capabilities.NewFileCapabilityStore(root), nil, nil, nil), nil)...,
 	)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
@@ -188,7 +188,7 @@ func TestCapabilityManagerFromEnvHotRegistersPublishedCapability(t *testing.T) {
 	_, writeExecutor, _, runtime := buildCapabilityRuntimes(nil, capabilities.NewHTTPAdapter(http.DefaultClient), true, staticWriteExecutor{})
 	adapter := capabilities.NewHTTPAdapter(http.DefaultClient)
 
-	manager := capabilityManagerFromEnv(adapter, runtime, nil)
+	manager := capabilityManagerFromEnv(capabilities.NewFileCapabilityStore(root), adapter, runtime, nil)
 	if manager == nil {
 		t.Fatal("capabilityManagerFromEnv returned nil")
 	}
@@ -245,7 +245,7 @@ func TestCapabilityRuntimesRouteHotPublishedWriteThroughHTTPAdapter(t *testing.T
 	}
 
 	_, writeExecutor, _, runtime := buildCapabilityRuntimes(nil, capabilities.NewHTTPAdapter(server.Client()), true, staticWriteExecutor{})
-	manager := capabilityManagerFromEnv(capabilities.NewHTTPAdapter(server.Client()), runtime, nil)
+	manager := capabilityManagerFromEnv(capabilities.NewFileCapabilityStore(root), capabilities.NewHTTPAdapter(server.Client()), runtime, nil)
 	if manager == nil {
 		t.Fatal("capabilityManagerFromEnv returned nil")
 	}
