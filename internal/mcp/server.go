@@ -56,6 +56,11 @@ func (s *MCPServer) Handler() http.Handler {
 	return s.httpSrv
 }
 
+// MCPServerGo 返回底层的 mcp-go server（调试/测试用）。
+func (s *MCPServer) MCPServerGo() *server.MCPServer {
+	return s.mcpSrv
+}
+
 // Init 从 store 加载已发布能力并注册为 MCP 工具。启动时调用一次即可。
 func (s *MCPServer) Init(ctx context.Context) error {
 	s.mu.Lock()
