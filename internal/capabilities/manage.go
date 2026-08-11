@@ -204,7 +204,7 @@ func (m *Manager) fetchOpenAPIFromURL(ctx context.Context, openAPIURL string) ([
 	if err != nil {
 		return nil, "", err
 	}
-	response, err := m.adapter.openapiClient().Do(httpRequest)
+	response, err := m.adapter.client.Do(httpRequest)
 	if err != nil {
 		return nil, "", err
 	}

@@ -132,7 +132,7 @@ curl -s http://127.0.0.1:18080/metrics   # Prometheus 指标
 | LLM | `COPILOT_OPENAI_TIMEOUT` / `_RETRY` / `_RETRY_BACKOFF` | 超时/重试/退避 |
 | Prompt | `COPILOT_PROMPTS_DIR` | prompt 模板目录，热加载无需重启 |
 | 能力 | `COPILOT_CAPABILITIES_DIR` | YAML 已发布能力目录；留空则不启用能力管理 |
-| 能力 | `COPILOT_OPENAPI_INSECURE_SKIP_VERIFY` | 抓取外部 OpenAPI/Swagger 文档时忽略 TLS 证书校验（对接自签/内网 HTTPS 文档源）；**仅作用于文档抓取路径，能力执行始终校验证书**，生产默认关闭 |
+| 能力 | `COPILOT_OPENAPI_INSECURE_SKIP_VERIFY` | 跳过 TLS 证书校验（对接自签/内网 HTTPS 后端）；开启后能力执行与 OpenAPI/Swagger 文档抓取都跳过证书校验，**生产默认关闭**，开启前评估风险 |
 | 文档 | `COPILOT_DOCS_DIR` | 「使用手册」markdown 目录；留空取工作目录 `docs/`，生产可挂到只读卷设绝对路径 |
 | 能力市场 | （迁移自动建表） | `/v1/marketplace/capabilities` 团队共享注册表 |
 | MCP | `COPILOT_MCP_SERVERS` | JSON 数组，启动发现外部 MCP 工具 |

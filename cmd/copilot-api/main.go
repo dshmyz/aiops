@@ -177,9 +177,8 @@ func main() {
 		MaxBackoff:       2 * time.Second,
 		FailureThreshold: 5,
 		ResetTimeout:     30 * time.Second,
-		// COPILOT_OPENAPI_INSECURE_SKIP_VERIFY=1 时，抓取外部 OpenAPI/Swagger 文档
-		// 忽略 TLS 证书校验（适配自签/内网 HTTPS 文档源）。仅作用于文档抓取路径，
-		// 能力执行始终校验证书。生产默认关闭。
+		// COPILOT_OPENAPI_INSECURE_SKIP_VERIFY=1 时，能力执行与抓取外部 OpenAPI/Swagger
+		// 文档都跳过 TLS 证书校验（对接自签/内网 HTTPS 后端）。默认关闭（校验证书）。
 		OpenAPIInsecureSkipVerify: os.Getenv("COPILOT_OPENAPI_INSECURE_SKIP_VERIFY") == "1",
 	})
 	if capabilitiesConfigured {
