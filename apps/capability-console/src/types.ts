@@ -14,6 +14,12 @@ export interface BackendSpec {
 export interface InputField {
   type: 'string' | 'integer' | 'number' | 'boolean';
   required: boolean;
+  in?: string;
+  min?: number;
+  max?: number;
+  description?: string;
+  examples?: string[];
+  enum?: string[];
 }
 
 export interface OutputSpec {

@@ -109,7 +109,7 @@ export interface UseCapabilities {
   stats: ComputedRef<{ published: number; review: number; invalid: number; publishable: number }>;
   filteredCapabilities: ComputedRef<ManagedCapability[]>;
   inputRows: ComputedRef<{ name: string; type: InputField['type']; required: boolean }[]>;
-  testInputRows: ComputedRef<{ name: string; type: InputField['type']; required: boolean; source: string }[]>;
+  testInputRows: ComputedRef<{ name: string; type: InputField['type']; required: boolean; source: string; description?: string; examples?: string[]; enum?: string[] }[]>;
   outputRows: ComputedRef<{ name: string; path: string }[]>;
   publishTargetPath: ComputedRef<string>;
   governanceSummary: ComputedRef<string>;
@@ -309,9 +309,9 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     })),
   );
   const testInputRows = computed(() => {
-    const rows = new Map<string, { name: string; type: InputField['type']; required: boolean; source: string }>();
+    const rows = new Map<string, { name: string; type: InputField['type']; required: boolean; source: string; description?: string; examples?: string[]; enum?: string[] }>();
     for (const [name, field] of Object.entries(selected.value.input_schema)) {
-      rows.set(name, { name, type: field.type, required: field.required, source: 'schema' });
+      rows.set(name, { name, type: field.type, required: field.required, source: 'schema', description: field.description, examples: field.examples, enum: field.enum });
     }
     for (const name of derivedVariables.value) {
       if (!rows.has(name)) {
@@ -319,7 +319,7 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
       }
     }
     if (!rows.has('environment')) {
-      rows.set('environment', { name: 'environment', type: 'string', required: true, source: 'schema' });
+      rows.set('environment', { name: 'environment', type: 'string', required: true, source: 'schema', description: '目标环境（prod/staging/dev）', examples: ['prod'] });
     }
     return Array.from(rows.values());
   });

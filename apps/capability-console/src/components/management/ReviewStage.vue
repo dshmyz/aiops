@@ -208,8 +208,13 @@ defineProps<{ capabilities: UseCapabilities }>();
           <div class="test-param-grid">
             <label v-for="row in capabilities.testInputRows.value" :key="row.name" class="test-param">
               <span>{{ row.name }}<small>{{ row.type }}{{ row.required ? ' / 必填' : '' }}{{ row.source === 'path' ? ' / 路径变量' : '' }}</small></span>
-              <select v-if="row.type === 'boolean'" :data-test="`test-param-${row.name}`" class="filter-select" :value="String(capabilities.testInputFieldValue(row.name))" @change="capabilities.setTestInputField(row.name, ($event.target as HTMLSelectElement).value === 'true', row.type)"><option value="">未设置</option><option value="true">true</option><option value="false">false</option></select>
-              <input v-else :data-test="`test-param-${row.name}`" class="filter-input" :type="row.type === 'integer' || row.type === 'number' ? 'number' : 'text'" :value="capabilities.testInputFieldValue(row.name)" :placeholder="row.name === 'environment' ? 'prod' : `填写 ${row.name}`" @input="capabilities.setTestInputField(row.name, ($event.target as HTMLInputElement).value, row.type)" />
+              <select v-if="row.enum && row.enum.length > 0" :data-test="`test-param-${row.name}`" class="filter-select" :value="capabilities.testInputFieldValue(row.name) ? String(capabilities.testInputFieldValue(row.name)) : ''" @change="capabilities.setTestInputField(row.name, ($event.target as HTMLSelectElement).value, row.type)">
+                <option value="">未设置</option>
+                <option v-for="opt in row.enum" :key="opt" :value="opt">{{ opt }}</option>
+              </select>
+              <select v-else-if="row.type === 'boolean'" :data-test="`test-param-${row.name}`" class="filter-select" :value="String(capabilities.testInputFieldValue(row.name))" @change="capabilities.setTestInputField(row.name, ($event.target as HTMLSelectElement).value === 'true', row.type)"><option value="">未设置</option><option value="true">true</option><option value="false">false</option></select>
+              <input v-else :data-test="`test-param-${row.name}`" class="filter-input" :type="row.type === 'integer' || row.type === 'number' ? 'number' : 'text'" :value="capabilities.testInputFieldValue(row.name)" :placeholder="row.name === 'environment' ? 'prod' : (row.examples && row.examples[0]) ? `例如 ${row.examples[0]}` : `填写 ${row.name}`" @input="capabilities.setTestInputField(row.name, ($event.target as HTMLInputElement).value, row.type)" />
+              <em v-if="row.description" class="test-param-hint">{{ row.description }}</em>
             </label>
           </div>
         </section>

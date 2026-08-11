@@ -2705,6 +2705,13 @@ nav button:focus-visible {
   margin-left: 4px;
 }
 
+.test-param-hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-tertiary);
+  font-style: normal;
+  line-height: 1.4;
+}
+
 .actions {
   display: flex;
   gap: var(--space-2);
