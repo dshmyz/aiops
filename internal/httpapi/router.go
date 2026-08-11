@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	maxReadResponseBytes       = 10 * 1024
+	maxReadResponseBytes       = 1024 * 1024
 	maxCapabilityResponseBytes = 1024 * 1024
 	readTimeout                = 5 * time.Second
 	// assistantRequestTimeout bounds a single synchronous /v1/assistant/messages

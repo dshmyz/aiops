@@ -518,7 +518,7 @@ func TestReadToolRejectsWriteTool(t *testing.T) {
 
 func TestReadToolCapsResponseSize(t *testing.T) {
 	t.Parallel()
-	router, _ := testRouter(t, &readRunner{result: map[string]any{"payload": strings.Repeat("x", 11*1024)}})
+	router, _ := testRouter(t, &readRunner{result: map[string]any{"payload": strings.Repeat("x", 1024*1024+1)}})
 	req := signedRequest(t, "/v1/tools/cluster.status.read/read", `{"environment":"prod"}`, "operator-1", []string{"viewer"}, []string{"prod"})
 
 	res := httptest.NewRecorder()

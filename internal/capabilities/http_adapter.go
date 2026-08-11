@@ -17,7 +17,7 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
-const maxBackendResponseBytes = 10 * 1024
+const maxBackendResponseBytes = 1024 * 1024
 
 type AdapterConfig struct {
 	MaxRetries       int

@@ -329,7 +329,7 @@ func TestHTTPAdapterEscapesPathValues(t *testing.T) {
 func TestHTTPAdapterRejectsOversizedResponse(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"data":{"usage_pct":86,"padding":"` + strings.Repeat("x", 10240) + `"}}`))
+		_, _ = w.Write([]byte(`{"data":{"usage_pct":86,"padding":"` + strings.Repeat("x", 1024*1024) + `"}}`))
 	}))
 	defer server.Close()
 	capability := validReadCapability()
