@@ -1,4 +1,4 @@
-.PHONY: test test-integration lint vet cover build docker-build web-build web-test web-typecheck web-check e2e all-checks dev-up dev-down dev-logs dev-verify-trace dev-verify-verification eval gen-token compose-up compose-down compose-logs scripts-build scripts-start scripts-stop scripts-status scripts-logs scripts-health scripts-token scripts-nginx
+.PHONY: test test-integration lint vet cover build docker-build web-build web-test web-typecheck web-check e2e all-checks dev-up dev-down dev-logs dev-verify-trace dev-verify-verification eval gen-token compose-up compose-down compose-logs scripts-build scripts-start scripts-stop scripts-status scripts-logs scripts-health scripts-token scripts-nginx dev-enrich
 
 test:
 	go test -race ./...
@@ -47,6 +47,18 @@ web-build:
 gen-token:
 	@if [ -f .env ]; then set -a; . ./.env; set +a; else echo "WARN: no ./.env — use COPILOT_JWT_HMAC_SECRET env"; fi; \
 	go run ./gen_token.go
+
+# dev-enrich: 检查「导入流程 LLM 辅助」是否已配好（贴 Swagger 后自动补参数说明/
+# 示例/枚举）。需要一个 eino LLM planner 才会富化；纯规则/确定性 planner 下富化不
+# 生效（但不影响能力导入）。逐项告警，让你一眼看出少了哪个，避免静默 no-op。
+dev-enrich:
+	@echo "== 导入 LLM 辅助（v0.7.0+）配置检查 =="; \
+	set -a; [ -f .env ] && . ./.env; set +a; \
+	if [ "$${COPILOT_ASSISTANT_PROVIDER:-}" = "eino-openai" ]; then echo "[ok] COPILOT_ASSISTANT_PROVIDER=eino-openai (LLM planner)"; else echo "[缺] COPILOT_ASSISTANT_PROVIDER 应为 eino-openai（否则走纯规则，不富化）"; fi; \
+	if [ -n "$${COPILOT_OPENAI_API_KEY:-}" ]; then echo "[ok] COPILOT_OPENAI_API_KEY 已设置"; else echo "[缺] COPILOT_OPENAI_API_KEY（LLM 调用需要）"; fi; \
+	if [ -n "$${COPILOT_OPENAI_MODEL:-}" ]; then echo "[ok] COPILOT_OPENAI_MODEL=$${COPILOT_OPENAI_MODEL}"; else echo "[缺] COPILOT_OPENAI_MODEL（默认可用但建议显式）"; fi; \
+	if [ -n "$${COPILOT_CAPABILITIES_DIR:-}" ]; then echo "[ok] COPILOT_CAPABILITIES_DIR=$${COPILOT_CAPABILITIES_DIR}"; else echo "[缺] COPILOT_CAPABILITIES_DIR（能力管理需此目录）"; fi; \
+	echo "== 全部 [ok] 即富化开启；有 [缺] 则按提示补齐后重启后端。 =="
 
 # Build & run the full containerized stack (mysql + copilot-api + capability-console)
 # via docker-compose. Requires the two Dockerfiles and a JWT secret.
