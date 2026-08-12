@@ -129,12 +129,13 @@ func (r *Router) verifyAlertWebhookSignature(request *http.Request) bool {
 // 每次 webhook 接收都记录审计事件。webhook 无用户身份，Subject 用来源
 // 系统名，形成闭环可追溯。可选地在落地后异步触发自动研判和自动建 plan。
 type alertWebhookService struct {
-	svc          *alert.Service
-	audit        *audit.Service
-	diagnoser    *alert.Diagnoser
-	planCreator  *alert.PlanCreator
-	actions      []alert.AlertAction
-	now          func() time.Time
+	svc            *alert.Service
+	audit          *audit.Service
+	diagnoser      *alert.Diagnoser
+	chainDiagnoser *alert.ChainDiagnoser
+	planCreator    *alert.PlanCreator
+	actions        []alert.AlertAction
+	now            func() time.Time
 }
 
 // NewAlertWebhookService 创建一个带审计的组合 webhook 服务。
@@ -145,6 +146,12 @@ func NewAlertWebhookService(svc *alert.Service, auditService *audit.Service) *al
 // WithDiagnoser 配置自动研判（告警落地后异步触发诊断）。
 func (s *alertWebhookService) WithDiagnoser(d *alert.Diagnoser) *alertWebhookService {
 	s.diagnoser = d
+	return s
+}
+
+// WithChainDiagnoser 配置多步链式研判（告警落地后异步触发三步链式诊断）。
+func (s *alertWebhookService) WithChainDiagnoser(d *alert.ChainDiagnoser) *alertWebhookService {
+	s.chainDiagnoser = d
 	return s
 }
 
@@ -174,7 +181,9 @@ func (s *alertWebhookService) Ingest(ctx context.Context, p alert.WebhookPayload
 
 	// 异步触发自动研判 + 自动建 plan（不阻塞 webhook 响应）。
 	a := result.Alert
-	if s.diagnoser != nil {
+	if s.chainDiagnoser != nil {
+		go s.chainDiagnoser.ChainDiagnose(context.Background(), a)
+	} else if s.diagnoser != nil {
 		go s.diagnoser.Diagnose(context.Background(), a)
 	}
 	if s.planCreator != nil && len(s.actions) > 0 {
