@@ -133,7 +133,6 @@ type alertWebhookService struct {
 	audit          *audit.Service
 	diagnoser      *alert.Diagnoser
 	chainDiagnoser *alert.ChainDiagnoser
-	planCreator    *alert.PlanCreator
 	actions        []alert.AlertAction
 	now            func() time.Time
 }
@@ -143,21 +142,20 @@ func NewAlertWebhookService(svc *alert.Service, auditService *audit.Service) *al
 	return &alertWebhookService{svc: svc, audit: auditService, now: func() time.Time { return time.Now().UTC() }}
 }
 
-// WithDiagnoser 配置自动研判（告警落地后异步触发诊断）。
+// WithDiagnoser 配置单步自动研判（告警落地后异步触发诊断）。
 func (s *alertWebhookService) WithDiagnoser(d *alert.Diagnoser) *alertWebhookService {
 	s.diagnoser = d
 	return s
 }
 
-// WithChainDiagnoser 配置多步链式研判（告警落地后异步触发三步链式诊断）。
+// WithChainDiagnoser 配置多步链式研判（告警落地后异步执行序列）。
 func (s *alertWebhookService) WithChainDiagnoser(d *alert.ChainDiagnoser) *alertWebhookService {
 	s.chainDiagnoser = d
 	return s
 }
 
-// WithPlanCreator 配置自动建 plan（告警落地后异步创建 action plan）。
-func (s *alertWebhookService) WithPlanCreator(pc *alert.PlanCreator, actions []alert.AlertAction) *alertWebhookService {
-	s.planCreator = pc
+// WithActions 配置告警→动作的编排规则。
+func (s *alertWebhookService) WithActions(actions []alert.AlertAction) *alertWebhookService {
 	s.actions = actions
 	return s
 }
@@ -179,16 +177,19 @@ func (s *alertWebhookService) Ingest(ctx context.Context, p alert.WebhookPayload
 		"created":  result.Created,
 	})
 
-	// 异步触发自动研判 + 自动建 plan（不阻塞 webhook 响应）。
+	// 异步触发链式执行（诊断+处置）+ 自动建 plan（不阻塞 webhook 响应）。
 	a := result.Alert
-	if s.chainDiagnoser != nil {
-		go s.chainDiagnoser.ChainDiagnose(context.Background(), a)
+	if s.chainDiagnoser != nil && len(s.actions) > 0 {
+		// 按匹配的规则逐条执行完整序列
+		matched := alert.MatchActions(a, s.actions)
+		for _, action := range matched {
+			go s.chainDiagnoser.ExecuteChain(context.Background(), a, action)
+		}
 	} else if s.diagnoser != nil {
 		go s.diagnoser.Diagnose(context.Background(), a)
 	}
-	if s.planCreator != nil && len(s.actions) > 0 {
-		go s.planCreator.CreatePlansForAlert(context.Background(), a, s.actions)
-	}
+	// 注意：当有 chainDiagnoser 时，plan 由序列的最后一步驱动（CreatePlanForStep），
+	// 不再需要单独的 CreatePlansForAlert 回退。
 
 	return result, nil
 }

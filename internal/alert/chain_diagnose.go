@@ -8,172 +8,200 @@ import (
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
-	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
-// StepResult 是链式诊断中单步的结果。
+// StepResult 是链式执行中单步的结果。
 type StepResult struct {
+	Step   int
 	Tool   string
 	Result map[string]any
 	Err    error
 }
 
-// ChainDiagnoser 执行多步链式诊断：alert.query → event.query → domain.read。
-// 前两步通过 ReadRunner 直接调用（alert/event 不是 domain 诊断工具），
-// 第三步通过 diagnostics.Service.Run() 走域诊断链。
+// ChainDiagnoser 从 AlertAction 的 ToolSequence 驱动多步执行。
+// 诊断步骤（读）直接执行并收集结果；处置步骤（写）根据 ExecuteLastStep
+// 决定是直接执行还是创建 PendingConfirmation plan。
 type ChainDiagnoser struct {
 	diag     *diagnostics.Service
 	alertSvc *Service
+	planExec PlanExecutor
 	readTool func(ctx context.Context, user identity.CurrentUser, toolName string, input map[string]any) (map[string]any, error)
 }
 
-// NewChainDiagnoser 创建多步链式诊断器。readTool 是从外部注入的只读执行函数，
-// 通常由 ReadOnlyService.ExecuteRead 提供。
-func NewChainDiagnoser(diag *diagnostics.Service, alertSvc *Service, readTool func(context.Context, identity.CurrentUser, string, map[string]any) (map[string]any, error)) *ChainDiagnoser {
-	return &ChainDiagnoser{diag: diag, alertSvc: alertSvc, readTool: readTool}
+// PlanExecutor 是处置步骤的执行接口：创建 plan 或直接执行。
+type PlanExecutor interface {
+	CreatePlanForStep(ctx context.Context, alert Alert, action AlertAction, stepIdx int, stepResult []StepResult) error
 }
 
-// ChainDiagnose 对一条 firing 告警执行多步链式诊断，把结果写回 alert.Description。
-func (d *ChainDiagnoser) ChainDiagnose(ctx context.Context, alert Alert) {
-	if d.diag == nil || d.alertSvc == nil || d.readTool == nil {
+// NewChainDiagnoser 创建多步链式诊断器。
+func NewChainDiagnoser(
+	diag *diagnostics.Service,
+	alertSvc *Service,
+	planExec PlanExecutor,
+	readTool func(context.Context, identity.CurrentUser, string, map[string]any) (map[string]any, error),
+) *ChainDiagnoser {
+	return &ChainDiagnoser{
+		diag:     diag,
+		alertSvc: alertSvc,
+		planExec: planExec,
+		readTool: readTool,
+	}
+}
+
+// ExecuteChain 对一条 firing 告警执行一条告警动作的完整序列。
+func (d *ChainDiagnoser) ExecuteChain(ctx context.Context, alert Alert, action AlertAction) {
+	if d.alertSvc == nil || d.readTool == nil {
 		return
 	}
 	if alert.Status != StatusFiring {
 		return
 	}
-
-	domain := alert.Domain
-	if domain == "" {
-		domain = guessDomain(alert)
-	}
-	if domain == "" {
+	if len(action.ToolSequence) == 0 {
 		return
-	}
-	env := alert.Environment
-	if env == "" {
-		env = "prod"
 	}
 
 	user := identity.CurrentUser{
-		Subject:             "alert-chain-diag",
+		Subject:             "alert-chain",
 		Roles:               []string{"admin"},
 		AllowedEnvironments: []string{"prod", "staging", "dev"},
 	}
 
-	// 步骤 1：alert.query — 查当前相关告警
-	alertResult := d.runReadStep(ctx, user, "alert.query", map[string]any{
-		"environment": env,
-		"severity":    "critical",
-	})
+	var allResults []StepResult
 
-	// 步骤 2：event.query — 查审计事件历史
-	eventResult := d.runReadStep(ctx, user, "event.query", map[string]any{
-		"environment": env,
-	})
+	// 执行序列：前 N-1 步是诊断（只读），最后一步按配置决定
+	for i, step := range action.ToolSequence {
+		isLast := i == len(action.ToolSequence)-1
 
-	// 步骤 3：domain.read — 采集域健康数据（走诊断链）
-	domainPkg := d.runDomainStep(ctx, user, domain, env)
+		input := step.RenderInput(alert)
+		log.Printf("[alert-chain] step %d/%d: tool=%s input=%v", i+1, len(action.ToolSequence), step.Tool, input)
 
-	// 聚合
-	summary := d.buildChainSummary(alert, alertResult, eventResult, domainPkg)
+		result := d.executeStep(ctx, user, step.Tool, input)
+		result.Step = i
+		allResults = append(allResults, result)
+
+		if result.Err != nil {
+			log.Printf("[alert-chain] step %d failed: %v", i+1, result.Err)
+			break // 步骤失败中断链
+		}
+
+		// 最后一步是处置（写）且不直接执行 → 建 plan
+		if isLast && !action.ExecuteLastStep {
+			if d.planExec != nil {
+				if err := d.planExec.CreatePlanForStep(ctx, alert, action, i, allResults); err != nil {
+					log.Printf("[alert-chain] create plan for step %d failed: %v", i+1, err)
+				}
+			}
+		}
+	}
+
+	// 聚合诊断步骤的结果（排除最后处置步骤）写回 description
+	diagResults := allResults
+	if len(allResults) > 0 && !action.ExecuteLastStep {
+		diagResults = allResults[:len(allResults)-1]
+	}
+	summary := d.buildSummary(alert, action, diagResults)
 	if summary == "" {
 		return
 	}
 
 	desc := alert.Description
 	if desc != "" {
-		desc += "\n\n---\n\n[多步链式研判]\n" + summary
+		desc += "\n\n---\n\n[链式研判:" + action.Name + "]\n" + summary
 	} else {
-		desc = "[多步链式研判]\n" + summary
+		desc = "[链式研判:" + action.Name + "]\n" + summary
 	}
 	_ = d.alertSvc.UpdateDescription(ctx, alert.ID, desc)
 }
 
-// runReadStep 通过 ReadRunner 直接调用只读工具。
-func (d *ChainDiagnoser) runReadStep(ctx context.Context, user identity.CurrentUser, toolName string, input map[string]any) StepResult {
+// executeStep 执行单步：优先走 diagnostics.Service（如果是 domain 诊断），
+// 否则直接调 ReadRunner。
+func (d *ChainDiagnoser) executeStep(ctx context.Context, user identity.CurrentUser, toolName string, input map[string]any) StepResult {
+	// 尝试走 diagnostics.Service（仅 domain 工具有效）
+	domain := toolDomain(toolName)
+	if domain != "" && d.diag != nil {
+		pkg, err := d.diag.Run(ctx, user, diagnostics.Request{
+			Domain:      domain,
+			Environment: inputStr(input, "environment"),
+		})
+		if err == nil && len(pkg.Observations) > 0 {
+			return StepResult{Tool: toolName, Result: map[string]any{
+				"summary":     pkg.Observations[0].Summary,
+				"findings":    len(pkg.Findings),
+				"recs":        len(pkg.Recommendations),
+			}}
+		}
+		// diagnostics 失败或不支持该 domain，回退到直接 ReadRunner
+	}
+
+	// 直接调 ReadRunner
 	result, err := d.readTool(ctx, user, toolName, input)
 	if err != nil {
-		log.Printf("[chain-diagnose] read step %q failed: %v", toolName, err)
 		return StepResult{Tool: toolName, Err: err}
 	}
 	return StepResult{Tool: toolName, Result: result}
 }
 
-// runDomainStep 通过 diagnostics.Service.Run() 走域诊断链。
-func (d *ChainDiagnoser) runDomainStep(ctx context.Context, user identity.CurrentUser, domain, env string) diagnostics.Package {
-	pkg, err := d.diag.Run(ctx, user, diagnostics.Request{
-		Domain:      domain,
-		Environment: env,
-	})
-	if err != nil {
-		log.Printf("[chain-diagnose] domain step %q failed: %v", domain, err)
-		return diagnostics.Package{}
-	}
-	return pkg
-}
-
-// buildChainSummary 把三步诊断结果拼成可读摘要。
-func (d *ChainDiagnoser) buildChainSummary(alert Alert, alertResult, eventResult StepResult, domainPkg diagnostics.Package) string {
-	var sections []string
-
-	// 告警关联
-	if alertResult.Err == nil && alertResult.Result != nil {
-		summary := summarizeToolResult("alert.query", alertResult.Result)
-		if summary != "" {
-			sections = append(sections, fmt.Sprintf("【告警关联】%s", summary))
-		}
-	} else if alertResult.Err != nil {
-		sections = append(sections, fmt.Sprintf("【告警关联】查询失败: %v", alertResult.Err))
-	}
-
-	// 审计事件
-	if eventResult.Err == nil && eventResult.Result != nil {
-		summary := summarizeToolResult("event.query", eventResult.Result)
-		if summary != "" {
-			sections = append(sections, fmt.Sprintf("【审计事件】%s", summary))
-		}
-	} else if eventResult.Err != nil {
-		sections = append(sections, fmt.Sprintf("【审计事件】查询失败: %v", eventResult.Err))
-	}
-
-	// 域健康
-	if len(domainPkg.Observations) > 0 {
-		sections = append(sections, fmt.Sprintf("【域健康】%s", domainPkg.Observations[0].Summary))
-	}
-	if len(domainPkg.Findings) > 0 {
-		for _, f := range domainPkg.Findings {
-			sections = append(sections, fmt.Sprintf("  发现: [%s] %s", f.Severity, f.Summary))
-		}
-	}
-	if len(domainPkg.Recommendations) > 0 {
-		for _, r := range domainPkg.Recommendations {
-			riskTag := ""
-			if r.Risk == tools.Medium {
-				riskTag = " ⚠️"
-			}
-			sections = append(sections, fmt.Sprintf("  建议: %s (工具: %s)%s", r.Summary, r.ToolName, riskTag))
-		}
-	}
-
-	return strings.Join(sections, "\n")
-}
-
-// summarizeToolResult 把工具返回的 map 拼成一句摘要。
-func summarizeToolResult(toolName string, result map[string]any) string {
-	if result == nil {
-		return ""
-	}
-	// 优先用 result_summary
-	if summary, ok := result["result_summary"].(string); ok && summary != "" {
-		return summary
-	}
-	// 用 count 兜底
-	if count, ok := result["count"].(float64); ok && count > 0 {
-		return fmt.Sprintf("查询到 %.0f 条记录", count)
-	}
-	// 用 status 兜底
-	if status, ok := result["status"].(string); ok && status != "" {
-		return fmt.Sprintf("状态: %s", status)
+// toolDomain 判断工具名是否属于已知的 domain 诊断工具。
+func toolDomain(toolName string) string {
+	switch {
+	case strings.HasPrefix(toolName, "kafka."):
+		return "kafka"
+	case strings.HasPrefix(toolName, "minio."):
+		return "minio"
+	case strings.HasPrefix(toolName, "glusterfs."):
+		return "glusterfs"
 	}
 	return ""
+}
+
+func inputStr(input map[string]any, key string) string {
+	if v, ok := input[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// buildSummary 把序列执行结果拼成可读摘要。
+func (d *ChainDiagnoser) buildSummary(alert Alert, action AlertAction, results []StepResult) string {
+	var sections []sections
+	_ = sections
+
+	var parts []string
+	for _, r := range results {
+		if r.Err != nil {
+			parts = append(parts, fmt.Sprintf("  步骤%d (%s): 失败 - %v", r.Step+1, r.Tool, r.Err))
+			continue
+		}
+		summary := summarizeResult(r.Result)
+		parts = append(parts, fmt.Sprintf("  步骤%d (%s): %s", r.Step+1, r.Tool, summary))
+	}
+
+	if len(results) > 0 && !action.ExecuteLastStep {
+		last := results[len(results)-1]
+		if last.Err == nil {
+			parts = append(parts, "\n  → 最后一步（处置）已创建待审批 plan，等待人工确认")
+		}
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+type sections = struct{}
+
+func summarizeResult(result map[string]any) string {
+	if result == nil {
+		return "(无结果)"
+	}
+	if s, ok := result["summary"].(string); ok && s != "" {
+		return s
+	}
+	if count, ok := result["count"].(float64); ok {
+		return fmt.Sprintf("查询到 %.0f 条记录", count)
+	}
+	if status, ok := result["status"].(string); ok {
+		return fmt.Sprintf("状态: %s", status)
+	}
+	return fmt.Sprintf("%v", result)
 }

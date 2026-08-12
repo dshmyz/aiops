@@ -12,8 +12,9 @@ import (
 )
 
 // PlanCreator 为告警自动创建 action plan（PendingConfirmation 状态）。
+// 同时实现 PlanExecutor 接口，供 ChainDiagnoser 调用。
 type PlanCreator struct {
-	planSvc *plans.Service
+	planSvc  *plans.Service
 	alertSvc *Service
 }
 
@@ -22,23 +23,22 @@ func NewPlanCreator(planSvc *plans.Service, alertSvc *Service) *PlanCreator {
 	return &PlanCreator{planSvc: planSvc, alertSvc: alertSvc}
 }
 
-// CreatePlansForAlert 为一条告警匹配所有 action 规则，为每条命中的规则创建 plan。
-func (c *PlanCreator) CreatePlansForAlert(ctx context.Context, alert Alert, actions []AlertAction) {
-	log.Printf("[alert-auto-plan] CreatePlansForAlert called: alert=%s status=%s severity=%s matched_rules=%d",
-		alert.Title, alert.Status, alert.Severity, len(MatchActions(alert, actions)))
+// CreatePlanForStep 为序列中某一步创建 plan（PlanExecutor 接口）。
+func (c *PlanCreator) CreatePlanForStep(ctx context.Context, alert Alert, action AlertAction, stepIdx int, prevResults []StepResult) error {
 	if c.planSvc == nil {
-		log.Printf("[alert-auto-plan] planSvc is nil, skipping")
-		return
+		return fmt.Errorf("plan service not configured")
 	}
-	if alert.Status != StatusFiring {
-		log.Printf("[alert-auto-plan] alert status=%q not firing, skipping", alert.Status)
-		return
+	if stepIdx < 0 || stepIdx >= len(action.ToolSequence) {
+		return fmt.Errorf("step index %d out of range", stepIdx)
 	}
 
-	matched := MatchActions(alert, actions)
-	if len(matched) == 0 {
-		return
+	step := action.ToolSequence[stepIdx]
+	tool, ok := tools.Lookup(step.Tool)
+	if !ok {
+		return fmt.Errorf("tool %q not registered", step.Tool)
 	}
+
+	input := step.RenderInput(alert)
 
 	user := identity.CurrentUser{
 		Subject:             "alert-auto-plan",
@@ -46,31 +46,19 @@ func (c *PlanCreator) CreatePlansForAlert(ctx context.Context, alert Alert, acti
 		AllowedEnvironments: []string{"prod", "staging", "dev"},
 	}
 
-	for _, action := range matched {
-		tool, ok := tools.Lookup(action.Tool)
-		if !ok {
-			log.Printf("[alert-auto-plan] tool %q not registered, skipping", action.Tool)
-			continue
-		}
-
-		input := action.RenderInput(alert)
-
-		decision := policy.Evaluate(user, tool, input)
-		if !decision.Allowed {
-			log.Printf("[alert-auto-plan] policy denies %q: %s", action.Tool, decision.Reason)
-			continue
-		}
-
-		// 强制 RequiresConfirmation=true（告警触发的 plan 必须人工确认）
-		decision.RequiresConfirmation = true
-
-		plan, err := c.planSvc.CreatePlan(ctx, user, decision, input)
-		if err != nil {
-			continue
-		}
-
-		_ = c.alertSvc.UpdateDescription(ctx, alert.ID,
-			fmt.Sprintf("已自动创建待审批计划 (plan: %s, 工具: %s, 描述: %s)",
-				plan.ID, action.Tool, action.Description))
+	decision := policy.Evaluate(user, tool, input)
+	if !decision.Allowed {
+		return fmt.Errorf("policy denies %q: %s", step.Tool, decision.Reason)
 	}
+
+	// 告警触发的 plan 必须人工确认
+	decision.RequiresConfirmation = true
+
+	plan, err := c.planSvc.CreatePlan(ctx, user, decision, input)
+	if err != nil {
+		return fmt.Errorf("create plan: %w", err)
+	}
+
+	log.Printf("[alert-auto-plan] created plan %s for step %d (tool=%s)", plan.ID[:8], stepIdx+1, step.Tool)
+	return nil
 }

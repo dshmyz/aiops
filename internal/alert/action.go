@@ -8,15 +8,21 @@ import (
 	"strings"
 )
 
-// AlertAction 定义一条告警→动作的映射规则：匹配到 critical 告警时自动创建 action plan。
-// AlertMatch 按 AND 语义匹配（所有指定字段都必须匹配）。模板字段用 {labels.xxx}
-// 引用告警的 labels 值，{environment} 引用告警环境。
+// AlertAction 定义一条告警→动作的编排规则。
+// ToolSequence 是按序执行的工具序列（诊断+处置）；最后一步若是写操作
+// 且 ExecuteLastStep=false，则自动创建 PendingConfirmation plan 等人工确认。
 type AlertAction struct {
-	Name        string            `json:"name"`
-	AlertMatch  AlertMatch        `json:"alert_match"`
-	Tool        string            `json:"tool"`
-	Input       map[string]string `json:"input"`
-	Description string            `json:"description"`
+	Name             string            `json:"name"`
+	AlertMatch       AlertMatch        `json:"alert_match"`
+	ToolSequence     []AlertActionStep `json:"tool_sequence"`
+	ExecuteLastStep  bool              `json:"execute_last_step,omitempty"` // true=直接执行最后一步，false=建 plan
+	Description      string            `json:"description"`
+}
+
+// AlertActionStep 是序列中的一步。
+type AlertActionStep struct {
+	Tool  string            `json:"tool"`            // 工具名（alert.query / event.query / kafka.consumer_lag.read / ...）
+	Input map[string]string `json:"input,omitempty"` // 输入模板，{xxx} 引用告警字段
 }
 
 // AlertMatch 匹配条件（AND 语义）。
@@ -40,14 +46,11 @@ func (a *AlertAction) Match(alert Alert) bool {
 	return true
 }
 
-// RenderInput 把模板里的 {xxx} 占位符替换为告警的实际值。
-// 支持 {labels.xxx}、{environment}、{title}、{resource_name}。
-// 数值字符串（"72"）会被转为 int，以通过 policy 的类型校验。
-func (a *AlertAction) RenderInput(alert Alert) map[string]any {
-	result := make(map[string]any, len(a.Input))
-	for k, tpl := range a.Input {
+// RenderStepInput 渲染单步的输入模板。
+func (step *AlertActionStep) RenderInput(alert Alert) map[string]any {
+	result := make(map[string]any, len(step.Input))
+	for k, tpl := range step.Input {
 		val := renderTemplate(tpl, alert)
-		// 尝试解析为 int（多数参数校验器期望 int/float64 而非 string）
 		if i, err := strconv.Atoi(val); err == nil {
 			result[k] = i
 		} else {
@@ -63,7 +66,6 @@ func renderTemplate(tpl string, alert Alert) string {
 	result = strings.ReplaceAll(result, "{title}", alert.Title)
 	result = strings.ReplaceAll(result, "{resource_name}", alert.ResourceName)
 	result = strings.ReplaceAll(result, "{resource_type}", alert.ResourceType)
-	// {labels.xxx}
 	for {
 		idx := strings.Index(result, "{labels.")
 		if idx < 0 {

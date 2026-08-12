@@ -352,9 +352,8 @@ func main() {
 	// COPILOT_ALERT_AUTO_PLAN / COPILOT_ALERT_ACTIONS_JSON）。
 	alertWebhook := httpapi.NewAlertWebhookService(alertSvc, auditService)
 	if os.Getenv("COPILOT_ALERT_AUTO_DIAGNOSE") == "1" {
-		// 优先用多步链式研判（alert.query → event.query → domain.read），
-		// 回退到单步研判（仅调 domain.read）。
-		chainDiag := alert.NewChainDiagnoser(diagService, alertSvc, readService.ExecuteRead)
+		planCreator := alert.NewPlanCreator(planService, alertSvc)
+		chainDiag := alert.NewChainDiagnoser(diagService, alertSvc, planCreator, readService.ExecuteRead)
 		alertWebhook = alertWebhook.WithChainDiagnoser(chainDiag)
 	}
 	if os.Getenv("COPILOT_ALERT_AUTO_PLAN") == "1" {
@@ -362,7 +361,7 @@ func main() {
 		if loadErr != nil {
 			logger.Warn("load alert actions", zap.Error(loadErr))
 		} else if len(alertActions) > 0 {
-			alertWebhook = alertWebhook.WithPlanCreator(alert.NewPlanCreator(planService, alertSvc), alertActions)
+			alertWebhook = alertWebhook.WithActions(alertActions)
 		}
 	}
 	options = append(options, httpapi.WithAlertWebhook(alertWebhook))
