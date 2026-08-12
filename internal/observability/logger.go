@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // loggerHolder keeps a single process-wide zap.Logger so that all packages
@@ -15,8 +16,8 @@ var loggerHolder atomic.Pointer[zap.Logger]
 
 // InitLogger initializes the global zap.Logger with the given level string.
 // Supported levels: debug, info, warn, error (case-insensitive). Unknown
-// levels default to info. The logger writes JSON to stdout and includes the
-// "service" field on every entry.
+// levels default to info.
+// COPILOT_LOG_FORMAT 控制输出格式：json（默认，生产）或 console（开发，人类可读）。
 func InitLogger(level string) *zap.Logger {
 	zapLevel := zap.InfoLevel
 	switch strings.ToLower(strings.TrimSpace(level)) {
@@ -30,9 +31,22 @@ func InitLogger(level string) *zap.Logger {
 		zapLevel = zap.ErrorLevel
 	}
 
-	cfg := zap.NewProductionConfig()
+	var cfg zap.Config
+	logFormat := strings.ToLower(strings.TrimSpace(os.Getenv("COPILOT_LOG_FORMAT")))
+
+	if logFormat == "console" {
+		// 开发模式：人类可读的 console 格式，带颜色和缩进
+		cfg = zap.NewDevelopmentConfig()
+		cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+		cfg.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("15:04:05")
+		cfg.EncoderConfig.EncodeCaller = zapcore.ShortCallerEncoder
+	} else {
+		// 生产模式：JSON 格式
+		cfg = zap.NewProductionConfig()
+		cfg.Encoding = "json"
+	}
+
 	cfg.Level = zap.NewAtomicLevelAt(zapLevel)
-	cfg.Encoding = "json"
 	cfg.OutputPaths = []string{"stdout"}
 	cfg.ErrorOutputPaths = []string{"stderr"}
 	cfg.InitialFields = map[string]any{

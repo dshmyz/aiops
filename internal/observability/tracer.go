@@ -19,6 +19,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// noopSpanExporter 丢弃所有 span（OTLP 未配置时的默认行为，避免 stdout 被 span JSON 刷屏）。
+type noopSpanExporter struct{}
+
+func (n *noopSpanExporter) ExportSpans(_ context.Context, _ []sdktrace.ReadOnlySpan) error { return nil }
+func (n *noopSpanExporter) Shutdown(_ context.Context) error                              { return nil }
+
 // tracerName is the single tracer used across the copilot backend so that all
 // spans share a common instrumentation scope.
 const tracerName = "github.com/gracegaoya/ai-operations-copilot"
@@ -68,7 +74,11 @@ func InitTracer(ctx context.Context, cfg Config) (func(context.Context) error, e
 
 func buildExporter(ctx context.Context, cfg Config) (sdktrace.SpanExporter, error) {
 	switch cfg.Exporter {
-	case "", "stdout":
+	case "":
+		// 未配置 OTLP 时默认不导出 span 到 stdout（避免日志被 span JSON 刷屏）。
+		// 如需本地调试可设 COPILOT_OTEL_EXPORTER=stdout。
+		return &noopSpanExporter{}, nil
+	case "stdout":
 		return stdouttrace.New(stdouttrace.WithWriter(os.Stdout), stdouttrace.WithPrettyPrint())
 	case "otlp":
 		opts := []otlptracehttp.Option{otlptracehttp.WithInsecure()}
