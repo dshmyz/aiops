@@ -3,6 +3,7 @@ package alert
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
 	"github.com/gracegaoya/ai-operations-copilot/internal/plans"
@@ -23,10 +24,14 @@ func NewPlanCreator(planSvc *plans.Service, alertSvc *Service) *PlanCreator {
 
 // CreatePlansForAlert 为一条告警匹配所有 action 规则，为每条命中的规则创建 plan。
 func (c *PlanCreator) CreatePlansForAlert(ctx context.Context, alert Alert, actions []AlertAction) {
+	log.Printf("[alert-auto-plan] CreatePlansForAlert called: alert=%s status=%s severity=%s matched_rules=%d",
+		alert.Title, alert.Status, alert.Severity, len(MatchActions(alert, actions)))
 	if c.planSvc == nil {
+		log.Printf("[alert-auto-plan] planSvc is nil, skipping")
 		return
 	}
 	if alert.Status != StatusFiring {
+		log.Printf("[alert-auto-plan] alert status=%q not firing, skipping", alert.Status)
 		return
 	}
 
@@ -44,6 +49,7 @@ func (c *PlanCreator) CreatePlansForAlert(ctx context.Context, alert Alert, acti
 	for _, action := range matched {
 		tool, ok := tools.Lookup(action.Tool)
 		if !ok {
+			log.Printf("[alert-auto-plan] tool %q not registered, skipping", action.Tool)
 			continue
 		}
 
@@ -51,6 +57,7 @@ func (c *PlanCreator) CreatePlansForAlert(ctx context.Context, alert Alert, acti
 
 		decision := policy.Evaluate(user, tool, input)
 		if !decision.Allowed {
+			log.Printf("[alert-auto-plan] policy denies %q: %s", action.Tool, decision.Reason)
 			continue
 		}
 

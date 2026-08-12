@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -41,10 +42,17 @@ func (a *AlertAction) Match(alert Alert) bool {
 
 // RenderInput 把模板里的 {xxx} 占位符替换为告警的实际值。
 // 支持 {labels.xxx}、{environment}、{title}、{resource_name}。
+// 数值字符串（"72"）会被转为 int，以通过 policy 的类型校验。
 func (a *AlertAction) RenderInput(alert Alert) map[string]any {
 	result := make(map[string]any, len(a.Input))
 	for k, tpl := range a.Input {
-		result[k] = renderTemplate(tpl, alert)
+		val := renderTemplate(tpl, alert)
+		// 尝试解析为 int（多数参数校验器期望 int/float64 而非 string）
+		if i, err := strconv.Atoi(val); err == nil {
+			result[k] = i
+		} else {
+			result[k] = val
+		}
 	}
 	return result
 }
