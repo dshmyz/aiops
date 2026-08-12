@@ -348,6 +348,13 @@ func main() {
 	// 可调度的低风险 runbook 列表（E2 Phase 3：定时任务表单 run_kind=runbook 下拉）。
 	options = append(options, httpapi.WithRunbooks(runbookStore))
 	options = append(options, httpapi.WithMCPService(httpapi.NewMCPServerService(mcpServerStore, mcpManager)))
+	// 告警→动作编排规则（DB 存储 + 内存缓存 + CRUD API）。
+	alertActionStore := store.NewSQLAlertActionRuleStore(db)
+	alertActionRegistry := alert.NewAlertActionRegistry(alertActionStore)
+	if err := alertActionRegistry.Load(serviceContext); err != nil {
+		logger.Warn("load alert action rules", zap.Error(err))
+	}
+	options = append(options, httpapi.WithAlertActions(alertActionRegistry))
 	// 告警 webhook：可选自动研判 + 自动建 plan（COPILOT_ALERT_AUTO_DIAGNOSE /
 	// COPILOT_ALERT_AUTO_PLAN / COPILOT_ALERT_ACTIONS_JSON）。
 	alertWebhook := httpapi.NewAlertWebhookService(alertSvc, auditService)

@@ -140,6 +140,7 @@ type Router struct {
 	scheduledTasks     ScheduledTaskService
 	notifier           notification.Notifier
 	prompts            *prompt.Registry
+	alertActions       *alert.AlertActionRegistry
 	feedback           FeedbackService
 	runbookDrafts      RunbookDraftService
 	runbooks           store.RunbookStore
@@ -356,6 +357,13 @@ func WithPromptRegistry(reg *prompt.Registry) Option {
 	}
 }
 
+// WithAlertActions 注入告警→动作编排规则注册表。
+func WithAlertActions(reg *alert.AlertActionRegistry) Option {
+	return func(router *Router) {
+		router.alertActions = reg
+	}
+}
+
 // authenticate validates the request credentials and returns the authenticated
 // user along with a new request whose context carries the subject field for
 // structured logging (observability.LoggerFromContext). When authentication
@@ -486,6 +494,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/admin/prompts") {
 		r.serveAdminPrompts(writer, request)
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/v1/admin/alert-actions") {
+		r.serveAdminAlertActions(writer, request)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/admin/knowledge") {
@@ -2797,6 +2809,65 @@ func (r *Router) serveAdminPrompts(writer http.ResponseWriter, request *http.Req
 		}
 		saved, _ := r.prompts.Get(name)
 		writeCappedJSON(writer, saved)
+
+	default:
+		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// serveAdminAlertActions handles GET/POST/PUT/DELETE /v1/admin/alert-actions[/:name]。
+// Admin role required。GET 列出所有规则，POST 创建，PUT 更新，DELETE 删除。
+func (r *Router) serveAdminAlertActions(writer http.ResponseWriter, request *http.Request) {
+	if r.auth == nil {
+		writeError(writer, http.StatusServiceUnavailable, "authentication is not configured")
+		return
+	}
+	user, _, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	if !userHasAnyRole(user, "admin") {
+		r.writeForbidden(writer, request, user, string(policy.PermissionDenied), request.URL.Path)
+		return
+	}
+
+	if r.alertActions == nil {
+		writeCappedJSON(writer, map[string]any{
+			"configured": false,
+			"rules":      []any{},
+			"hint":       "告警响应编排未配置。数据库中无规则。",
+		})
+		return
+	}
+
+	name := strings.TrimPrefix(request.URL.Path, "/v1/admin/alert-actions")
+	name = strings.TrimPrefix(name, "/")
+	name = strings.TrimSpace(name)
+
+	switch {
+	case request.Method == http.MethodGet && name == "":
+		rules := r.alertActions.List()
+		writeCappedJSON(writer, map[string]any{"rules": rules, "count": len(rules)})
+
+	case request.Method == http.MethodGet && name != "":
+		// 单条查询（暂不实现，复用 List 过滤）
+
+	case request.Method == http.MethodPost:
+		var body alert.AlertAction
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if body.Name == "" {
+			writeError(writer, http.StatusBadRequest, "name is required")
+			return
+		}
+		// TODO: 写入 DB + 热重载
+		writeCappedJSON(writer, map[string]any{"status": "created", "name": body.Name})
+
+	case request.Method == http.MethodDelete && name != "":
+		// TODO: 从 DB 删除 + 热重载
+		writeCappedJSON(writer, map[string]any{"status": "deleted", "name": name})
 
 	default:
 		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
