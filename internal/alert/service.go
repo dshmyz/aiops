@@ -46,6 +46,11 @@ func (s *Service) Ingest(ctx context.Context, p WebhookPayload) (IngestResult, e
 	return IngestResult{Alert: fromStoreAlert(saved), Created: created}, nil
 }
 
+// UpdateDescription 更新告警的 description 字段（自动研判结果回写）。
+func (s *Service) UpdateDescription(ctx context.Context, id, description string) error {
+	return s.store.UpdateDescription(ctx, id, description)
+}
+
 // Query 按过滤条件查询告警。
 func (s *Service) Query(ctx context.Context, f store.AlertFilter) ([]Alert, error) {
 	records, err := s.store.Query(ctx, f)

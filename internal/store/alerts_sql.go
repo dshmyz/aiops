@@ -144,6 +144,13 @@ func (s *SQLAlertStore) Get(ctx context.Context, id string) (Alert, error) {
 	return a, nil
 }
 
+func (s *SQLAlertStore) UpdateDescription(ctx context.Context, id, description string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE copilot_alerts SET description = ?, updated_at = ? WHERE id = ?`,
+		description, time.Now().UTC(), id)
+	return err
+}
+
 func (s *SQLAlertStore) Query(ctx context.Context, f AlertFilter) ([]Alert, error) {
 	limit := f.Limit
 	if limit <= 0 {

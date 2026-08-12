@@ -127,16 +127,32 @@ func (r *Router) verifyAlertWebhookSignature(request *http.Request) bool {
 
 // alertWebhookService 把 internal/alert.Service 与 audit.Service 组合：
 // 每次 webhook 接收都记录审计事件。webhook 无用户身份，Subject 用来源
-// 系统名，形成闭环可追溯。
+// 系统名，形成闭环可追溯。可选地在落地后异步触发自动研判和自动建 plan。
 type alertWebhookService struct {
-	svc   *alert.Service
-	audit *audit.Service
-	now   func() time.Time
+	svc          *alert.Service
+	audit        *audit.Service
+	diagnoser    *alert.Diagnoser
+	planCreator  *alert.PlanCreator
+	actions      []alert.AlertAction
+	now          func() time.Time
 }
 
 // NewAlertWebhookService 创建一个带审计的组合 webhook 服务。
 func NewAlertWebhookService(svc *alert.Service, auditService *audit.Service) *alertWebhookService {
 	return &alertWebhookService{svc: svc, audit: auditService, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// WithDiagnoser 配置自动研判（告警落地后异步触发诊断）。
+func (s *alertWebhookService) WithDiagnoser(d *alert.Diagnoser) *alertWebhookService {
+	s.diagnoser = d
+	return s
+}
+
+// WithPlanCreator 配置自动建 plan（告警落地后异步创建 action plan）。
+func (s *alertWebhookService) WithPlanCreator(pc *alert.PlanCreator, actions []alert.AlertAction) *alertWebhookService {
+	s.planCreator = pc
+	s.actions = actions
+	return s
 }
 
 func (s *alertWebhookService) Ingest(ctx context.Context, p alert.WebhookPayload) (alert.IngestResult, error) {
@@ -155,6 +171,16 @@ func (s *alertWebhookService) Ingest(ctx context.Context, p alert.WebhookPayload
 		"status":   result.Alert.Status,
 		"created":  result.Created,
 	})
+
+	// 异步触发自动研判 + 自动建 plan（不阻塞 webhook 响应）。
+	a := result.Alert
+	if s.diagnoser != nil {
+		go s.diagnoser.Diagnose(context.Background(), a)
+	}
+	if s.planCreator != nil && len(s.actions) > 0 {
+		go s.planCreator.CreatePlansForAlert(context.Background(), a, s.actions)
+	}
+
 	return result, nil
 }
 

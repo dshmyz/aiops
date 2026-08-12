@@ -52,6 +52,7 @@ const maxAlertLimit = 200
 type AlertStore interface {
 	Upsert(ctx context.Context, a Alert) (Alert, bool, error)
 	Get(ctx context.Context, id string) (Alert, error)
+	UpdateDescription(ctx context.Context, id, description string) error
 	Query(ctx context.Context, f AlertFilter) ([]Alert, error)
 	ListActive(ctx context.Context, environment string, limit int) ([]Alert, error)
 	Resolve(ctx context.Context, externalID, source string) (Alert, error)
@@ -125,6 +126,19 @@ func (s *MemoryAlertStore) Get(ctx context.Context, id string) (Alert, error) {
 		return Alert{}, ErrNotFound
 	}
 	return cloneStoreAlert(a), nil
+}
+
+func (s *MemoryAlertStore) UpdateDescription(_ context.Context, id, description string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.byID[id]
+	if !ok {
+		return ErrNotFound
+	}
+	a.Description = description
+	a.UpdatedAt = s.clock()
+	s.byID[id] = a
+	return nil
 }
 
 func (s *MemoryAlertStore) Query(ctx context.Context, f AlertFilter) ([]Alert, error) {

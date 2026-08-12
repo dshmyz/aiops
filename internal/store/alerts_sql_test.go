@@ -180,3 +180,33 @@ func TestSQLiteMigrationsIncludeCopilotAlerts(t *testing.T) {
 		t.Error("migrations list does not contain 012_alerts.sql")
 	}
 }
+
+func TestSQLAlertStoreUpdateDescription(t *testing.T) {
+	t.Parallel()
+	db := testSQLite(t)
+	if err := ApplySQLiteMigrations(db); err != nil {
+		t.Fatalf("apply sqlite migrations: %v", err)
+	}
+	ctx := context.Background()
+	s := NewSQLAlertStore(db)
+
+	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	created, _, err := s.Upsert(ctx, Alert{
+		ExternalID: "upd-1", Source: "alertmanager", Title: "t",
+		Severity: "critical", Status: "firing", Environment: "prod",
+		FiredAt: now, ReceivedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := s.UpdateDescription(ctx, created.ID, "自动研判: 高 CPU"); err != nil {
+		t.Fatalf("UpdateDescription: %v", err)
+	}
+	got, err := s.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Description != "自动研判: 高 CPU" {
+		t.Fatalf("description = %q, want 自动研判: 高 CPU", got.Description)
+	}
+}

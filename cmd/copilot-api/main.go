@@ -348,7 +348,21 @@ func main() {
 	// 可调度的低风险 runbook 列表（E2 Phase 3：定时任务表单 run_kind=runbook 下拉）。
 	options = append(options, httpapi.WithRunbooks(runbookStore))
 	options = append(options, httpapi.WithMCPService(httpapi.NewMCPServerService(mcpServerStore, mcpManager)))
-	options = append(options, httpapi.WithAlertWebhook(httpapi.NewAlertWebhookService(alertSvc, auditService)))
+	// 告警 webhook：可选自动研判 + 自动建 plan（COPILOT_ALERT_AUTO_DIAGNOSE /
+	// COPILOT_ALERT_AUTO_PLAN / COPILOT_ALERT_ACTIONS_JSON）。
+	alertWebhook := httpapi.NewAlertWebhookService(alertSvc, auditService)
+	if os.Getenv("COPILOT_ALERT_AUTO_DIAGNOSE") == "1" {
+		alertWebhook = alertWebhook.WithDiagnoser(alert.NewDiagnoser(diagService, alertSvc))
+	}
+	if os.Getenv("COPILOT_ALERT_AUTO_PLAN") == "1" {
+		alertActions, loadErr := alert.LoadAlertActionsFromEnv()
+		if loadErr != nil {
+			logger.Warn("load alert actions", zap.Error(loadErr))
+		} else if len(alertActions) > 0 {
+			alertWebhook = alertWebhook.WithPlanCreator(alert.NewPlanCreator(planService, alertSvc), alertActions)
+		}
+	}
+	options = append(options, httpapi.WithAlertWebhook(alertWebhook))
 	options = append(options, httpapi.WithAlertWebhookSecret(os.Getenv("COPILOT_ALERT_WEBHOOK_SECRET")))
 	// 告警查询：供 /v1/overview 统计活动告警数（*alert.Service 满足 AlertQueryService）。
 	options = append(options, httpapi.WithAlertQuery(alertSvc))
