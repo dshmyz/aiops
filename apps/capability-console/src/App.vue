@@ -24,6 +24,7 @@ const McpServersView = defineAsyncComponent(() => import('./views/McpServersView
 const MarketplaceView = defineAsyncComponent(() => import('./views/MarketplaceView.vue'));
 import ManagementView from './views/ManagementView.vue';
 const AdminPromptsView = defineAsyncComponent(() => import('./views/AdminPromptsView.vue'));
+const AlertActionsView = defineAsyncComponent(() => import('./views/AlertActionsView.vue'));
 const AdminKnowledgeView = defineAsyncComponent(() => import('./views/AdminKnowledgeView.vue'));
 const FeedbackView = defineAsyncComponent(() => import('./views/FeedbackView.vue'));
 const DocsView = defineAsyncComponent(() => import('./views/DocsView.vue'));
@@ -45,7 +46,7 @@ import type {
   ExecutionResult,
 } from './types';
 
-type ActiveView = 'assistant' | 'management' | 'dashboard' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs';
+type ActiveView = 'assistant' | 'management' | 'dashboard' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs' | 'alert-actions';
 
 const activeView = ref<ActiveView>('assistant');
 
@@ -63,7 +64,7 @@ async function loadCurrentUser() {
 }
 
 // 视图顺序与快捷键映射（Cmd/Ctrl+1..9），顺序与侧栏视觉分组一致
-const viewOrder: ActiveView[] = ['assistant', 'management', 'dashboard', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'knowledge', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace', 'docs'];
+const viewOrder: ActiveView[] = ['assistant', 'management', 'dashboard', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'alert-actions', 'knowledge', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace', 'docs'];
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   // Cmd/Ctrl + 数字 切换视图
@@ -655,6 +656,17 @@ onUnmounted(() => {
           <span v-if="!sidebarCollapsed">Prompt 管理</span>
         </button>
         <button
+          data-test="nav-alert-actions"
+          data-view="alert-actions"
+          class="nav-item"
+          :class="{ active: activeView === 'alert-actions' }"
+          title="告警响应编排"
+          @click="activeView = 'alert-actions'"
+        >
+          <NavIcon name="prompts" />
+          <span v-if="!sidebarCollapsed">告警编排</span>
+        </button>
+        <button
           data-test="nav-knowledge"
           data-view="knowledge"
           class="nav-item"
@@ -940,6 +952,7 @@ onUnmounted(() => {
       />
 
       <AdminPromptsView v-if="activeView === 'prompts'" />
+      <AlertActionsView v-if="activeView === 'alert-actions'" />
 
       <AdminKnowledgeView v-if="activeView === 'knowledge'" />
 
