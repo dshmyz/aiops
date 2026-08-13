@@ -8,21 +8,24 @@ import (
 
 func TestKnownDomainsReturnsAlphabeticallySortedList(t *testing.T) {
 	domains := tools.KnownDomains()
-	if len(domains) != 3 {
-		t.Fatalf("KnownDomains count = %d, want 3", len(domains))
+	if len(domains) != 5 {
+		t.Fatalf("KnownDomains count = %d, want 5", len(domains))
 	}
-	if domains[0] != "glusterfs" || domains[1] != "kafka" || domains[2] != "minio" {
-		t.Fatalf("KnownDomains = %v, want [glusterfs kafka minio] in alpha order", domains)
+	if domains[0] != "glusterfs" || domains[1] != "http" || domains[2] != "kafka" || domains[3] != "minio" || domains[4] != "moonlightbox" {
+		t.Fatalf("KnownDomains = %v, want [glusterfs http kafka minio moonlightbox] in alpha order", domains)
 	}
 }
 
 func TestDomainAliasesReturnsGlusterMapping(t *testing.T) {
 	aliases := tools.DomainAliases()
-	if len(aliases) != 1 {
-		t.Fatalf("DomainAliases count = %d, want 1", len(aliases))
+	if len(aliases) != 4 {
+		t.Fatalf("DomainAliases count = %d, want 4", len(aliases))
 	}
 	if aliases["gluster"] != "glusterfs" {
 		t.Fatalf("aliases[gluster] = %q, want glusterfs", aliases["gluster"])
+	}
+	if aliases["moonlight"] != "moonlightbox" {
+		t.Fatalf("aliases[moonlight] = %q, want moonlightbox", aliases["moonlight"])
 	}
 }
 

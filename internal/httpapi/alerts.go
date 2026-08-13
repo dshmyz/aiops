@@ -131,6 +131,7 @@ func (r *Router) verifyAlertWebhookSignature(request *http.Request) bool {
 type alertWebhookService struct {
 	svc            *alert.Service
 	audit          *audit.Service
+	llmDiagnoser   *alert.LLMDiagnoser   // LLM 智能研判（最高优先级）
 	diagnoser      *alert.Diagnoser
 	chainDiagnoser *alert.ChainDiagnoser
 	actions        []alert.AlertAction
@@ -151,6 +152,13 @@ func (s *alertWebhookService) WithDiagnoser(d *alert.Diagnoser) *alertWebhookSer
 // WithChainDiagnoser 配置多步链式研判（告警落地后异步执行序列）。
 func (s *alertWebhookService) WithChainDiagnoser(d *alert.ChainDiagnoser) *alertWebhookService {
 	s.chainDiagnoser = d
+	return s
+}
+
+// WithLLMDiagnoser 配置 LLM 智能研判（告警落地后异步触发 LLM 分析）。
+// LLM 研判优先级最高：有 LLM 时走 LLM，失败 fallback 到确定性路径。
+func (s *alertWebhookService) WithLLMDiagnoser(d *alert.LLMDiagnoser) *alertWebhookService {
+	s.llmDiagnoser = d
 	return s
 }
 
@@ -177,9 +185,11 @@ func (s *alertWebhookService) Ingest(ctx context.Context, p alert.WebhookPayload
 		"created":  result.Created,
 	})
 
-	// 异步触发链式执行（诊断+处置）+ 自动建 plan（不阻塞 webhook 响应）。
+	// 异步触发研判（不阻塞 webhook 响应）。优先级：LLM 智能 > 链式 > 单步。
 	a := result.Alert
-	if s.chainDiagnoser != nil && len(s.actions) > 0 {
+	if s.llmDiagnoser != nil {
+		go s.llmDiagnoser.Diagnose(context.Background(), a)
+	} else if s.chainDiagnoser != nil && len(s.actions) > 0 {
 		// 按匹配的规则逐条执行完整序列
 		matched := alert.MatchActions(a, s.actions)
 		for _, action := range matched {

@@ -58,6 +58,7 @@ func (m *Manager) WithEventEmitter(emit EmitFunc) *Manager {
 // Reload 从 DB 重新加载配置，增量注册/注销工具，更新快照。
 // 返回 nil 表示成功；DB 错误或 Discover 致命错误时返回 error。
 // 单个服务器连接失败不阻塞其他服务器，只触发 unhealthy 事件。
+// 多个服务器并行 Discover，最多 8 个并发子进程。
 func (m *Manager) Reload(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -68,24 +69,49 @@ func (m *Manager) Reload(ctx context.Context) error {
 		return fmt.Errorf("mcp reload: list enabled servers: %w", err)
 	}
 
-	// 2. 转成 MCPServerConfig 并 Discover 每个服务器的工具
+	// 2. 转成 MCPServerConfig 并并行 Discover 每个服务器的工具
 	configs := make([]MCPServerConfig, 0, len(records))
-	discovered := make(map[string][]MCPTool, len(records))
 	for _, record := range records {
-		config := recordToConfig(record)
-		configs = append(configs, config)
-		mcpTools, err := m.lister.List(ctx, config)
-		if err != nil {
-			// 连接失败：触发 unhealthy 事件，该服务器工具不纳入新快照
+		configs = append(configs, recordToConfig(record))
+	}
+
+	type discoverResult struct {
+		name  string
+		tools []MCPTool
+		err   error
+	}
+	results := make([]discoverResult, len(configs))
+
+	// 并行 Discover：用带 buffer 的 channel 做令牌桶限流。
+	const maxConcurrency = 8
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	for i, config := range configs {
+		wg.Add(1)
+		i, config := i, config
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}        // 获取令牌
+			defer func() { <-sem }() // 释放令牌
+			mcpTools, err := m.lister.List(ctx, config)
+			results[i] = discoverResult{name: config.Name, tools: mcpTools, err: err}
+		}()
+	}
+	wg.Wait()
+
+	// 收集结果：失败的触发 unhealthy 事件，成功的纳入 discovered。
+	discovered := make(map[string][]MCPTool, len(configs))
+	for _, r := range results {
+		if r.err != nil {
 			m.emitEvent(MCPEvent{
 				Type:       EventTypeHealthUnhealthy,
-				ServerName: config.Name,
-				Message:    fmt.Sprintf("reload: list tools failed: %s", err.Error()),
-				Metadata:   map[string]any{"error": err.Error()},
+				ServerName: r.name,
+				Message:    fmt.Sprintf("reload: list tools failed: %s", r.err.Error()),
+				Metadata:   map[string]any{"error": r.err.Error()},
 			})
 			continue
 		}
-		discovered[config.Name] = mcpTools
+		discovered[r.name] = r.tools
 	}
 
 	// 3. 构建新快照

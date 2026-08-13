@@ -385,6 +385,37 @@ export async function fetchOverview(): Promise<OverviewData> {
   return request<OverviewData>('/v1/overview');
 }
 
+export interface AgentMetrics {
+  llm_calls: number;
+  llm_failures: number;
+  llm_failure_rate: number;
+  tool_calls: number;
+  tool_failures: number;
+  tool_failure_rate: number;
+  requests: number;
+  requests_failed: number;
+  consecutive_errors: number;
+  last_error?: string;
+  last_error_at?: string;
+  last_success?: string;
+  agent_enabled: boolean;
+}
+
+export async function fetchAgentMetrics(): Promise<AgentMetrics> {
+  return request<AgentMetrics>('/v1/system/agent/metrics');
+}
+
+export async function setAgentEnabled(enabled: boolean): Promise<{ agent_enabled: boolean; message: string }> {
+  return request(`/v1/system/agent/${enabled ? 'enable' : 'disable'}`, { method: 'POST' });
+}
+
+export async function setAgentTrustLevel(level: 'readonly' | 'confirm' | 'auto'): Promise<{ trust_level: string }> {
+  return request('/v1/system/agent/trust-level', {
+    method: 'POST',
+    body: JSON.stringify({ level }),
+  });
+}
+
 export async function listAuditEvents(filter: AuditEventFilter = {}): Promise<AuditEventPage> {
   const params = new URLSearchParams();
   if (filter.tool) params.set('tool', filter.tool);

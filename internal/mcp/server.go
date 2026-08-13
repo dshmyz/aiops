@@ -39,6 +39,7 @@ type MCPServer struct {
 func NewMCPServer(store capabilities.CapabilityStore, runner execution.ReadRunner, auditSvc *audit.Service) *MCPServer {
 	mcpSrv := server.NewMCPServer("aiops-copilot", "0.8.0",
 		server.WithToolCapabilities(false),
+		server.WithPaginationLimit(50), // 每页最多 50 个工具，避免数百工具一次性塞满客户端 context
 	)
 	return NewMCPServerFrom(mcpSrv, store, runner, auditSvc)
 }

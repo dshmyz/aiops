@@ -95,6 +95,10 @@ type Service struct {
 	// autonomy 是 Low-Risk Admission Controller（E2）。为 nil 时自动执行一律禁用
 	// （fail-closed），所有写操作退化为 confirmation_required，与 launch 前的行为一致。
 	autonomy *autonomy.Controller
+	// agentExecutor 是基于 LLM function calling 的新执行器。
+	// 不为 nil 时，handleStatelessWithHistory 走新路径（LLM 自主选工具），
+	// 跳过旧的 planner + capability matching 链路。
+	agentExecutor *AgentExecutor
 }
 
 // ExecutionRunner 自动执行已确认的 plan（低风险 Runbook 路径）。
@@ -221,6 +225,13 @@ func (s *Service) WithAgentLoop(enabled bool) *Service {
 // (fail-closed) and writes fall back to confirmation_required.
 func (s *Service) WithAutonomy(c *autonomy.Controller) *Service {
 	s.autonomy = c
+	return s
+}
+
+// WithAgentExecutor 注入基于 LLM function calling 的执行器。
+// 设置后 handleStatelessWithHistory 走新路径：LLM 自主选工具、自动循环。
+func (s *Service) WithAgentExecutor(e *AgentExecutor) *Service {
+	s.agentExecutor = e
 	return s
 }
 
@@ -410,6 +421,11 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 			s.progressEmitter = nil
 			s.toolCallEmitter = nil
 		}()
+		// 新路径：AgentExecutor（LLM function calling）
+		if s.agentExecutor != nil {
+			s.runAgentExecutorInStream(ctx, events, user, message, history, conv.ID, hasConversation)
+			return
+		}
 		if s.agentEnabled() {
 			s.runAgentLoopInStream(ctx, events, user, message, history, pageContext, conv.ID, hasConversation)
 			return
@@ -589,6 +605,90 @@ func (s *Service) fallbackPlanStream(ctx context.Context, user identity.CurrentU
 	return events
 }
 
+// runAgentExecutorInStream 用 AgentExecutor（LLM function calling）流式处理请求。
+func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- StreamEvent, user identity.CurrentUser, message string, history []Turn, convID string, hasConversation bool) {
+	// 安全发送：ctx 取消或 channel 满时不再阻塞
+	send := func(ev StreamEvent) bool {
+		select {
+		case events <- ev:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	// panic 保护：单个请求崩溃不影响进程
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[agent] stream panic recovered: %v\n", r)
+			send(StreamEvent{Err: fmt.Errorf("internal error: %v", r), Done: true})
+		}
+	}()
+
+	// 发送 progress 事件：正在规划
+	if !send(StreamEvent{Progress: &ProgressEvent{Stage: "planning"}}) {
+		return
+	}
+
+	// 用 RunWithCallback 逐步推送工具调用事件
+	result := s.agentExecutor.RunWithCallback(ctx, message, history, func(step AgentStepEvent) {
+		send(StreamEvent{
+			Step: &StepEvent{
+				Tool:      step.Tool,
+				StepIndex: step.Step,
+				Status:    step.Status,
+				Summary:   step.Summary,
+			},
+		})
+	})
+	if result.Error != nil {
+		send(StreamEvent{Err: result.Error, Done: true})
+		return
+	}
+	if result.Answer == "" {
+		send(StreamEvent{
+			Response: &Response{
+				Type:    "answer",
+				Message: "已执行工具但未生成回复",
+			},
+			Done: true,
+		})
+		return
+	}
+	response := Response{
+		Type:    "answer",
+		Message: result.Answer,
+		Answer:  map[string]any{"message": result.Answer},
+	}
+	// 二阶段格式化
+	if s.formatter != nil {
+		factSet := make([]ToolFact, 0, len(result.ToolCalls))
+		for _, tc := range result.ToolCalls {
+			factSet = append(factSet, ToolFact{Tool: tc.Tool, Result: tc.Output})
+		}
+		req := FormatRequest{Tool: "agent", Answer: map[string]any{"message": result.Answer}, FactSet: factSet}
+		if formatted, err := s.formatter.Format(ctx, req); err == nil {
+			if strings.TrimSpace(formatted.Summary) != "" {
+				response.Summary = formatted.Summary
+				response.Message = formatted.Summary
+			}
+			if len(formatted.Blocks) > 0 {
+				response.Blocks = formatted.Blocks
+			}
+		}
+	}
+	// 持久化 turn（流式路径必须在发送 response 前完成）
+	if hasConversation {
+		assistantTurnID, perr := s.persistTurns(ctx, convID, message, response)
+		if perr != nil {
+			fmt.Printf("[agent] persist turns failed: %v\n", perr)
+		} else {
+			response.ConversationID = convID
+			response.TurnID = assistantTurnID
+		}
+	}
+	send(StreamEvent{Response: &response, Done: true})
+}
+
 // handleStateless preserves the pre-multiturn behavior: no history, no
 // persistence. Used when no conversation store is configured AND as the inner
 // planning pipeline for the multiturn path.
@@ -597,10 +697,59 @@ func (s *Service) handleStateless(ctx context.Context, user identity.CurrentUser
 }
 
 func (s *Service) handleStatelessWithHistory(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) (Response, error) {
+	// 新路径：基于 LLM function calling 的 Agent 执行器
+	if s.agentExecutor != nil {
+		return s.handleWithAgentExecutor(ctx, user, message, history)
+	}
+	// 旧路径：planner + capability matching
 	planCtx, planSpan := tracer().Start(ctx, "planner.Plan")
 	intent, err := s.planner.Plan(planCtx, user, message, history, pageContext)
 	planSpan.End()
 	return s.executeFromIntent(ctx, user, message, intent, err)
+}
+
+// handleWithAgentExecutor 用 AgentExecutor（LLM function calling）处理请求。
+func (s *Service) handleWithAgentExecutor(ctx context.Context, user identity.CurrentUser, message string, history []Turn) (Response, error) {
+	result := s.agentExecutor.Run(ctx, message, history)
+	if result.Error != nil {
+		return Response{}, result.Error
+	}
+	if result.Answer == "" {
+		return Response{
+			Type:    "answer",
+			Message: "已执行工具但未生成回复",
+		}, nil
+	}
+	response := Response{
+		Type:    "answer",
+		Message: result.Answer,
+		Answer:  map[string]any{"message": result.Answer},
+	}
+	// 二阶段格式化：把 LLM 回复转为结构化 Summary + Blocks
+	if s.formatter != nil {
+		factSet := make([]ToolFact, 0, len(result.ToolCalls))
+		for _, tc := range result.ToolCalls {
+			factSet = append(factSet, ToolFact{
+				Tool:   tc.Tool,
+				Result: tc.Output,
+			})
+		}
+		req := FormatRequest{
+			Tool:    "agent",
+			Answer:  map[string]any{"message": result.Answer},
+			FactSet: factSet,
+		}
+		if formatted, err := s.formatter.Format(ctx, req); err == nil {
+			if strings.TrimSpace(formatted.Summary) != "" {
+				response.Summary = formatted.Summary
+				response.Message = formatted.Summary
+			}
+			if len(formatted.Blocks) > 0 {
+				response.Blocks = formatted.Blocks
+			}
+		}
+	}
+	return response, nil
 }
 
 // executeFromIntent runs the policy + plan + execution pipeline for a

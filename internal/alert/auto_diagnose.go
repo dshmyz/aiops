@@ -2,8 +2,12 @@ package alert
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
@@ -13,11 +17,18 @@ import (
 type Diagnoser struct {
 	diag     *diagnostics.Service
 	alertSvc *Service
+	chat     model.BaseChatModel // 可选：LLM 用于智能 domain 推断
 }
 
 // NewDiagnoser 创建自动研判器。
 func NewDiagnoser(diag *diagnostics.Service, alertSvc *Service) *Diagnoser {
 	return &Diagnoser{diag: diag, alertSvc: alertSvc}
+}
+
+// WithChatModel 注入 LLM 模型，用于智能 domain 推断。不注入则走关键词匹配。
+func (d *Diagnoser) WithChatModel(chat model.BaseChatModel) *Diagnoser {
+	d.chat = chat
+	return d
 }
 
 // Diagnose 对一条 firing 告警做自动研判，把诊断结果摘要写回 alert.Description。
@@ -32,7 +43,7 @@ func (d *Diagnoser) Diagnose(ctx context.Context, alert Alert) {
 
 	domain := alert.Domain
 	if domain == "" {
-		domain = guessDomain(alert)
+		domain = d.inferDomain(ctx, alert)
 	}
 	if domain == "" {
 		return // 没有 domain 无法诊断
@@ -81,7 +92,63 @@ func (d *Diagnoser) Diagnose(ctx context.Context, alert Alert) {
 	_ = d.alertSvc.UpdateDescription(ctx, alert.ID, desc)
 }
 
-// guessDomain 从告警 title/labels 猜测 domain。
+// inferDomain 智能推断告警所属 domain。有 LLM 时用 LLM，否则走关键词匹配。
+func (d *Diagnoser) inferDomain(ctx context.Context, alert Alert) string {
+	// 优先用 LLM 推断
+	if d.chat != nil {
+		if domain := d.llmInferDomain(ctx, alert); domain != "" {
+			return domain
+		}
+	}
+	// fallback 到关键词匹配
+	return guessDomain(alert)
+}
+
+// llmInferDomain 用 LLM 从告警上下文推断 domain。
+func (d *Diagnoser) llmInferDomain(ctx context.Context, alert Alert) string {
+	prompt := fmt.Sprintf(`分析以下告警，判断它属于哪个运维领域。只返回 JSON：
+{
+  "domain": "kafka|minio|glusterfs|moonlightbox|unknown",
+  "confidence": 0.0-1.0,
+  "reasoning": "判断依据"
+}
+
+可用领域：
+- kafka：消息队列相关（消费者延迟、Topic、Broker）
+- minio：对象存储相关（Bucket、存储容量）
+- glusterfs：分布式文件系统（卷、存储）
+- moonlightbox：制品仓库管理（包、代理、缓存）
+- unknown：无法判断
+
+告警信息：
+标题: %s
+描述: %s
+严重级别: %s
+标签: %v`,
+		alert.Title, alert.Description, alert.Severity, alert.Labels)
+
+	resp, err := d.chat.Generate(ctx, []*schema.Message{
+		schema.SystemMessage("你是运维领域分类专家，只返回 JSON。"),
+		schema.UserMessage(prompt),
+	})
+	if err != nil {
+		return ""
+	}
+
+	var result struct {
+		Domain     string  `json:"domain"`
+		Confidence float64 `json:"confidence"`
+	}
+	if err := json.Unmarshal([]byte(resp.Content), &result); err != nil {
+		return ""
+	}
+	if result.Domain == "" || result.Domain == "unknown" || result.Confidence < 0.5 {
+		return ""
+	}
+	return result.Domain
+}
+
+// guessDomain 从告警 title/labels 关键词猜测 domain（LLM fallback）。
 func guessDomain(alert Alert) string {
 	// 优先用告警自身 domain
 	if alert.Domain != "" {

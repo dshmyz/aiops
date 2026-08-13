@@ -566,3 +566,84 @@ func TestHTTPAdapterRetriesExhaustedReturnsError(t *testing.T) {
 		t.Fatalf("err = %v, want HTTP 503 after retries exhausted", err)
 	}
 }
+
+func TestHTTPAdapterInjectsBearerTokenOnRead(t *testing.T) {
+	t.Parallel()
+	var capturedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"data":{"usage_pct":86}}`))
+	}))
+	defer server.Close()
+
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	capability.Backend.Auth = capabilities.BackendAuthConfig{
+		Type:  "bearer",
+		Token: "test-token-123",
+	}
+
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{
+		"environment": "prod", "cluster": "m1", "bucket": "archive",
+	})
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	if capturedAuth != "Bearer test-token-123" {
+		t.Fatalf("Authorization = %q, want 'Bearer test-token-123'", capturedAuth)
+	}
+	if result.Data["usage_pct"] != float64(86) {
+		t.Fatalf("result data = %+v", result.Data)
+	}
+}
+
+func TestHTTPAdapterInjectsBearerTokenOnWrite(t *testing.T) {
+	t.Parallel()
+	var capturedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"status":"applied"}`))
+	}))
+	defer server.Close()
+
+	capability := validWriteCapability()
+	capability.Backend.BaseURL = server.URL
+	capability.Backend.Auth = capabilities.BackendAuthConfig{
+		Type:  "bearer",
+		Token: "write-token-456",
+	}
+
+	_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{
+		"environment": "prod", "cluster": "m1", "bucket": "archive", "quota": 100,
+	})
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	if capturedAuth != "Bearer write-token-456" {
+		t.Fatalf("Authorization = %q, want 'Bearer write-token-456'", capturedAuth)
+	}
+}
+
+func TestHTTPAdapterNoAuthWhenTypeEmpty(t *testing.T) {
+	t.Parallel()
+	var capturedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"data":{"usage_pct":86}}`))
+	}))
+	defer server.Close()
+
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	// BackendAuthConfig zero value — no auth
+
+	_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{
+		"environment": "prod", "cluster": "m1", "bucket": "archive",
+	})
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	if capturedAuth != "" {
+		t.Fatalf("Authorization = %q, want empty", capturedAuth)
+	}
+}

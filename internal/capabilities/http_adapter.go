@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -271,6 +272,7 @@ func (a *HTTPAdapter) executeRead(ctx context.Context, capability Capability, in
 	if err != nil {
 		return NormalizedResult{}, err
 	}
+	injectAuthHeader(request, capability)
 	response, err := a.do(request)
 	if err != nil {
 		return NormalizedResult{}, err
@@ -291,13 +293,22 @@ func (a *HTTPAdapter) executeRead(ctx context.Context, capability Capability, in
 	}
 
 	fields := make(map[string]any)
-	for name, path := range capability.Output.Fields {
-		if isSensitive(name) || isSensitivePath(path) {
-			continue
+	if len(capability.Output.Fields) == 0 {
+		// 没有显式字段映射时，传递原始响应数据（适用于仪表盘/概览类查询）
+		for k, v := range raw {
+			if !isSensitive(k) {
+				fields[k] = v
+			}
 		}
-		if value, ok := extractPath(raw, path); ok {
-			if _, ok := scalarString(value); ok {
-				fields[name] = value
+	} else {
+		for name, path := range capability.Output.Fields {
+			if isSensitive(name) || isSensitivePath(path) {
+				continue
+			}
+			if value, ok := extractPath(raw, path); ok {
+				if _, ok := scalarString(value); ok {
+					fields[name] = value
+				}
 			}
 		}
 	}
@@ -343,6 +354,7 @@ func (a *HTTPAdapter) executeWrite(ctx context.Context, capability Capability, i
 	if len(body) > 0 {
 		request.Header.Set("Content-Type", "application/json")
 	}
+	injectAuthHeader(request, capability)
 	response, err := a.do(request)
 	if err != nil {
 		return NormalizedResult{}, err
@@ -523,6 +535,29 @@ func isSensitivePath(path string) bool {
 		}
 	}
 	return false
+}
+
+// injectAuthHeader 根据 BackendAuthConfig 在 HTTP 请求中注入认证头。
+func injectAuthHeader(req *http.Request, capability Capability) {
+	if capability.Backend.Auth.Type != "bearer" {
+		return
+	}
+	token := resolveAuthToken(capability.Backend.Auth.Token)
+	if token == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+}
+
+// resolveAuthToken 解析 token 值。支持 ${ENV_VAR} 语法：以 ${ 开头、}
+// 结尾时从环境变量读取；否则原样返回。
+func resolveAuthToken(token string) string {
+	token = strings.TrimSpace(token)
+	if strings.HasPrefix(token, "${") && strings.HasSuffix(token, "}") && len(token) > 4 {
+		envName := token[2 : len(token)-1]
+		return os.Getenv(envName)
+	}
+	return token
 }
 
 func scalarString(value any) (string, bool) {

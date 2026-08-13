@@ -1,0 +1,33 @@
+# models.yaml — 模型配置注册表
+# 每个模型定义角色（planner/reasoning/formatter）和连接参数
+
+models:
+  # 主模型：工具调用 + 意图规划
+  planner:
+    provider: openai
+    model: mimo-v2.5
+    base_url: https://token-plan-cn.xiaomimimo.com/v1
+    api_key: ${COPILOT_OPENAI_API_KEY}
+    timeout: 30s
+    max_tokens: 2048
+
+  # 推理模型：深度分析 + 报告生成
+  reasoning:
+    provider: openai
+    model: deepseek-reasoner
+    base_url: https://api.deepseek.com/v1
+    api_key: ${COPILOT_REASONING_API_KEY}
+    timeout: 60s
+    max_tokens: 4096
+
+  # 格式化模型：回复整形（可选，不设则复用 planner）
+  # formatter:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   base_url: https://api.openai.com/v1
+  #   api_key: ${OPENAI_API_KEY}
+
+  # 压缩模型：对话历史摘要（可选，不设则复用 planner）
+  # compactor:
+  #   provider: openai
+  #   model: gpt-4o-mini

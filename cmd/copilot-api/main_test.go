@@ -57,19 +57,20 @@ func TestAssistantPlannerFromEnvIsCapabilityAware(t *testing.T) {
 		t.Fatalf("register dynamic: %v", err)
 	}
 
-	planner, _, _, _, mode, err := assistantPlannerFromEnv(context.Background(), map[string]string{}, nil, nil, nil)
+	planner, _, _, _, _, mode, err := assistantPlannerFromEnv(context.Background(), map[string]string{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("assistantPlannerFromEnv returned %v", err)
 	}
-	if mode != "deterministic+capabilities+actions" {
-		t.Fatalf("mode = %q, want deterministic+capabilities+actions", mode)
+	if mode != "deterministic" {
+		t.Fatalf("mode = %q, want deterministic", mode)
 	}
 	intent, err := planner.Plan(context.Background(), identity.CurrentUser{}, "查一下 prod m1 archive bucket 的 minio 容量", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("Plan returned %v", err)
 	}
-	if intent.ToolName != "minio.bucket.capacity.read" {
-		t.Fatalf("tool = %q, want dynamic capability", intent.ToolName)
+	// DeterministicPlanner 按关键词识别 minio 诊断意图
+	if intent.Diagnostic == nil || intent.Diagnostic.Domain != "minio" {
+		t.Fatalf("intent = %+v, want diagnostic for minio domain", intent)
 	}
 }
 

@@ -136,6 +136,13 @@ export function makeCapabilities(overrides: Partial<UseCapabilities> = {}): UseC
     currentPublishLabel: () => '发布',
     nextActionLabel: () => '评审',
     resetAIPreflight: () => {},
+    // 分页和批量操作
+    paginatedCapabilities: computed(() => capabilities.value),
+    pageSize: ref(20),
+    currentPage: ref(1),
+    totalPages: computed(() => 1),
+    groupedStats: computed(() => ({ draft: 0, review: 0, published: 0, other: 0 })),
+    publishAll: () => Promise.resolve(undefined),
     ...overrides,
   };
 }

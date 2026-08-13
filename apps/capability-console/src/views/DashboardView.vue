@@ -5,6 +5,10 @@ import {
   fetchOverview,
   listPendingPlans,
   rejectPlan,
+  fetchAgentMetrics,
+  setAgentEnabled,
+  setAgentTrustLevel,
+  type AgentMetrics,
 } from '../api';
 import { labelForRisk, labelForExecutionStatus } from '../labels';
 import { formatRelativeTime } from '../conversationFormat';
@@ -25,6 +29,13 @@ const rejectingIDs = ref<Set<string>>(new Set());
 const rejectError = ref('');
 const notice = ref('');
 
+// Agent 状态面板
+const agentMetrics = ref<AgentMetrics | null>(null);
+const agentMetricsError = ref('');
+const agentActionLoading = ref(false);
+const agentNotice = ref('');
+const trustLevel = ref<'readonly' | 'confirm' | 'auto'>('confirm');
+
 // 统计卡片 → 目标视图映射，供模板绑定（@click 时 emit navigate）。
 const statTargets: Record<string, string> = {
   'stat-pending-plans': 'plans',
@@ -42,13 +53,43 @@ async function refresh() {
   overviewLoading.value = true;
   overviewError.value = '';
   try {
-    const [ov, plans] = await Promise.all([fetchOverview(), listPendingPlans()]);
+    const [ov, plans, metrics] = await Promise.all([fetchOverview(), listPendingPlans(), fetchAgentMetrics().catch(() => null)]);
     overview.value = ov;
     pendingPlans.value = plans;
+    agentMetrics.value = metrics;
   } catch (e) {
     overviewError.value = e instanceof Error ? e.message : String(e);
   } finally {
     overviewLoading.value = false;
+  }
+}
+
+async function handleToggleAgent() {
+  if (!agentMetrics.value) return;
+  agentActionLoading.value = true;
+  agentNotice.value = '';
+  try {
+    const result = await setAgentEnabled(!agentMetrics.value.agent_enabled);
+    agentNotice.value = result.message;
+    agentMetrics.value = await fetchAgentMetrics();
+  } catch (e) {
+    agentMetricsError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    agentActionLoading.value = false;
+  }
+}
+
+async function handleTrustLevel(level: 'readonly' | 'confirm' | 'auto') {
+  agentActionLoading.value = true;
+  agentNotice.value = '';
+  try {
+    await setAgentTrustLevel(level);
+    trustLevel.value = level;
+    agentNotice.value = `信任等级已切换为 ${level}`;
+  } catch (e) {
+    agentMetricsError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    agentActionLoading.value = false;
   }
 }
 
@@ -113,6 +154,69 @@ onMounted(() => {
         </span>
         <span class="stat-label">今日执行 成功/失败</span>
       </button>
+    </section>
+
+    <!-- Agent 状态面板：运行状态 + 一键停止 + 信任等级 -->
+    <section class="dashboard-panel" data-test="agent-status-panel">
+      <div class="section-heading">
+        <h2>AI Agent 状态</h2>
+        <span class="section-hint">LLM 调用健康度与安全开关</span>
+      </div>
+      <p v-if="agentMetricsError" class="error-text" role="alert">{{ agentMetricsError }}</p>
+      <p v-if="agentNotice" class="notice-text">{{ agentNotice }}</p>
+      <div v-if="agentMetrics" class="agent-status-grid">
+        <div class="agent-status-item">
+          <span class="agent-status-label">运行状态</span>
+          <span class="agent-status-value" :class="agentMetrics.agent_enabled ? 'ok' : 'bad'">
+            {{ agentMetrics.agent_enabled ? '运行中' : '已停止' }}
+          </span>
+        </div>
+        <div class="agent-status-item">
+          <span class="agent-status-label">LLM 调用</span>
+          <span class="agent-status-value">
+            {{ agentMetrics.llm_calls }} 次 / 失败 {{ agentMetrics.llm_failures }}（{{ (agentMetrics.llm_failure_rate * 100).toFixed(1) }}%）
+          </span>
+        </div>
+        <div class="agent-status-item">
+          <span class="agent-status-label">工具调用</span>
+          <span class="agent-status-value">
+            {{ agentMetrics.tool_calls }} 次 / 失败 {{ agentMetrics.tool_failures }}（{{ (agentMetrics.tool_failure_rate * 100).toFixed(1) }}%）
+          </span>
+        </div>
+        <div class="agent-status-item">
+          <span class="agent-status-label">连续失败</span>
+          <span class="agent-status-value" :class="agentMetrics.consecutive_errors > 0 ? 'bad' : 'ok'">
+            {{ agentMetrics.consecutive_errors }}
+          </span>
+        </div>
+        <div class="agent-status-actions">
+          <button
+            type="button"
+            class="mini-button"
+            :class="agentMetrics.agent_enabled ? 'danger' : ''"
+            :disabled="agentActionLoading"
+            data-test="agent-kill-switch"
+            @click="handleToggleAgent"
+          >
+            {{ agentActionLoading ? '处理中...' : agentMetrics.agent_enabled ? '⏹ 停止 Agent' : '▶ 启动 Agent' }}
+          </button>
+          <div class="trust-level-group" role="radiogroup" aria-label="信任等级">
+            <span class="agent-status-label">信任等级</span>
+            <button
+              v-for="level in (['readonly', 'confirm', 'auto'] as const)"
+              :key="level"
+              type="button"
+              class="mini-button trust-button"
+              :class="{ active: trustLevel === level }"
+              :disabled="agentActionLoading"
+              @click="handleTrustLevel(level)"
+            >
+              {{ { readonly: '只读', confirm: '需确认', auto: '自动' }[level] }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty">Agent 指标暂不可用（可能未启用 LLM 模式）</div>
     </section>
 
     <!-- 待确认计划速览 -->

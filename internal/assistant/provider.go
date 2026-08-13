@@ -23,6 +23,17 @@ const (
 	envOpenAIRetry       = "COPILOT_OPENAI_RETRY"
 	envOpenAIRetryBackoff = "COPILOT_OPENAI_RETRY_BACKOFF"
 	envPromptsDir        = "COPILOT_PROMPTS_DIR"
+	envOpenAIMaxTokens   = "COPILOT_OPENAI_MAX_TOKENS"
+
+	// 推理模型配置（可选，不设则复用主模型）
+	envReasoningModel   = "COPILOT_REASONING_MODEL"
+	envReasoningBaseURL = "COPILOT_REASONING_BASE_URL"
+	envReasoningAPIKey  = "COPILOT_REASONING_API_KEY"
+
+	// 备用模型配置（可选，主模型限流时自动切换）
+	envFallbackModel   = "COPILOT_FALLBACK_MODEL"
+	envFallbackBaseURL = "COPILOT_FALLBACK_BASE_URL"
+	envFallbackAPIKey  = "COPILOT_FALLBACK_API_KEY"
 
 	// defaultChatTimeout is the per-LLM-call timeout used for the eino-openai
 	// chat model unless overridden by COPILOT_OPENAI_TIMEOUT. Reasoning models
@@ -86,6 +97,11 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 	}
 	temperature := float32(0)
 	maxCompletionTokens := 256
+	if v := strings.TrimSpace(env[envOpenAIMaxTokens]); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxCompletionTokens = n
+		}
+	}
 	timeout := defaultChatTimeout
 	if v := strings.TrimSpace(env[envOpenAITimeout]); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
@@ -155,6 +171,85 @@ func EnvMapFromLookup(lookup func(string) string) map[string]string {
 		envOpenAIAPIKey:      lookup(envOpenAIAPIKey),
 		envOpenAIModel:       lookup(envOpenAIModel),
 		envOpenAIBaseURL:     lookup(envOpenAIBaseURL),
+		envOpenAIRetry:       lookup(envOpenAIRetry),
+		envOpenAIRetryBackoff: lookup(envOpenAIRetryBackoff),
+		envOpenAITimeout:     lookup(envOpenAITimeout),
+		envOpenAIMaxTokens:   lookup(envOpenAIMaxTokens),
 		envPromptsDir:        lookup(envPromptsDir),
+		envReasoningModel:    lookup(envReasoningModel),
+		envReasoningBaseURL:  lookup(envReasoningBaseURL),
+		envReasoningAPIKey:   lookup(envReasoningAPIKey),
+		envFallbackModel:    lookup(envFallbackModel),
+		envFallbackBaseURL:  lookup(envFallbackBaseURL),
+		envFallbackAPIKey:   lookup(envFallbackAPIKey),
 	}
+}
+
+// NewFallbackChatModel 创建带降级的 chat model。
+// 如果 COPILOT_FALLBACK_MODEL 未设置，返回 nil（不降级）。
+func NewFallbackChatModel(ctx context.Context, primary model.BaseChatModel, env map[string]string) model.BaseChatModel {
+	modelName := strings.TrimSpace(env[envFallbackModel])
+	if modelName == "" {
+		return nil
+	}
+	apiKey := strings.TrimSpace(env[envFallbackAPIKey])
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(env[envOpenAIAPIKey])
+	}
+	baseURL := strings.TrimSpace(env[envFallbackBaseURL])
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(env[envOpenAIBaseURL])
+	}
+	temperature := float32(0)
+	maxTokens := 2048
+	timeout := 30 * time.Second
+
+	chat, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+		APIKey:              apiKey,
+		BaseURL:             baseURL,
+		Model:               modelName,
+		Timeout:             timeout,
+		Temperature:         &temperature,
+		MaxCompletionTokens: &maxTokens,
+	})
+	if err != nil {
+		return nil
+	}
+	var fallbackWrapped model.BaseChatModel = chat
+	fallbackWrapped = withChatRetry(fallbackWrapped, retryAttempts(env), retryBackoff(env))
+	// 3 次连续 429 后切换到备用模型
+	return newFallbackChat(primary, fallbackWrapped, 3)
+}
+
+// NewReasoningModelFromEnv 创建推理模型。如果 COPILOT_REASONING_MODEL 未设置，
+// 返回 nil（表示复用主模型）。
+func NewReasoningModelFromEnv(ctx context.Context, env map[string]string) model.BaseChatModel {
+	modelName := strings.TrimSpace(env[envReasoningModel])
+	if modelName == "" {
+		return nil // 未配置推理模型，复用主模型
+	}
+	apiKey := strings.TrimSpace(env[envReasoningAPIKey])
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(env[envOpenAIAPIKey]) // fallback 到主模型 key
+	}
+	baseURL := strings.TrimSpace(env[envReasoningBaseURL])
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(env[envOpenAIBaseURL]) // fallback 到主模型 URL
+	}
+	temperature := float32(0)
+	maxTokens := 4096 // 推理模型给更多 token
+	timeout := 60 * time.Second // 推理模型需要更长时间
+
+	chat, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+		APIKey:              apiKey,
+		BaseURL:             baseURL,
+		Model:               modelName,
+		Timeout:             timeout,
+		Temperature:         &temperature,
+		MaxCompletionTokens: &maxTokens,
+	})
+	if err != nil {
+		return nil
+	}
+	return withChatRetry(chat, retryAttempts(env), retryBackoff(env))
 }

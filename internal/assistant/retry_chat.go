@@ -46,7 +46,12 @@ func (c *retryChat) Generate(ctx context.Context, input []*schema.Message, opts 
 		if attempt == c.maxAttempts || !isTransientChatError(ctx, err) {
 			break
 		}
-		timer := time.NewTimer(backoffFor(attempt, c.baseBackoff))
+		// 429 用更长退避（3s, 6s, 12s），其他瞬态错误用标准退避
+		delay := backoffFor(attempt, c.baseBackoff)
+		if isRateLimitError(err) {
+			delay = time.Duration(attempt) * 3 * time.Second
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -55,6 +60,15 @@ func (c *retryChat) Generate(ctx context.Context, input []*schema.Message, opts 
 		}
 	}
 	return resp, lastErr
+}
+
+// isRateLimitError 判断是否是 429 限流错误。
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "429") || strings.Contains(msg, "too many requests") || strings.Contains(msg, "rate limit")
 }
 
 // isTransientChatError reports whether err is worth retrying: a network-level
@@ -81,9 +95,10 @@ func isTransientChatError(ctx context.Context, err error) bool {
 		strings.Contains(msg, "EOF") {
 		return true
 	}
-	// HTTP 5xx from an OpenAI-compatible backend.
+	// HTTP 429/5xx from an OpenAI-compatible backend.
 	lower := strings.ToLower(msg)
-	return strings.Contains(lower, " 500") || strings.Contains(lower, " 502") ||
+	return strings.Contains(lower, " 429") ||
+		strings.Contains(lower, " 500") || strings.Contains(lower, " 502") ||
 		strings.Contains(lower, " 503") || strings.Contains(lower, " 504")
 }
 
