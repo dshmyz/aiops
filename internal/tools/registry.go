@@ -159,6 +159,8 @@ func Lookup(name string) (Tool, bool) {
 		dynamicMu.RLock()
 		tool, ok = dynamicTools[name]
 		dynamicMu.RUnlock()
+		if !ok {
+		}
 	}
 	return tool, ok
 }

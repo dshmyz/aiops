@@ -19,11 +19,12 @@ import (
 )
 
 type EinoPlanner struct {
-	chat         model.BaseChatModel
-	parser       schema.MessageParser[einoIntent]
-	systemPrompt func() string // nil → use hardcoded einoPlanningPrompt
-	knowledge    KnowledgeAugmenter
-	audit        *llmAuditRecorder // nil → 不记录 LLM 调用审计（缺口-5 / R1）
+	chat              model.BaseChatModel
+	parser            schema.MessageParser[einoIntent]
+	systemPrompt      func() string // nil → use hardcoded einoPlanningPrompt
+	knowledge         KnowledgeAugmenter
+	audit             *llmAuditRecorder // nil → 不记录 LLM 调用审计（缺口-5 / R1）
+	capabilityCatalog string            // 动态能力目录，追加到 system prompt
 }
 
 // ChatModel 返回底层的 chat model，用于创建 LLMParamExtractor 等。
@@ -71,6 +72,13 @@ func (p *EinoPlanner) WithLLMAudit(auditSvc *audit.Service, model string) *EinoP
 	return p
 }
 
+// WithCapabilityCatalog 注入动态能力目录。目录文本会追加到 system prompt
+// 末尾，让 LLM 看到所有可用的动态能力并据此选择工具。
+func (p *EinoPlanner) WithCapabilityCatalog(catalog string) *EinoPlanner {
+	p.capabilityCatalog = catalog
+	return p
+}
+
 // currentPrompt returns the active system prompt text. When a prompt source
 // function is configured it is called; otherwise the hardcoded constant is
 // used as fallback.
@@ -85,7 +93,10 @@ func (p *EinoPlanner) currentPrompt(ctx context.Context, message string) string 
 		base = einoPlanningPrompt
 	}
 	if p.knowledge != nil {
-		return p.knowledge.AugmentPrompt(ctx, base, message)
+		base = p.knowledge.AugmentPrompt(ctx, base, message)
+	}
+	if p.capabilityCatalog != "" {
+		base += "\n\n" + p.capabilityCatalog
 	}
 	return base
 }
@@ -495,6 +506,13 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 ## 核心职责
 分析用户消息，返回严格的JSON格式意图规划。你只能提出候选意图，Go后端会执行静态工具注册、策略、确认、执行和审计规则。
 
+## 动态能力（重要）
+系统注册了多个动态能力（见下方"可用的动态能力"列表）。当用户请求匹配其中某个能力时：
+1. 直接用该能力的 tool_name 填入 tool_name 字段
+2. 从用户消息中提取该能力 input_schema 所需的参数填入 input 字段
+3. 用户未指定 environment 时默认 "prod"
+4. 不需要走 diagnostic 通道，直接用 tool_name
+
 ## 输出格式
 只返回JSON，不要包含任何其他文本：
 {
@@ -512,8 +530,9 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 ### tool_name（工具名称）
 - 字符串或null
 - 当用户请求普通工具操作时填写
-- 可选值示例："cluster.status.read"、"topic.retention.set"、"consumer.group.list"、"alert.query"、"event.query"、"task.query"
-- 当用户请求诊断检查时设为null
+- 静态工具示例："cluster.status.read"、"topic.retention.set"
+- 动态能力：从下方"可用的动态能力"列表中选择匹配的 tool_name
+- 当用户请求诊断检查且没有匹配的动态能力时设为null
 
 ### input（输入参数）
 - 对象或null
@@ -524,6 +543,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 ### diagnostic（诊断对象）
 - 对象或null
 - 仅用于GlusterFS、MinIO或Kafka的健康、容量或消费者延迟检查
+- 当有匹配的动态能力时，优先用 tool_name 而不是 diagnostic
 - 结构：
   {
     "domain": "glusterfs" | "minio" | "kafka",
@@ -555,7 +575,8 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 
 ### agent 循环收敛规则（重要）
 - **不要重复执行已运行过的工具**：如果历史[Last Intent]中某个工具已经执行过且返回值确定，就不要再次调用同一个工具。反复返回同一结果的重复调用是空转，应直接 final_answer: true 汇总。
-- **单域健康/容量/延迟检查拿到结果后立即收尾**：一次诊断请求（如 glusterfs volume 健康）执行完拿到结论（即使有 1 条 finding/建议），就 final_answer: true，除非用户明确要求连环排查或对比多个域。
+- **多能力系统要全面检查**：当用户请求涉及一个有多个能力的系统（如 moonlightbox 有 health/cache/security/dashboard），应该依次检查各个维度，收集完整信息后再给出综合结论。不要查一个就收尾。
+- **单域诊断拿到结果后可以继续**：如果还有同 domain 的其他能力没查，继续检查下一个维度，直到覆盖主要方面再收尾。
 - 只有当你需要**新的信息**（另一个域、另一个资源、或排查异常的下一步证据）时才调用新工具，并且**换用与之前不同的工具**。
 - 若某工具执行失败，可根据错误换用其他候选工具，但失败次数超过预算仍无法推进时应 final_answer: true 汇总已知信息，而不是空转。
 

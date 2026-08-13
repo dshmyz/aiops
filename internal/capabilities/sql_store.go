@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -354,7 +355,9 @@ func (s *SQLCapabilityStore) SeedFromYAML(ctx context.Context, publishedDir stri
 	if publishedDir == "" {
 		return 0, nil
 	}
-	fileStore := NewFileCapabilityStore(publishedDir)
+	// publishedDir 是 .../published 的完整路径，但 FileCapabilityStore.ListAll
+	// 期望 root 下有 discovered/ 和 published/ 两个子目录，所以取其父目录。
+	fileStore := NewFileCapabilityStore(filepath.Dir(publishedDir))
 	items, err := fileStore.ListAll(ctx)
 	if err != nil {
 		return 0, err

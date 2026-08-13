@@ -8,11 +8,12 @@
  *
  * 设计原则：
  * - 独立区块：不复用 progress 折叠，步骤是审计线索，默认展开、可点击收起
+ * - 输入/输出默认折叠，点击展开查看详细 JSON
  * - 只读语义：循环内的 advisory 步都已完成（status=done），无进行中态
  * - 不暴露原始 CoT：只展示工具名、摘要与输入/输出，与 thinking/tool_calls
  *   职责互补：steps 看"多步做了什么"、progress 看"阶段时序"、thinking 看 CoT
  */
-import { computed, ref } from 'vue';
+import { computed, ref, reactive } from 'vue';
 import type { AssistantStep } from '../types';
 import SfSymbol from './SfSymbol.vue';
 
@@ -24,6 +25,29 @@ const props = defineProps<{
 }>();
 
 const expanded = ref(true);
+
+// 每个步骤的输入/输出折叠状态，key = step_index
+const detailsExpanded = reactive<Record<number, { input: boolean; output: boolean }>>({});
+
+function isDetailsExpanded(stepIndex: number, section: 'input' | 'output'): boolean {
+  if (!(stepIndex in detailsExpanded)) {
+    detailsExpanded[stepIndex] = { input: false, output: false };
+  }
+  return detailsExpanded[stepIndex][section];
+}
+
+function toggleDetails(stepIndex: number, section: 'input' | 'output') {
+  if (!(stepIndex in detailsExpanded)) {
+    detailsExpanded[stepIndex] = { input: false, output: false };
+  }
+  detailsExpanded[stepIndex][section] = !detailsExpanded[stepIndex][section];
+}
+
+/** 输出 JSON 是否较长（>200 字符） */
+function isLongOutput(step: AssistantStep): boolean {
+  if (!step.output) return false;
+  return JSON.stringify(step.output).length > 200;
+}
 
 const hasSteps = computed(() => props.steps.length > 0);
 
@@ -85,12 +109,22 @@ function stepStatusVariant(step: AssistantStep): string {
           </span>
           <span v-if="step.summary" class="step-item-summary">{{ step.summary }}</span>
           <span v-if="step.input && Object.keys(step.input).length" class="step-item-toggleable">
-            <span class="step-item-label">输入</span>
-            <pre class="step-item-json">{{ JSON.stringify(step.input, null, 2) }}</pre>
+            <button type="button" class="step-detail-toggle" @click="toggleDetails(step.step_index, 'input')">
+              <svg viewBox="0 0 24 24" width="10" height="10" class="step-detail-chevron" :class="{ open: isDetailsExpanded(step.step_index, 'input') }">
+                <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+              </svg>
+              <span class="step-item-label">输入</span>
+            </button>
+            <pre v-show="isDetailsExpanded(step.step_index, 'input')" class="step-item-json">{{ JSON.stringify(step.input, null, 2) }}</pre>
           </span>
           <span v-if="step.output && Object.keys(step.output).length" class="step-item-toggleable">
-            <span class="step-item-label">输出</span>
-            <pre class="step-item-json">{{ JSON.stringify(step.output, null, 2) }}</pre>
+            <button type="button" class="step-detail-toggle" @click="toggleDetails(step.step_index, 'output')">
+              <svg viewBox="0 0 24 24" width="10" height="10" class="step-detail-chevron" :class="{ open: isDetailsExpanded(step.step_index, 'output') }">
+                <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+              </svg>
+              <span class="step-item-label">输出</span>
+            </button>
+            <pre v-show="isDetailsExpanded(step.step_index, 'output')" class="step-item-json">{{ JSON.stringify(step.output, null, 2) }}</pre>
           </span>
         </span>
       </li>
@@ -232,6 +266,32 @@ function stepStatusVariant(step: AssistantStep): string {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+
+.step-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #a0a8b0;
+  font-size: 0.66rem;
+  font-weight: 500;
+}
+
+.step-detail-toggle:hover {
+  color: #4f7ccf;
+}
+
+.step-detail-chevron {
+  transition: transform 0.15s ease;
+  transform: rotate(-90deg);
+}
+
+.step-detail-chevron.open {
+  transform: rotate(0deg);
 }
 
 .step-item-label {

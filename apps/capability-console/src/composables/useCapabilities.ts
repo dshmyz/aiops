@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { ComputedRef, Ref, WritableComputedRef } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
@@ -116,6 +116,14 @@ export interface UseCapabilities {
   governanceSummary: ComputedRef<string>;
   publishChecks: ComputedRef<{ label: string; ok: boolean; detail: string }[]>;
   publishReady: ComputedRef<boolean>;
+
+  // 分页和批量操作
+  paginatedCapabilities: ComputedRef<ManagedCapability[]>;
+  pageSize: Ref<number>;
+  currentPage: Ref<number>;
+  totalPages: ComputedRef<number>;
+  groupedStats: ComputedRef<Record<string, number>>;
+  publishAll: () => Promise<{ success: number; failed: number; total: number } | undefined>;
 
   // Functions
   loadCapabilities: () => Promise<void>;
@@ -302,6 +310,50 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
       return matchesQuery && matchesStatus && matchesDomain;
     });
   });
+
+  // 分页：每页显示的数量
+  const pageSize = ref(20);
+  const currentPage = ref(1);
+
+  // 过滤条件变化时重置页码
+  watch([searchText, statusFilter, domainFilter], () => {
+    currentPage.value = 1;
+  });
+
+  const paginatedCapabilities = computed(() => {
+    const start = (currentPage.value - 1) * pageSize.value;
+    return filteredCapabilities.value.slice(start, start + pageSize.value);
+  });
+  const totalPages = computed(() => Math.ceil(filteredCapabilities.value.length / pageSize.value));
+
+  // 状态分组统计
+  const groupedStats = computed(() => {
+    const groups: Record<string, number> = { draft: 0, review: 0, published: 0, other: 0 };
+    for (const item of capabilities.value) {
+      if (item.source === 'published') groups.published++;
+      else if (item.status === 'needs_review' || item.source === 'discovered') groups.review++;
+      else groups.draft++;
+    }
+    return groups;
+  });
+
+  // 批量发布：一键发布所有可发布的草稿
+  async function publishAll() {
+    const publishable = filteredCapabilities.value.filter((item) => isPublishable(item));
+    if (publishable.length === 0) return;
+    let success = 0;
+    let failed = 0;
+    for (const item of publishable) {
+      try {
+        await publishCapability(item.name);
+        success++;
+      } catch {
+        failed++;
+      }
+    }
+    await loadCapabilities();
+    return { success, failed, total: publishable.length };
+  }
   const inputRows = computed(() =>
     Object.entries(selected.value.input_schema).map(([name, field]) => ({
       name,
@@ -1055,5 +1107,12 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     currentPublishLabel,
     nextActionLabel,
     resetAIPreflight,
+    // 分页和批量操作
+    paginatedCapabilities,
+    pageSize,
+    currentPage,
+    totalPages,
+    groupedStats,
+    publishAll,
   };
 }

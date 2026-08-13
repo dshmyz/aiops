@@ -106,7 +106,8 @@ func Evaluate(user identity.CurrentUser, requestedTool tools.Tool, input map[str
 		return deny(InvalidInput)
 	}
 
-	environment := input["environment"].(string)
+	// environment 可能缺失或类型错误（LLM 生成），安全处理
+	environment, _ := input["environment"].(string)
 	if !contains(user.AllowedEnvironments, environment) {
 		return deny(EnvironmentDenied)
 	}

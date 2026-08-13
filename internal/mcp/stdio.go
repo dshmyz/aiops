@@ -52,7 +52,8 @@ type jsonrpcError struct {
 
 // toolsListResult 是 tools/list 方法的结果。
 type toolsListResult struct {
-	Tools []MCPTool `json:"tools"`
+	Tools      []MCPTool `json:"tools"`
+	NextCursor string    `json:"nextCursor,omitempty"`
 }
 
 func (l *stdioLister) List(ctx context.Context, config MCPServerConfig) ([]MCPTool, error) {
@@ -113,21 +114,43 @@ func (l *stdioLister) List(ctx context.Context, config MCPServerConfig) ([]MCPTo
 		return nil, fmt.Errorf("send initialized notification: %w", err)
 	}
 
-	// 3. tools/list
-	listCtx, listCancel := context.WithTimeout(ctx, listTimeout)
-	defer listCancel()
-	if err := send(writer, jsonrpcRequest{JSONRPC: "2.0", ID: 2, Method: "tools/list"}); err != nil {
-		return nil, fmt.Errorf("send tools/list: %w", err)
+	// 3. tools/list（支持 cursor 分页：循环请求直到 nextCursor 为空）
+	var allTools []MCPTool
+	var cursor string
+	reqID := 2
+	for {
+		listCtx, listCancel := context.WithTimeout(ctx, listTimeout)
+		params := map[string]any{}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		var req jsonrpcRequest
+		if len(params) > 0 {
+			req = jsonrpcRequest{JSONRPC: "2.0", ID: reqID, Method: "tools/list", Params: params}
+		} else {
+			req = jsonrpcRequest{JSONRPC: "2.0", ID: reqID, Method: "tools/list"}
+		}
+		if err := send(writer, req); err != nil {
+			listCancel()
+			return nil, fmt.Errorf("send tools/list: %w", err)
+		}
+		resp, err := readResponse(listCtx, scanner, reqID)
+		listCancel()
+		if err != nil {
+			return nil, fmt.Errorf("read tools/list response: %w", err)
+		}
+		var page toolsListResult
+		if err := json.Unmarshal(resp, &page); err != nil {
+			return nil, fmt.Errorf("decode tools/list result: %w", err)
+		}
+		allTools = append(allTools, page.Tools...)
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+		reqID++
 	}
-	resp, err := readResponse(listCtx, scanner, 2)
-	if err != nil {
-		return nil, fmt.Errorf("read tools/list response: %w", err)
-	}
-	var result toolsListResult
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return nil, fmt.Errorf("decode tools/list result: %w", err)
-	}
-	return result.Tools, nil
+	return allTools, nil
 }
 
 func send(w *json.Encoder, req jsonrpcRequest) error {
@@ -171,6 +194,11 @@ func readResponse(ctx context.Context, scanner *bufio.Scanner, wantID int) (json
 		}
 		return resp.Result, nil
 	}
+}
+
+// NewStdioListerWithTimeout 创建指定超时的 stdio lister（测试用）。
+func NewStdioListerWithTimeout(handshake, list time.Duration) ToolLister {
+	return &stdioLister{handshakeTimeout: handshake, listTimeout: list}
 }
 
 func envSlice(env map[string]string) []string {

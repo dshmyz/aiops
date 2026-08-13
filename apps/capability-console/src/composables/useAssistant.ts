@@ -261,6 +261,21 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     function applyResponse(response: AssistantConsoleResponse) {
       assistantLatestResponse.value = response;
       assistantLatestStatus.value = assistantResponseStatus(response);
+      // 用响应内容填充本地 assistant turn（流式或非流式都走这里）
+      const content = (response as any).message || (response as any).summary || '';
+      const localTurn = conversationTurns.value.find((t) => t.id === streamingTurnId);
+      if (localTurn) {
+        localTurn.content = content;
+      } else if (content) {
+        // 流式 turn 不存在（可能被刷新掉了），创建一个新的
+        conversationTurns.value.push({
+          id: `local-assistant-${Date.now()}`,
+          conversation_id: (response as any).conversation_id || activeConversationID.value || '',
+          role: 'assistant',
+          content,
+          created_at: new Date().toISOString(),
+        });
+      }
       if (isObjectRecord(response) && typeof response.conversation_id === 'string') {
         activeConversationID.value = response.conversation_id;
       }

@@ -1,0 +1,55 @@
+ai:
+  description: 查询 Moonlight Box 各缓存（权限缓存、代理内容缓存、仓库配置缓存）的统计信息，包括条目数、命中率、容量使用。
+  examples:
+  - 查看制品仓库缓存状态
+  - Moonlight Box 缓存命中率
+  - 检查代理缓存是否正常
+auth:
+  environment_scoped: true
+  roles:
+  - viewer
+  - operator
+  - admin
+backend:
+  adapter: http
+  auth_config:
+    token: ${COPILOT_MOONLIGHTBOX_TOKEN}
+    type: bearer
+  base_url: http://localhost:9081
+  method: GET
+  path: /api/v1/cache/stats
+  timeout_ms: 5000
+domain: moonlightbox
+governance:
+  precheck_tools: []
+  requires_action_plan: false
+  requires_approval: false
+  rollback:
+    source: ''
+    strategy: ''
+input_schema:
+  environment:
+    description: 部署环境，必须是 prod、staging 或 dev 之一
+    enum:
+    - prod
+    - staging
+    - dev
+    examples:
+    - prod
+    required: true
+    type: string
+  name:
+    description: 缓存名称（可选，不填返回全部缓存统计）
+    required: false
+    type: string
+name: moonlightbox.cache.stats.read
+operation: read
+output:
+  fields: {}
+  kind: observation
+  severity_path: $.data
+  summary_template: 制品仓库缓存统计查询完成
+resource_type: cache
+risk: low
+schema_version: 1
+status: published

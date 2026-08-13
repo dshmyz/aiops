@@ -16,14 +16,16 @@ import (
 //
 // 原先各处各自维护 []string{"kafka", "minio", "glusterfs"}，现统一从此派生。
 func KnownDomains() []string {
-	return []string{"glusterfs", "kafka", "minio"}
+	return []string{"glusterfs", "http", "kafka", "minio", "moonlightbox"}
 }
 
 // DomainAliases 返回域名的别名映射：alias → canonical。
-// 当前仅 "gluster" → "glusterfs"，供推断场景使用（用户消息、OpenAPI tags）。
 func DomainAliases() map[string]string {
 	return map[string]string{
-		"gluster": "glusterfs",
+		"gluster":     "glusterfs",
+		"moonlight":   "moonlightbox",
+		"moonlightbox": "moonlightbox",
+		"mbox":        "moonlightbox",
 	}
 }
 

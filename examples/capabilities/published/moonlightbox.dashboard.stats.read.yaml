@@ -1,0 +1,55 @@
+ai:
+  description: 查询 Moonlight Box 仪表盘统计，包括各仓库的状态（healthy/warning/error）、包数量、今日下载量、存储使用量。
+  examples:
+  - 查看制品仓库仪表盘
+  - Moonlight Box 各仓库状态概览
+  - 制品仓库今日下载量
+auth:
+  environment_scoped: true
+  roles:
+  - viewer
+  - operator
+  - admin
+backend:
+  adapter: http
+  auth_config:
+    token: ${COPILOT_MOONLIGHTBOX_TOKEN}
+    type: bearer
+  base_url: http://localhost:9081
+  method: GET
+  path: /api/v1/dashboard/stats
+  timeout_ms: 5000
+domain: moonlightbox
+governance:
+  precheck_tools: []
+  requires_action_plan: false
+  requires_approval: false
+  rollback:
+    source: ''
+    strategy: ''
+input_schema:
+  environment:
+    description: 部署环境，必须是 prod、staging 或 dev 之一
+    enum:
+    - prod
+    - staging
+    - dev
+    examples:
+    - prod
+    required: true
+    type: string
+  name:
+    description: 资源名称（可选）
+    required: false
+    type: string
+name: moonlightbox.dashboard.stats.read
+operation: read
+output:
+  fields: {}
+  kind: observation
+  severity_path: $.data
+  summary_template: 制品仓库仪表盘统计查询完成
+resource_type: dashboard
+risk: low
+schema_version: 1
+status: published

@@ -65,6 +65,10 @@ func RegisterPublishedCapability(capability Capability) error {
 	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{Tool: tool, InputSchema: schema}}); err != nil {
 		return err
 	}
+	// debug: verify registration
+	if _, ok := tools.Lookup(tool.Name); !ok {
+	} else {
+	}
 	policy.RegisterDynamicRolePermissions(map[string][]string{capability.Name: append([]string(nil), capability.Auth.Roles...)})
 	return nil
 }

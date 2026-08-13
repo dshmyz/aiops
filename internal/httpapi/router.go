@@ -142,9 +142,11 @@ type Router struct {
 	prompts            *prompt.Registry
 	alertActions       *alert.AlertActionRegistry
 	feedback           FeedbackService
+	feedbackCallback   func(ctx context.Context, conversationID, turnID, correction string, rating int) // 可选：反馈后回调（用于知识学习）
 	runbookDrafts      RunbookDraftService
 	runbooks           store.RunbookStore
 	knowledge          KnowledgeService
+	healthCheck        HealthCheckService // 定期巡检结果查询
 	inspectionReports  store.InspectionReportStore
 	mcpService         MCPService
 	alertWebhook       AlertWebhookService
@@ -211,6 +213,13 @@ func WithFeedback(service FeedbackService) Option {
 	}
 }
 
+// WithFeedbackCallback 注册反馈后回调（用于知识学习）。feedback 被持久化后调用。
+func WithFeedbackCallback(fn func(ctx context.Context, conversationID, turnID, correction string, rating int)) Option {
+	return func(router *Router) {
+		router.feedbackCallback = fn
+	}
+}
+
 // WithRunbookDrafts wires the runbook-draft service (反馈 → 可确认启用的 runbook)。
 // When unset, /v1/admin/runbook-drafts* returns configured:false. Only admin
 // users can access these endpoints (checked inside serveRunbookDrafts).
@@ -243,6 +252,21 @@ func WithMCPService(service MCPService) Option {
 type KnowledgeService interface {
 	AddDocument(ctx context.Context, title, content, source string) (knowledge.Document, error)
 	ListDocuments(ctx context.Context) ([]knowledge.Document, error)
+}
+
+// HealthCheckService 提供健康巡检结果查询。
+type HealthCheckService interface {
+	// GetRecentResults 返回最近的巡检结果。
+	GetRecentResults(ctx context.Context, limit int) ([]map[string]any, error)
+	// GetAnalysis 返回巡检统计分析。
+	GetAnalysis(ctx context.Context) (map[string]any, error)
+}
+
+// WithHealthCheck 注入健康巡检结果查询服务。
+func WithHealthCheck(service HealthCheckService) Option {
+	return func(router *Router) {
+		router.healthCheck = service
+	}
 }
 
 // WithKnowledge wires the RAG knowledge service for document ingestion and
@@ -474,6 +498,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if request.Method == http.MethodGet && request.URL.Path == "/v1/assistant/feedback" {
 		r.serveFeedback(writer, request)
+		return
+	}
+	if request.Method == http.MethodGet && request.URL.Path == "/v1/system/health-checks" {
+		r.serveHealthChecks(writer, request)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/marketplace/capabilities") {
@@ -2918,6 +2946,10 @@ func (r *Router) serveFeedback(writer http.ResponseWriter, request *http.Request
 			writeError(writer, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// 触发知识学习回调
+		if r.feedbackCallback != nil {
+			go r.feedbackCallback(request.Context(), body.ConversationID, body.TurnID, body.Correction, body.Rating)
+		}
 		writeCappedJSON(writer, saved)
 
 	case http.MethodGet:
@@ -3110,4 +3142,39 @@ func (r *Router) serveCASAuth(writer http.ResponseWriter, request *http.Request)
 	default:
 		writeError(writer, http.StatusNotFound, "not found")
 	}
+}
+
+// serveHealthChecks 处理 GET /v1/system/health-checks，返回最近的巡检结果。
+func (r *Router) serveHealthChecks(writer http.ResponseWriter, request *http.Request) {
+	if r.healthCheck == nil {
+		writeError(writer, http.StatusServiceUnavailable, "health check service is not configured")
+		return
+	}
+	user, _, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	if !userHasAnyRole(user, "viewer", "operator", "admin") {
+		r.writeForbidden(writer, request, user, string(policy.PermissionDenied), request.URL.Path)
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	defer cancel()
+
+	limit := 20
+	if v := request.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	results, err := r.healthCheck.GetRecentResults(ctx, limit)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeCappedJSON(writer, map[string]any{
+		"results": results,
+		"total":   len(results),
+	})
 }

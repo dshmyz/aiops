@@ -10,6 +10,7 @@ import (
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
+	"github.com/gracegaoya/ai-operations-copilot/internal/orchestrator"
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
@@ -377,4 +378,28 @@ func containsAny(text string, needles ...string) bool {
 
 func tokenExists(text, token string) bool {
 	return regexp.MustCompile(`(^|[^a-z0-9_-])` + regexp.QuoteMeta(token) + `([^a-z0-9_-]|$)`).MatchString(text)
+}
+
+// isMultiDomainDiagnostic reports whether the user message names multiple
+// middleware diagnostic domains (e.g. "检查 glusterfs、minio、kafka").
+func isMultiDomainDiagnostic(message string) bool {
+	return len(orchestrator.DomainsInText(message)) > 1
+}
+
+// stripActionAugment 移除 ActionAwarePlanner 注入的 SOP 上下文标记。
+// DeterministicPlanner 无法利用 SOP，需要剥离避免关键词匹配误判。
+const (
+	actionAugmentOpen  = "[Action 上下文引导]"
+	actionAugmentClose = "[/Action 上下文引导]"
+)
+
+func stripActionAugment(message string) string {
+	if !strings.HasPrefix(message, actionAugmentOpen) {
+		return message
+	}
+	idx := strings.Index(message, actionAugmentClose)
+	if idx < 0 {
+		return message
+	}
+	return strings.TrimLeft(message[idx+len(actionAugmentClose):], "\n")
 }

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/google/uuid"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/alert"
@@ -249,18 +250,75 @@ func main() {
 	// runbook 存储已在 readRunner 链构建处提前构造；此处仅需复用其 lookup 适配器。
 	runbookLookup := httpapi.NewRunbookLookupAdapter(runbookStore)
 
-	planner, compactor, formatter, promptRegistry, plannerMode, err := assistantPlannerFromEnv(serviceContext, assistant.EnvMapFromLookup(os.Getenv), knowledgeManager, skillLookup, auditService)
+	planner, compactor, formatter, chatModel, promptRegistry, plannerMode, err := assistantPlannerFromEnv(serviceContext, assistant.EnvMapFromLookup(os.Getenv), knowledgeManager, skillLookup, auditService, loadedCapabilities)
 	if err != nil {
 		logger.Fatal("configure assistant planner", zap.Error(err))
 	}
 	logger.Info("assistant planner mode", zap.String("mode", plannerMode))
 	conversationStore := store.NewSQLAssistantConversationStore(db)
 	assistantService := assistant.NewServiceWithCompactor(planner, readService, planService, conversationStore, compactor)
+	// 知识库：存储诊断经验，支持历史案例检索
+	var diagKnowledgeStore *assistant.KnowledgeStore
+	if db != nil {
+		diagKnowledgeStore = assistant.NewKnowledgeStore(db)
+		if err := diagKnowledgeStore.Init(serviceContext); err != nil {
+			logger.Warn("init knowledge store", zap.Error(err))
+			diagKnowledgeStore = nil
+		} else {
+			logger.Info("knowledge store enabled")
+		}
+	}
 	// 启用自治 agent 循环（多步链式执行 + 结果反馈重规划）。只有 LLM planner
 	// （eino-openai）支持；确定性 planner 忽略历史，不启用。循环内只读工具自主
 	// 链式执行，写工具在建 plan/审批处停下交还给人，绝不自动执行写。
 	if strings.HasPrefix(plannerMode, "eino-openai") {
 		assistantService = assistantService.WithAgentLoop(true)
+		// 新路径：基于 LLM function calling 的 Agent 执行器。
+		// 替代旧的 planner + keyword matching + 手动 agent loop。
+		if chatModel != nil {
+			// 推理模型：优先用 COPILOT_REASONING_MODEL，不设则复用主模型
+			reasoningEnv := assistant.EnvMapFromLookup(os.Getenv)
+			reasoningModel := assistant.NewReasoningModelFromEnv(serviceContext, reasoningEnv)
+			if reasoningModel != nil {
+				logger.Info("reasoning model configured", zap.String("model", os.Getenv("COPILOT_REASONING_MODEL")))
+			}
+			// 备用模型：主模型限流时自动降级
+			fallbackChat := assistant.NewFallbackChatModel(serviceContext, chatModel, reasoningEnv)
+			if fallbackChat != nil {
+				logger.Info("fallback model configured", zap.String("model", os.Getenv("COPILOT_FALLBACK_MODEL")))
+				chatModel = fallbackChat
+			}
+			agentExec, agentErr := assistant.NewAgentExecutorWithCache(assistant.AgentExecutorConfig{
+				ChatModel:      chatModel,
+				ReasoningModel: reasoningModel,
+				Capabilities:   loadedCapabilities,
+				Adapter:        capabilityAdapter,
+				AuditService:   auditService,
+				ModelName:      os.Getenv("COPILOT_OPENAI_MODEL"),
+				MaxSteps:       10,
+				KnowledgeStore: diagKnowledgeStore,
+				SkillLookup:    skillLookup,
+				CacheEnabled:   true,
+				RateLimit:      20, // 每分钟最多 20 次 LLM 调用
+			})
+			if agentErr != nil {
+				logger.Warn("create agent executor", zap.Error(agentErr))
+			} else {
+				assistantService = assistantService.WithAgentExecutor(agentExec)
+				logger.Info("agent executor enabled (LLM function calling)")
+				// 主动巡检：定期检查已注册端点的健康状态
+				if diagKnowledgeStore != nil {
+					probe := assistant.NewHTTPProbeTool()
+					healthChecker := assistant.NewHealthChecker(probe, diagKnowledgeStore, 5*time.Minute)
+					// 注册 Moonlight Box 端点（可通过环境变量配置更多）
+					if mbURL := os.Getenv("COPILOT_MOONLIGHTBOX_BASE_URL"); mbURL != "" {
+						healthChecker.RegisterEndpoint("moonlightbox", mbURL+"/health", "moonlightbox")
+					}
+					go healthChecker.Start(serviceContext)
+					logger.Info("health checker started", zap.Duration("interval", 5*time.Minute))
+				}
+			}
+		}
 	}
 	// Wire second-stage response formatter. eino-openai 模式下 formatter 是
 	// ChainedFormatter[LLM, Code]（LLM 复用 planner 的 chat model，失败回退代码兜底）；
@@ -342,6 +400,23 @@ func main() {
 	options = append(options, httpapi.WithNotifier(notifier))
 	feedbackStore := store.NewSQLFeedbackStore(db)
 	options = append(options, httpapi.WithFeedback(feedbackStore))
+	// 反馈学习：用户 👍/👎 后自动存入知识库，下次类似问题注入经验
+	if diagKnowledgeStore != nil {
+		options = append(options, httpapi.WithFeedbackCallback(func(ctx context.Context, conversationID, turnID, correction string, rating int) {
+			query := correction
+			if query == "" && rating > 0 {
+				query = "满意"
+			}
+			if query == "" {
+				return
+			}
+			_ = diagKnowledgeStore.SaveFeedback(ctx, query, rating, correction, nil)
+		}))
+	}
+	// 健康巡检：定期探活结果查询
+	if diagKnowledgeStore != nil {
+		options = append(options, httpapi.WithHealthCheck(assistant.NewHealthCheckAdapter(diagKnowledgeStore)))
+	}
 	// Runbook 意图进化：反馈 → 可确认启用的 runbook 草稿。activate 时经
 	// runbookStore 落 SQL，RunbookRouter 即时命中。
 	options = append(options, httpapi.WithRunbookDrafts(httpapi.NewRunbookDraftService(runbookStore)))
@@ -358,10 +433,28 @@ func main() {
 	// 告警 webhook：可选自动研判 + 自动建 plan（COPILOT_ALERT_AUTO_DIAGNOSE /
 	// COPILOT_ALERT_AUTO_PLAN / COPILOT_ALERT_ACTIONS_JSON）。
 	alertWebhook := httpapi.NewAlertWebhookService(alertSvc, auditService)
+	// LLM 智能研判（最高优先级）：需要 eino-openai 模式 + 显式开启。
+	// 内置 fallback 到确定性 Diagnoser，LLM 失败不影响告警接入。
+	var fallbackDiag *alert.Diagnoser
 	if os.Getenv("COPILOT_ALERT_AUTO_DIAGNOSE") == "1" {
 		planCreator := alert.NewPlanCreator(planService, alertSvc)
 		chainDiag := alert.NewChainDiagnoser(diagService, alertSvc, planCreator, readService.ExecuteRead)
 		alertWebhook = alertWebhook.WithChainDiagnoser(chainDiag)
+		// 同时创建确定性 Diagnoser 作为 LLM fallback
+		fallbackDiag = alert.NewDiagnoser(diagService, alertSvc)
+	}
+	if os.Getenv("COPILOT_ALERT_LLM_DIAGNOSE") == "1" {
+		if chatModel != nil {
+			llmDiag := alert.NewLLMDiagnoser(chatModel, diagService, alertSvc).
+				WithFallback(fallbackDiag)
+			if auditService != nil {
+				llmDiag.WithAudit(auditService, os.Getenv("COPILOT_OPENAI_MODEL"))
+			}
+			alertWebhook = alertWebhook.WithLLMDiagnoser(llmDiag)
+			logger.Info("alert LLM diagnosis enabled (COPILOT_ALERT_LLM_DIAGNOSE=1)")
+		} else {
+			logger.Warn("COPILOT_ALERT_LLM_DIAGNOSE requires eino-openai provider; LLM diagnosis disabled")
+		}
 	}
 	if os.Getenv("COPILOT_ALERT_AUTO_PLAN") == "1" {
 		alertActions, loadErr := alert.LoadAlertActionsFromEnv()
@@ -501,6 +594,40 @@ func publishedCapabilitiesFromEnv() ([]capabilities.Capability, error) {
 	return capabilities.RegisterPublished(dir)
 }
 
+// buildCapabilityCatalog 从全局工具注册表构建动态能力目录文本，
+// 注入 EinoPlanner 的 system prompt 让 LLM 直接选择工具。
+func buildCapabilityCatalog(loaded []capabilities.Capability) string {
+	allTools := tools.All()
+	// 收集每个动态工具的 AI 描述（从 capabilities.LoadPublished 加载）
+	aiDescriptions := map[string]string{}
+	for _, cap := range loaded {
+		if cap.AI.Description != "" {
+			aiDescriptions[cap.Name] = cap.AI.Description
+		}
+	}
+	var lines []string
+	lines = append(lines, "## 可用的动态能力（工具）")
+	lines = append(lines, "当用户请求涉及以下能力时，直接使用对应的 tool_name，不要猜：")
+	lines = append(lines, "")
+	for _, t := range allTools {
+		if !tools.IsDynamic(t.Name) {
+			continue
+		}
+		if t.Operation != tools.Read && t.Operation != tools.Write {
+			continue
+		}
+		desc := ""
+		if d, ok := aiDescriptions[t.Name]; ok {
+			desc = " — " + d
+		}
+		lines = append(lines, fmt.Sprintf("- `%s` (domain=%s, type=%s, op=%s)%s",
+			t.Name, t.Domain, t.ResourceType, t.Operation, desc))
+	}
+	lines = append(lines, "")
+	lines = append(lines, "选择规则：优先匹配 domain + resource_type 最具体的工具；通用查询（如\"检查 X\"）优先选 dashboard 或 health 类工具。")
+	return strings.Join(lines, "\n")
+}
+
 // casSessionTTL returns the CAS session-cookie TTL from
 // COPILOT_CAS_SESSION_TTL (a Go duration like "8h", "30m"). Invalid or empty
 // values fall back to the authenticator default (8h) with a warning — CAS SSO
@@ -635,14 +762,18 @@ func mcpEventToAuditEvent(event mcp.MCPEvent, now time.Time) audit.Event {
 	}
 }
 
-func assistantPlannerFromEnv(ctx context.Context, env map[string]string, aug assistant.KnowledgeAugmenter, skillLookup assistant.SkillLookup, auditService *audit.Service) (assistant.Planner, assistant.Compactor, assistant.ResponseFormatter, *prompt.Registry, string, error) {
+func assistantPlannerFromEnv(ctx context.Context, env map[string]string, aug assistant.KnowledgeAugmenter, skillLookup assistant.SkillLookup, auditService *audit.Service, loaded []capabilities.Capability) (assistant.Planner, assistant.Compactor, assistant.ResponseFormatter, model.BaseChatModel, *prompt.Registry, string, error) {
 	planner, compactor, formatter, registry, mode, err := assistant.NewPlannerFromEnvWithPrompts(ctx, env)
 	if err != nil {
-		return nil, nil, nil, nil, "", err
+		return nil, nil, nil, nil, nil, "", err
 	}
 	if ep, ok := planner.(*assistant.EinoPlanner); ok {
 		if aug != nil {
 			ep.WithKnowledge(aug)
+		}
+		// 注入动态能力目录：让 LLM 看到所有可用工具，直接选择最匹配的。
+		if catalog := buildCapabilityCatalog(loaded); catalog != "" {
+			ep.WithCapabilityCatalog(catalog)
 		}
 		// 缺口-5 / R1：LLM 调用审计。model 名从环境捕获（planner/formatter/
 		// compactor 共享同一 chat model）。
@@ -656,18 +787,15 @@ func assistantPlannerFromEnv(ctx context.Context, env map[string]string, aug ass
 			}
 		}
 	}
-	// 包装顺序（由内到外）：EinoPlanner → CapabilityAwarePlanner → ActionAwarePlanner
-	// Action 路由在最外层：先识别任务入口并注入 Skill SOP，再做能力匹配和执行。
-	var capabilityPlanner assistant.Planner
+	// 提取共享 chat model，供 LLM 研判等组件复用。
+	var sharedChatModel model.BaseChatModel
 	if ep, ok := planner.(*assistant.EinoPlanner); ok && ep != nil {
-		// 使用 AI 参数提取器，当规则提取失败时用 LLM 提取
-		extractor := assistant.NewLLMParamExtractor(ep.ChatModel())
-		capabilityPlanner = assistant.NewCapabilityAwarePlannerWithExtractor(planner, extractor)
-	} else {
-		capabilityPlanner = assistant.NewCapabilityAwarePlanner(planner)
+		sharedChatModel = ep.ChatModel()
 	}
-	router := assistant.NewActionRouter(skillLookup)
-	return assistant.NewActionAwarePlanner(capabilityPlanner, router), compactor, formatter, registry, mode + "+capabilities+actions", nil
+	// AgentExecutor 路径：LLM function calling 直接选工具，不需要旧的
+	// CapabilityAwarePlanner/ActionAwarePlanner 包装链。
+	// 保留 EinoPlanner 作为 DeterministicPlanner 的 fallback（AgentExecutor 未配置时）。
+	return planner, compactor, formatter, sharedChatModel, registry, mode, nil
 }
 
 // importEnricher 构造能力导入的 LLM 富化器。仅当 planner 是 eino（有 chat model）

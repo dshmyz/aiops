@@ -4,7 +4,14 @@ import StatsGrid from './StatsGrid.vue';
 import type { UseCapabilities } from '../../composables/useCapabilities';
 import type { InputField } from '../../types';
 
-defineProps<{ capabilities: UseCapabilities }>();
+const props = defineProps<{ capabilities: UseCapabilities }>();
+
+async function handlePublishAll() {
+  const result = await props.capabilities.publishAll();
+  if (result) {
+    alert(`发布完成：成功 ${result.success} 个，失败 ${result.failed} 个，共 ${result.total} 个`);
+  }
+}
 </script>
 
 <template>
@@ -73,8 +80,24 @@ defineProps<{ capabilities: UseCapabilities }>();
       </div>
       <div v-if="capabilities.loading.value" class="empty">正在加载 AI 运维能力...</div>
       <div v-else class="capability-card-list" data-test="capability-table-body">
+        <!-- 状态分组标签 -->
+        <div class="status-tabs">
+          <button :class="{ active: capabilities.statusFilter.value === 'all' }" @click="capabilities.statusFilter.value = 'all'">全部 ({{ capabilities.capabilities.value.length }})</button>
+          <button :class="{ active: capabilities.statusFilter.value === 'discovered' }" @click="capabilities.statusFilter.value = 'discovered'">草稿 ({{ capabilities.groupedStats.value.draft }})</button>
+          <button :class="{ active: capabilities.statusFilter.value === 'needs_review' }" @click="capabilities.statusFilter.value = 'needs_review'">待评审 ({{ capabilities.groupedStats.value.review }})</button>
+          <button :class="{ active: capabilities.statusFilter.value === 'published' }" @click="capabilities.statusFilter.value = 'published'">已发布 ({{ capabilities.groupedStats.value.published }})</button>
+        </div>
+
+        <!-- 批量操作栏 -->
+        <div class="batch-actions">
+          <span>已选 {{ capabilities.filteredCapabilities.value.filter(c => capabilities.isPublishable(c)).length }} 个可发布</span>
+          <el-button size="small" type="primary" :disabled="capabilities.filteredCapabilities.value.filter(c => capabilities.isPublishable(c)).length === 0" @click="handlePublishAll">
+            一键发布全部可发布
+          </el-button>
+        </div>
+
         <article
-          v-for="item in capabilities.filteredCapabilities.value"
+          v-for="item in capabilities.paginatedCapabilities.value"
           :key="`${item.source}:${item.name}`"
           class="capability-card"
           :class="{ selected: item.name === capabilities.selected.value.name }"
@@ -101,6 +124,12 @@ defineProps<{ capabilities: UseCapabilities }>();
             </div>
           </div>
         </article>
+        <!-- 分页控制 -->
+        <div v-if="capabilities.totalPages.value > 1" class="pagination-controls">
+          <button :disabled="capabilities.currentPage.value <= 1" @click="capabilities.currentPage.value--">上一页</button>
+          <span>{{ capabilities.currentPage.value }} / {{ capabilities.totalPages.value }}</span>
+          <button :disabled="capabilities.currentPage.value >= capabilities.totalPages.value" @click="capabilities.currentPage.value++">下一页</button>
+        </div>
       </div>
     </aside>
 
