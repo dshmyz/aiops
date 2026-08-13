@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS diagnosis_history (
 	tools_called TEXT,
 	findings TEXT,
 	recommendations TEXT,
+	reasoning TEXT,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	KEY idx_diagnosis_history_created (created_at),
 	KEY idx_diagnosis_history_domain (domain)

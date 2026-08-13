@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -502,6 +503,22 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if request.Method == http.MethodGet && request.URL.Path == "/v1/system/health-checks" {
 		r.serveHealthChecks(writer, request)
+		return
+	}
+	if request.Method == http.MethodGet && request.URL.Path == "/v1/system/agent/metrics" {
+		r.serveAgentMetrics(writer, request)
+		return
+	}
+	if request.Method == http.MethodPost && request.URL.Path == "/v1/system/agent/trust-level" {
+		r.serveAgentTrustLevel(writer, request)
+		return
+	}
+	if request.Method == http.MethodPost && request.URL.Path == "/v1/system/agent/disable" {
+		r.serveAgentKillSwitch(writer, request, true)
+		return
+	}
+	if request.Method == http.MethodPost && request.URL.Path == "/v1/system/agent/enable" {
+		r.serveAgentKillSwitch(writer, request, false)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/marketplace/capabilities") {
@@ -3142,6 +3159,69 @@ func (r *Router) serveCASAuth(writer http.ResponseWriter, request *http.Request)
 	default:
 		writeError(writer, http.StatusNotFound, "not found")
 	}
+}
+
+// serveAgentMetrics 处理 GET /v1/system/agent/metrics，返回 agent 自身健康指标。
+func (r *Router) serveAgentMetrics(writer http.ResponseWriter, request *http.Request) {
+	user, _, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	if !userHasAnyRole(user, "viewer", "operator", "admin") {
+		r.writeForbidden(writer, request, user, string(policy.PermissionDenied), request.URL.Path)
+		return
+	}
+	writeCappedJSON(writer, assistant.GetAgentMetrics())
+}
+
+// serveAgentTrustLevel 处理 POST /v1/system/agent/trust-level。
+// body: {"level": "readonly"|"confirm"|"auto"}，仅 admin。
+func (r *Router) serveAgentTrustLevel(writer http.ResponseWriter, request *http.Request) {
+	user, _, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	if !userHasAnyRole(user, "admin") {
+		r.writeForbidden(writer, request, user, string(policy.PermissionDenied), request.URL.Path)
+		return
+	}
+	var body struct {
+		Level string `json:"level"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(request.Body, 4096))
+	if err := decoder.Decode(&body); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	level := assistant.TrustLevel(strings.ToLower(strings.TrimSpace(body.Level)))
+	switch level {
+	case assistant.TrustReadonly, assistant.TrustConfirm, assistant.TrustAuto:
+	default:
+		writeError(writer, http.StatusBadRequest, "level must be readonly, confirm, or auto")
+		return
+	}
+	assistant.SetTrustLevel(level)
+	writeCappedJSON(writer, map[string]any{"trust_level": string(assistant.GetTrustLevel())})
+}
+
+// serveAgentKillSwitch 处理 POST /v1/system/agent/disable|enable。
+// 仅 admin 角色可操作；禁用后运行中的 agent 循环会在下一步终止。
+func (r *Router) serveAgentKillSwitch(writer http.ResponseWriter, request *http.Request, disable bool) {
+	user, _, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	if !userHasAnyRole(user, "admin") {
+		r.writeForbidden(writer, request, user, string(policy.PermissionDenied), request.URL.Path)
+		return
+	}
+	if disable {
+		assistant.DisableAgent()
+		writeCappedJSON(writer, map[string]any{"agent_enabled": false, "message": "agent disabled"})
+		return
+	}
+	assistant.EnableAgent()
+	writeCappedJSON(writer, map[string]any{"agent_enabled": true, "message": "agent enabled"})
 }
 
 // serveHealthChecks 处理 GET /v1/system/health-checks，返回最近的巡检结果。

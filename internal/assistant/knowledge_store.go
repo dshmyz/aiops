@@ -27,6 +27,7 @@ func (s *KnowledgeStore) Init(ctx context.Context) error {
 			tools_called TEXT,
 			findings TEXT,
 			recommendations TEXT,
+			reasoning TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
@@ -40,6 +41,7 @@ func (s *KnowledgeStore) Init(ctx context.Context) error {
 				tools_called TEXT,
 				findings TEXT,
 				recommendations TEXT,
+				reasoning TEXT,
 				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 			)
 		`)
@@ -47,6 +49,8 @@ func (s *KnowledgeStore) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// 兼容旧表：补列（表已存在时 ALTER 成功，新表时列已存在报错，两者都忽略）
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE diagnosis_history ADD COLUMN reasoning TEXT`)
 	// 反馈学习表：记录用户的 👍/👎 和纠错，用于下次类似问题的提示
 	_, err = s.db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS feedback_learning (
@@ -156,10 +160,15 @@ func (s *KnowledgeStore) AnalyzeFeedback(ctx context.Context) (map[string]any, e
 
 // Save 保存一次诊断记录
 func (s *KnowledgeStore) Save(ctx context.Context, title, domain string, toolsCalled []string, findings, recommendations string) error {
+	return s.SaveWithReasoning(ctx, title, domain, toolsCalled, findings, recommendations, "")
+}
+
+// SaveWithReasoning 保存诊断记录并附带 LLM 决策链。
+func (s *KnowledgeStore) SaveWithReasoning(ctx context.Context, title, domain string, toolsCalled []string, findings, recommendations, reasoning string) error {
 	toolsJSON, _ := json.Marshal(toolsCalled)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO diagnosis_history (alert_title, domain, tools_called, findings, recommendations) VALUES (?, ?, ?, ?, ?)`,
-		title, domain, string(toolsJSON), findings, recommendations)
+		`INSERT INTO diagnosis_history (alert_title, domain, tools_called, findings, recommendations, reasoning) VALUES (?, ?, ?, ?, ?, ?)`,
+		title, domain, string(toolsJSON), findings, recommendations, reasoning)
 	return err
 }
 
@@ -226,6 +235,36 @@ func (s *KnowledgeStore) SaveFromToolCalls(ctx context.Context, alertTitle strin
 		}
 	}
 	_ = s.Save(ctx, alertTitle, domain, toolsCalled, fmt.Sprint(findings), "")
+}
+
+// SaveFromToolCallsWithReasoning 保存工具调用记录并附带 LLM 决策链。
+func (s *KnowledgeStore) SaveFromToolCallsWithReasoning(ctx context.Context, alertTitle string, toolCalls []ToolCallLog, reasoning string) {
+	if len(toolCalls) == 0 {
+		return
+	}
+	var toolsCalled []string
+	var findings []string
+	for _, tc := range toolCalls {
+		toolsCalled = append(toolsCalled, tc.Tool)
+		if tc.Error != "" {
+			findings = append(findings, fmt.Sprintf("%s failed: %s", tc.Tool, tc.Error))
+		} else if tc.Output != nil {
+			if summary, ok := tc.Output["summary"].(string); ok && summary != "" {
+				findings = append(findings, summary)
+			}
+		}
+	}
+	domain := ""
+	if len(toolCalls) > 0 {
+		toolName := toolCalls[0].Tool
+		for _, d := range []string{"kafka", "minio", "glusterfs", "moonlightbox"} {
+			if len(toolName) > len(d) && toolName[:len(d)] == d {
+				domain = d
+				break
+			}
+		}
+	}
+	_ = s.SaveWithReasoning(ctx, alertTitle, domain, toolsCalled, fmt.Sprint(findings), "", reasoning)
 }
 
 // ConversationSummary 结构化对话摘要

@@ -106,6 +106,7 @@ func NewAgentExecutorWithCache(cfg AgentExecutorConfig) (*AgentExecutor, error) 
 type AgentRunResult struct {
 	Answer      string         // LLM 最终回复
 	ToolCalls   []ToolCallLog  // 每步工具调用记录
+	Reasoning   []string       // 每轮 LLM 的中间推理（决策链）
 	TurnCount   int            // LLM 调用次数
 	Error       error
 }
@@ -148,6 +149,26 @@ type AgentStepEvent struct {
 // RunWithCallback 执行 agent loop，每完成一个工具调用就回调 onStep。
 // onStep 为 nil 时等价于 Run。
 func (e *AgentExecutor) RunWithCallback(ctx context.Context, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
+	result := e.runWithCallback(ctx, message, history, onStep)
+	// 指标：记录请求结果（覆盖所有 return 路径）
+	if result == nil {
+		agentMetrics.recordRequest(false, "agent returned nil result")
+	} else {
+		agentMetrics.recordRequest(result.Error == nil, errMsgOf(result.Error))
+	}
+	return result
+}
+
+// errMsgOf 安全提取错误信息。
+func errMsgOf(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// runWithCallback 是 RunWithCallback 的实现（defer 指标在包装层处理）。
+func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
 	// 缓存检查：相同问题直接返回缓存结果
 	if e.cache != nil {
 		if cached := e.cache.Get(message); cached != nil {
@@ -229,6 +250,7 @@ func (e *AgentExecutor) RunWithCallback(ctx context.Context, message string, his
 	messages = append(messages, schema.UserMessage(message))
 
 	var allToolCalls []ToolCallLog
+	var reasoningTrail []string
 	consecutiveErrors := 0
 	lastStep := 0
 	seen := map[string]bool{} // 去重：同一工具+参数不重复调用
@@ -238,6 +260,10 @@ func (e *AgentExecutor) RunWithCallback(ctx context.Context, message string, his
 
 	for step := 0; step < e.maxSteps; step++ {
 		lastStep = step
+		// Kill switch：agent 被禁用时立即停止
+		if !AgentEnabled() {
+			return &AgentRunResult{Error: fmt.Errorf("agent disabled by operator"), ToolCalls: allToolCalls, TurnCount: step + 1}
+		}
 		if err := ctx.Err(); err != nil {
 			return &AgentRunResult{Error: err, ToolCalls: allToolCalls, TurnCount: step + 1}
 		}
@@ -255,29 +281,52 @@ func (e *AgentExecutor) RunWithCallback(ctx context.Context, message string, his
 			model.WithTools(toolInfos),
 		)
 		e.releaseLLM()
+		agentMetrics.recordLLMCall(err == nil)
 		if err != nil {
+			agentMetrics.recordRequest(false, err.Error())
 			return &AgentRunResult{Error: fmt.Errorf("LLM generate: %w", err), ToolCalls: allToolCalls, TurnCount: step + 1}
 		}
 		log.Printf("[agent] LLM returned: content=%d chars, tool_calls=%d", len(resp.Content), len(resp.ToolCalls))
+		// 决策链：记录本轮 LLM 的中间推理
+		if len(resp.Content) > 0 && len(resp.ToolCalls) > 0 {
+			reasoningTrail = append(reasoningTrail, resp.Content)
+		}
 
 		// 如果没有 tool calls → LLM 给出了最终回复
 		if len(resp.ToolCalls) == 0 {
+			// 数据诚实性兜底：所有工具都失败时，不给 LLM 脑补的机会
+			if len(allToolCalls) > 0 && allToolsFailed(allToolCalls) {
+				honest := fmt.Sprintf("抱歉，本次检查的所有工具调用都失败了，无法获取任何数据。失败详情：%s", summarizeFailures(allToolCalls))
+				e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
+				result := &AgentRunResult{
+					Answer:    honest,
+					ToolCalls: allToolCalls,
+					Reasoning: reasoningTrail,
+					TurnCount: step + 1,
+				}
+				if e.cache != nil {
+					e.cache.Set(message, result)
+				}
+				return result
+			}
 			// 如果已有工具调用结果，走分析层生成深度报告
 			if len(allToolCalls) > 0 {
 				analysis := e.analyze(ctx, message, allToolCalls)
 				if analysis != "" {
-					e.saveKnowledge(ctx, message, allToolCalls)
+					e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
 					return &AgentRunResult{
 						Answer:    analysis,
 						ToolCalls: allToolCalls,
+						Reasoning: reasoningTrail,
 						TurnCount: step + 1,
 					}
 				}
 			}
-			e.saveKnowledge(ctx, message, allToolCalls)
+			e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
 			result := &AgentRunResult{
 				Answer:    resp.Content,
 				ToolCalls: allToolCalls,
+				Reasoning: reasoningTrail,
 				TurnCount: step + 1,
 			}
 			if e.cache != nil && result.Answer != "" {
@@ -311,6 +360,7 @@ func (e *AgentExecutor) RunWithCallback(ctx context.Context, message string, his
 
 			// 执行工具
 			result, execErr := e.executeTool(ctx, toolName, toolArgs)
+			agentMetrics.recordToolCall(execErr == nil)
 
 			toolLog := ToolCallLog{Tool: toolName, Input: toolArgs}
 			if execErr != nil {
@@ -379,10 +429,11 @@ func (e *AgentExecutor) RunWithCallback(ctx context.Context, message string, his
 	if len(allToolCalls) > 0 {
 		analysis := e.analyze(ctx, message, allToolCalls)
 		if analysis != "" {
-			e.saveKnowledge(ctx, message, allToolCalls)
+			e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
 			result := &AgentRunResult{
 				Answer:    analysis,
 				ToolCalls: allToolCalls,
+				Reasoning: reasoningTrail,
 				TurnCount: lastStep + 1,
 			}
 			if e.cache != nil {
@@ -403,10 +454,11 @@ func (e *AgentExecutor) RunWithCallback(ctx context.Context, message string, his
 	result := &AgentRunResult{
 		Answer:    resp.Content,
 		ToolCalls: allToolCalls,
+		Reasoning: reasoningTrail,
 		TurnCount: e.maxSteps + 1,
 	}
 	// 知识积累：保存诊断记录
-	e.saveKnowledge(ctx, message, allToolCalls)
+	e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
 	// 缓存：存入响应缓存
 	if e.cache != nil && result.Answer != "" {
 		e.cache.Set(message, result)
@@ -416,12 +468,19 @@ func (e *AgentExecutor) RunWithCallback(ctx context.Context, message string, his
 
 // saveKnowledge 异步保存诊断记录到知识库。
 func (e *AgentExecutor) saveKnowledge(ctx context.Context, message string, toolCalls []ToolCallLog) {
+	e.saveKnowledgeWithReasoning(ctx, message, toolCalls, nil)
+}
+
+// saveKnowledgeWithReasoning 保存诊断记录 + LLM 决策链。
+func (e *AgentExecutor) saveKnowledgeWithReasoning(ctx context.Context, message string, toolCalls []ToolCallLog, reasoning []string) {
 	if e.knowledge == nil || len(toolCalls) == 0 {
 		return
 	}
+	// 序列化决策链
+	reasoningJSON, _ := json.Marshal(reasoning)
 	go func() {
-		// 保存原始工具调用记录
-		e.knowledge.SaveFromToolCalls(ctx, message, toolCalls)
+		// 保存原始工具调用记录 + 决策链
+		e.knowledge.SaveFromToolCallsWithReasoning(ctx, message, toolCalls, string(reasoningJSON))
 		// 保存结构化摘要
 		var toolsCalled []string
 		var keyFacts []string
@@ -457,32 +516,53 @@ func (e *AgentExecutor) analyze(ctx context.Context, userMessage string, toolCal
 	sb.WriteString("## 用户问题\n")
 	sb.WriteString(userMessage)
 	sb.WriteString("\n\n## 采集到的数据\n")
+
+	// 数据完整性评估：统计成功/失败/空结果
+	successCount := 0
+	failedCount := 0
+	emptyCount := 0
 	for _, tc := range toolCalls {
 		sb.WriteString(fmt.Sprintf("\n### %s\n", tc.Tool))
 		if tc.Error != "" {
+			failedCount++
 			sb.WriteString(fmt.Sprintf("调用失败: %s\n", tc.Error))
-		} else if tc.Output != nil {
+		} else if tc.Output == nil || len(tc.Output) == 0 {
+			emptyCount++
+			sb.WriteString("(工具返回空结果)\n")
+		} else {
 			// 压缩数据：只保留 summary/status 等关键字段，丢弃大体积 data
 			summary := compressToolOutput(tc.Output)
+			if summary == "(无结果)" || summary == "" {
+				emptyCount++
+			} else {
+				successCount++
+			}
 			sb.WriteString(summary)
 			sb.WriteString("\n")
-		} else {
-			sb.WriteString("(无结果)\n")
 		}
 	}
+
+	// 数据完整性声明：强制模型认识数据缺口
+	sb.WriteString("\n## 数据完整性\n")
+	sb.WriteString(fmt.Sprintf("- 成功获取数据的工具: %d 个\n", successCount))
+	sb.WriteString(fmt.Sprintf("- 调用失败的工具: %d 个\n", failedCount))
+	sb.WriteString(fmt.Sprintf("- 返回空结果的工具: %d 个\n", emptyCount))
+
 	sb.WriteString(`
 ## 输出要求
 用中文给出结构化分析报告，包含：
-1. **核心发现**：从数据中提取的关键事实（具体数字、状态、异常点）
-2. **根因分析**：基于数据推理问题的根本原因（如果有异常）
-3. **影响评估**：这个问题的影响范围和严重程度
-4. **建议操作**：具体的、可执行的运维操作建议
+1. **数据完整度**：明确说明哪些维度有数据、哪些没有。如果某工具失败或返回空，必须写"该维度无数据，无法判断"，绝对禁止把无数据推断为正常
+2. **核心发现**：从数据中提取的关键事实（具体数字、状态、异常点）
+3. **根因分析**：基于数据推理问题的根本原因（如果有异常）
+4. **影响评估**：这个问题的影响范围和严重程度
+5. **建议操作**：具体的、可执行的运维操作建议
 
 要求：
 - 所有结论必须基于上面的数据，不要编造
-- 数据不足时明确说明"数据不足，建议进一步检查 XXX"
+- 无数据的维度必须明确标注，不能默认为健康
 - 给出具体数字和状态，不要泛泛而谈
-- 如果数据全部正常，简洁总结即可，不需要长篇大论`)
+- 如果数据全部正常且完整，简洁总结即可，不需要长篇大论`)
+
 
 	messages := []*schema.Message{
 		schema.SystemMessage("你是资深运维专家，擅长从监控数据中分析问题根因。"),
@@ -501,6 +581,32 @@ func (e *AgentExecutor) analyze(ctx context.Context, userMessage string, toolCal
 	}
 	log.Printf("[agent] analysis completed: %d chars (%dms)", len(resp.Content), latency.Milliseconds())
 	return resp.Content
+}
+
+// allToolsFailed 判断所有工具调用是否都失败了。
+func allToolsFailed(toolCalls []ToolCallLog) bool {
+	if len(toolCalls) == 0 {
+		return false
+	}
+	for _, tc := range toolCalls {
+		if tc.Error == "" && tc.Output != nil && len(tc.Output) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// summarizeFailures 汇总工具失败原因。
+func summarizeFailures(toolCalls []ToolCallLog) string {
+	var parts []string
+	for _, tc := range toolCalls {
+		if tc.Error != "" {
+			parts = append(parts, fmt.Sprintf("%s: %s", tc.Tool, tc.Error))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s: 返回空结果", tc.Tool))
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // compressToolOutput 从工具输出中提取关键摘要，丢弃大体积数据。
@@ -532,6 +638,10 @@ func compressToolOutput(output map[string]any) string {
 	return string(data)
 }
 func (e *AgentExecutor) executeTool(ctx context.Context, name string, args string) (string, error) {
+	// Kill switch：写工具在 agent 被禁用时直接拒绝
+	if !AgentEnabled() {
+		return "", fmt.Errorf("agent disabled by operator")
+	}
 	t, ok := e.toolMap[name]
 	if !ok {
 		return "", fmt.Errorf("unknown tool: %s", name)

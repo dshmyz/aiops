@@ -70,6 +70,11 @@ func (t *CapabilityTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		return "", fmt.Errorf("parse tool arguments: %w", err)
 	}
 
+	// 1.5 信任等级检查：readonly 模式下写工具一律拒绝
+	if t.cap.Operation == tools.Write && !AllowWrite() {
+		return "", fmt.Errorf("trust level %q: write tools are disabled", GetTrustLevel())
+	}
+
 	// 2. 策略检查（优先用 context 中的真实请求者身份）
 	caller, ok := toolUserFromContext(ctx)
 	if !ok {
