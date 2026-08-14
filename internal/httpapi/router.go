@@ -1440,7 +1440,6 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, assistant.ErrPolicyDenied) || errors.Is(err, assistant.ErrForeignConversation) {
-			status = http.StatusForbidden
 			r.writeForbidden(writer, request, user, err.Error(), request.URL.Path)
 			return
 		} else if errors.Is(err, diagnostics.ErrUnsupportedDomain) || errors.Is(err, diagnostics.ErrInvalidRequest) {

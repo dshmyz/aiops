@@ -528,8 +528,8 @@ describe('Capability Console', () => {
     expect(sections[1].find('[data-test="nav-section-label"]').text()).toBe('管理配置');
     // 运维组包含 6 个 nav-item（assistant/management/dashboard/plans/scheduled-tasks/inspection-reports）
     expect(sections[0].findAll('.nav-item').length).toBe(6);
-    // 管理配置组包含 9 个 nav-item（audit/executions/incident/marketplace/prompts/knowledge/feedback/mcp-servers/docs）
-    expect(sections[1].findAll('.nav-item').length).toBe(9);
+    // 管理配置组包含 10 个 nav-item（audit/executions/incident/marketplace/prompts/alert-actions/knowledge/feedback/mcp-servers/docs）
+    expect(sections[1].findAll('.nav-item').length).toBe(10);
   });
 
   test('switches views via Cmd+number shortcut', async () => {

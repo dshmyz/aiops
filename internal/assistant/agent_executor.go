@@ -526,7 +526,7 @@ func (e *AgentExecutor) analyze(ctx context.Context, userMessage string, toolCal
 		if tc.Error != "" {
 			failedCount++
 			sb.WriteString(fmt.Sprintf("调用失败: %s\n", tc.Error))
-		} else if tc.Output == nil || len(tc.Output) == 0 {
+		} else if len(tc.Output) == 0 {
 			emptyCount++
 			sb.WriteString("(工具返回空结果)\n")
 		} else {
@@ -653,18 +653,6 @@ func (e *AgentExecutor) executeTool(ctx context.Context, name string, args strin
 }
 
 // toolInfos 返回所有工具的 Info 列表（传给 LLM）。
-func (e *AgentExecutor) toolInfos() []*schema.ToolInfo {
-	infos := make([]*schema.ToolInfo, 0, len(e.tools))
-	for _, t := range e.tools {
-		info, err := t.Info(context.Background())
-		if err != nil {
-			continue
-		}
-		infos = append(infos, info)
-	}
-	return infos
-}
-
 // toolInfosFiltered 返回过滤后的工具 Info 列表。
 func (e *AgentExecutor) toolInfosFiltered(filtered []tool.BaseTool) []*schema.ToolInfo {
 	infos := make([]*schema.ToolInfo, 0, len(filtered))
@@ -694,7 +682,7 @@ func (e *AgentExecutor) filterRelevantTools(message string) []tool.BaseTool {
 			continue
 		}
 		// 关键词匹配：工具名或 domain 出现在消息中
-		if strings.Contains(text, info.Name) || strings.Contains(text, info.Name) {
+		if strings.Contains(text, info.Name) {
 			relevant = append(relevant, t)
 			continue
 		}

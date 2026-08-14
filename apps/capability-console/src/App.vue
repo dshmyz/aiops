@@ -253,7 +253,7 @@ const assistantToolAnswer = computed<{ tool: string; answer: Record<string, unkn
   if (!isObjectRecord(response) || response.type !== 'answer') {
     return null;
   }
-  const tool = response.tool;
+  const tool = response.tool as string | undefined;
   if (!tool) {
     return null;
   }

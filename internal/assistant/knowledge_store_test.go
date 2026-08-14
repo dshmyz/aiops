@@ -100,9 +100,15 @@ func TestKnowledgeStore_AnalyzeFeedback(t *testing.T) {
 	ctx := context.Background()
 
 	// 保存一些反馈
-	store.SaveFeedback(ctx, "q1", 1, "", nil)
-	store.SaveFeedback(ctx, "q2", 1, "", nil)
-	store.SaveFeedback(ctx, "q3", -1, "错了", nil)
+	if err := store.SaveFeedback(ctx, "q1", 1, "", nil); err != nil {
+		t.Fatalf("save q1 feedback: %v", err)
+	}
+	if err := store.SaveFeedback(ctx, "q2", 1, "", nil); err != nil {
+		t.Fatalf("save q2 feedback: %v", err)
+	}
+	if err := store.SaveFeedback(ctx, "q3", -1, "错了", nil); err != nil {
+		t.Fatalf("save q3 feedback: %v", err)
+	}
 
 	// 分析
 	analysis, err := store.AnalyzeFeedback(ctx)
@@ -144,7 +150,9 @@ func TestKnowledgeStore_SaveConversationSummary(t *testing.T) {
 
 	// 验证记录已保存
 	var count int
-	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM diagnosis_history").Scan(&count)
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM diagnosis_history").Scan(&count); err != nil {
+		t.Fatalf("count diagnosis history: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("expected 1 record, got %d", count)
 	}

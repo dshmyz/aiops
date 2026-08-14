@@ -28,7 +28,7 @@ func TestInitTracerEmptyExporterDefaultsToStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitTracer: %v", err)
 	}
-	defer shutdown(context.Background())
+	defer func() { _ = shutdown(context.Background()) }()
 }
 
 func TestInitTracerUnknownExporterErrors(t *testing.T) {

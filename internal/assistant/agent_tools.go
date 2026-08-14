@@ -264,14 +264,6 @@ func (t *HTTPProbeTool) InvokableRun(ctx context.Context, argumentsInJSON string
 	return result, nil
 }
 
-func mustParseURL(raw string) *url.URL {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return &url.URL{Path: raw}
-	}
-	return u
-}
-
 // validateProbeURL 校验探测 URL，防止 SSRF 攻击。
 func validateProbeURL(raw string) error {
 	u, err := url.Parse(raw)
@@ -520,12 +512,15 @@ func (t *SystemVerifyTool) InvokableRun(ctx context.Context, argumentsInJSON str
 			result["http_check"] = map[string]any{"status": "error", "error": err.Error()}
 		} else {
 			var probeResult map[string]any
-			json.Unmarshal([]byte(probeResp), &probeResult)
-			result["http_check"] = probeResult
-			if code, ok := probeResult["status_code"].(float64); ok && code >= 200 && code < 400 {
-				result["verified"] = true
+			if err := json.Unmarshal([]byte(probeResp), &probeResult); err != nil {
+				result["http_check"] = map[string]any{"status": "error", "error": "invalid probe response"}
 			} else {
-				result["verified"] = false
+				result["http_check"] = probeResult
+				if code, ok := probeResult["status_code"].(float64); ok && code >= 200 && code < 400 {
+					result["verified"] = true
+				} else {
+					result["verified"] = false
+				}
 			}
 		}
 	}

@@ -49,8 +49,7 @@ describe('ReviewStage', () => {
     const cap = makeCapability();
     const { wrapper } = mountReview({
       capabilities: ref([cap]),
-      filteredCapabilities: computed(() => [cap]),
-    } as never);
+    });
     expect(wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="next-minio.bucket.capacity.read"]').exists()).toBe(true);
   });
@@ -60,9 +59,8 @@ describe('ReviewStage', () => {
     const cap = makeCapability();
     const { wrapper } = mountReview({
       capabilities: ref([cap]),
-      filteredCapabilities: computed(() => [cap]),
       selectCapability: fn,
-    } as never);
+    });
     await wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').trigger('click');
     expect(fn).toHaveBeenCalledWith(cap);
   });

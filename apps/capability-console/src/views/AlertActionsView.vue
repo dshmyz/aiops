@@ -9,7 +9,7 @@ interface AlertMatch {
 }
 interface AlertActionStep {
   tool: string;
-  input?: Record<string, string>;
+  input: Record<string, string>;
 }
 interface AlertAction {
   name: string;

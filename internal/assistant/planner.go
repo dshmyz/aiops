@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
@@ -307,32 +306,6 @@ func extractEnvironment(text string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func extractTopic(text string) (string, bool) {
-	matches := regexp.MustCompile(`(?:topic\s+|topic\s*[:=]\s*|的\s+)([a-z0-9._-]+)`).FindStringSubmatch(text)
-	if len(matches) == 2 && matches[1] != "topic" && matches[1] != "retention" {
-		return matches[1], true
-	}
-	parts := strings.Fields(text)
-	for index, part := range parts {
-		if part == "topic" && index > 0 {
-			candidate := strings.Trim(parts[index-1], " ,，。:：")
-			if regexp.MustCompile(`^[a-z0-9._-]+$`).MatchString(candidate) && candidate != "prod" && candidate != "staging" && candidate != "dev" {
-				return candidate, true
-			}
-		}
-	}
-	return "", false
-}
-
-func extractHours(text string) (int, bool) {
-	matches := regexp.MustCompile(`(\d+)\s*(?:hours?|小时|h)`).FindStringSubmatch(text)
-	if len(matches) != 2 {
-		return 0, false
-	}
-	hours, err := strconv.Atoi(matches[1])
-	return hours, err == nil && hours > 0
 }
 
 // extractDomain 从消息文本中提取中间件领域（glusterfs/minio/kafka）。

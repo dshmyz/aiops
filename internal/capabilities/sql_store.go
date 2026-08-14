@@ -281,11 +281,6 @@ func marshalCapabilityJSON(cap Capability) (capabilityJSONRows, error) {
 	return b, nil
 }
 
-// scannable 是 rows.QueryRow / Query 返回的可扫描接口。
-type scannable interface {
-	Scan(dest ...any) error
-}
-
 func scanSingleCapability(row *sql.Row) (ManagedCapability, error) {
 	return scanCapabilityRow(row)
 }

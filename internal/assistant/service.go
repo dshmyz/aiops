@@ -1381,7 +1381,7 @@ func assistantTurnContent(response Response) string {
 	if response.Message != "" {
 		return response.Message
 	}
-	if response.Answer != nil && len(response.Answer) > 0 {
+	if len(response.Answer) > 0 {
 		for _, key := range []string{"summary", "message", "status", "text", "result"} {
 			if value, ok := response.Answer[key].(string); ok && value != "" {
 				return value

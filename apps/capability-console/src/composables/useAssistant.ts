@@ -261,16 +261,24 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     function applyResponse(response: AssistantConsoleResponse) {
       assistantLatestResponse.value = response;
       assistantLatestStatus.value = assistantResponseStatus(response);
-      // 用响应内容填充本地 assistant turn（流式或非流式都走这里）
-      const content = (response as any).message || (response as any).summary || '';
+      // 用响应内容填充本地 assistant turn（流式或非流式都走这里）。
+      // 只有对象响应才读 message/summary；null/原始值原样交给 detail 面板。
+      const content = (response !== null && typeof response === 'object' && (response as any).message != null)
+        ? String((response as any).message)
+        : ((response !== null && typeof response === 'object' && (response as any).summary != null)
+            ? String((response as any).summary)
+            : '');
       const localTurn = conversationTurns.value.find((t) => t.id === streamingTurnId);
       if (localTurn) {
         localTurn.content = content;
       } else if (content) {
         // 流式 turn 不存在（可能被刷新掉了），创建一个新的
+        const convID = (response !== null && typeof response === 'object' && (response as any).conversation_id != null)
+          ? String((response as any).conversation_id)
+          : activeConversationID.value || '';
         conversationTurns.value.push({
           id: `local-assistant-${Date.now()}`,
-          conversation_id: (response as any).conversation_id || activeConversationID.value || '',
+          conversation_id: convID,
           role: 'assistant',
           content,
           created_at: new Date().toISOString(),

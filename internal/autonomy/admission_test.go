@@ -34,7 +34,6 @@ func enabledConfig() Config {
 // fakeLimiter is a configurable DailyLimiter for unit tests. today returned by
 // CountToday governs the daily-limit gate; count increments on Increment.
 type fakeLimiter struct {
-	count   int
 	days    map[string]int
 	err     error
 	lastKey string

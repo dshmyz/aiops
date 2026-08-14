@@ -1029,10 +1029,6 @@ func (s *MySQLActionPlanStore) ListAudit(ctx context.Context, filter AuditFilter
 	return page, nil
 }
 
-type queryRower interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
 func scanPlan(row *sql.Row) (PlanRecord, error) {
 	var plan PlanRecord
 	var token, confirmedBy, dryRun sql.NullString
@@ -1089,10 +1085,6 @@ func scanExecution(row *sql.Row) (ExecutionRecord, error) {
 
 type execer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
-type querier interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
 func insertAudit(ctx context.Context, executor execer, event AuditEvent) error {

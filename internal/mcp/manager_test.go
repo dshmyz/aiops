@@ -221,7 +221,7 @@ func TestManagerReloadEmitsToolsChangedEvent(t *testing.T) {
 	}
 	env.lister.setTools(srvName, []mcp.MCPTool{envTool("query")})
 
-	env.manager.Reload(context.Background())
+	_ = env.manager.Reload(context.Background())
 
 	// 首次 Reload 新增工具，应触发 tools_changed 事件
 	foundChanged := false
@@ -247,9 +247,9 @@ func TestManagerReloadNoEventWhenNoChanges(t *testing.T) {
 	}
 	env.lister.setTools(srvName, []mcp.MCPTool{envTool("query")})
 
-	env.manager.Reload(context.Background())
+	_ = env.manager.Reload(context.Background())
 	env.emitter.events = nil // 清空首次事件
-	env.manager.Reload(context.Background()) // 第二次无变更
+	_ = env.manager.Reload(context.Background()) // 第二次无变更
 
 	for _, event := range env.emitter.events {
 		if event.Type == mcp.EventTypeToolsChanged {
@@ -270,7 +270,7 @@ func TestManagerReloadEmitsUnhealthyEventOnListerError(t *testing.T) {
 	}
 	env.lister.setError(srvName, errors.New("connection refused"))
 
-	env.manager.Reload(context.Background())
+	_ = env.manager.Reload(context.Background())
 
 	foundUnhealthy := false
 	for _, event := range env.emitter.events {
@@ -294,12 +294,12 @@ func TestManagerReloadHandlesServerWithChangedTools(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	env.lister.setTools(srvName, []mcp.MCPTool{envTool("query")})
-	env.manager.Reload(context.Background())
+	_ = env.manager.Reload(context.Background())
 
 	// 服务器工具列表变化：移除 query，新增 alerts
 	env.lister.setTools(srvName, []mcp.MCPTool{envTool("alerts")})
 	env.emitter.events = nil
-	env.manager.Reload(context.Background())
+	_ = env.manager.Reload(context.Background())
 
 	// 旧工具应注销
 	if _, ok := tools.Lookup(srvName + ".query"); ok {
@@ -362,11 +362,11 @@ func TestManagerReloadEmptyDBClearsAll(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	env.lister.setTools(srvName, []mcp.MCPTool{envTool("query")})
-	env.manager.Reload(context.Background())
+	_ = env.manager.Reload(context.Background())
 
 	// 删除所有服务器后 Reload
-	env.store.Delete(context.Background(), "srv-1")
-	env.manager.Reload(context.Background())
+	_ = env.store.Delete(context.Background(), "srv-1")
+	_ = env.manager.Reload(context.Background())
 
 	if _, ok := tools.Lookup(srvName + ".query"); ok {
 		t.Fatal("all MCP tools should be unregistered when DB is empty")

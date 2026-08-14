@@ -293,11 +293,5 @@ func sourceRank(source string) int {
 	return 1
 }
 
-// readPathWithTime 是兼容旧 Manager 代码的保留方法，内部委托 readPath。
-func readPathWithTime(path, source string) (ManagedCapability, error) {
-	store := FileCapabilityStore{root: filepath.Dir(filepath.Dir(path))} // 向上两级
-	return store.readPath(path, source)
-}
-
 // Ensure FileCapabilityStore satisfies the interface at compile time.
 var _ CapabilityStore = (*FileCapabilityStore)(nil)

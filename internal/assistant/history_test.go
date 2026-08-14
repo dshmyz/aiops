@@ -168,10 +168,8 @@ func TestEstimateTurnCharsWithToolIntent(t *testing.T) {
 	if got <= len(turn.Content) {
 		t.Fatalf("got %d, want > %d (content length)", got, len(turn.Content))
 	}
-	// Should include tool_name length.
-	if !contains(jsonMust(t, map[string]any{"environment": "prod", "group": "orders"}), "") {
-		// sanity check that we can marshal the input
-	}
+	// sanity check that input marshals
+	_ = contains(jsonMust(t, map[string]any{"environment": "prod", "group": "orders"}), "")
 }
 
 // TestEstimateTurnCharsWithDiagnosticIntent asserts that a diagnostic turn

@@ -284,7 +284,7 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (*Registry, *
 	}
 	// 语义索引是 best-effort：检索索引构建失败绝不让发布本身失败，所以这里
 	// 忽略错误。索引在事务提交之后才写，避免半成品进检索。
-	s.indexCapability(ctx, registry, parsed)
+	_ = s.indexCapability(ctx, registry, parsed)
 	version := &Version{
 		ID:             versionID,
 		CapabilityID:   registryID,
@@ -724,6 +724,6 @@ func (s *Service) Deprecate(ctx context.Context, capabilityID, reason string) er
 		return ErrNotFound
 	}
 	// 弃用的能力从语义检索里移除，避免自然语言搜索命中已下线的基础设施。
-	s.removeCapabilityIndex(ctx, capabilityID)
+	_ = s.removeCapabilityIndex(ctx, capabilityID)
 	return nil
 }

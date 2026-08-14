@@ -330,13 +330,13 @@ func TestManagerRetrieveFallsBackToSubstring(t *testing.T) {
 	}
 
 	mgr := knowledge.NewManager(store, embedder, 1)
-	docs, err := mgr.Retrieve(ctx, "kafka reset", 1)
+	_, err := mgr.Retrieve(ctx, "kafka reset", 1)
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
 	}
 	// Should fall back to substring: "kafka reset" is not a substring of content,
 	// but "Kafka" won't match "kafka" (case-sensitive). Let's use a matching query.
-	docs, err = mgr.Retrieve(ctx, "Kafka consumer", 1)
+	docs, err := mgr.Retrieve(ctx, "Kafka consumer", 1)
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
 	}

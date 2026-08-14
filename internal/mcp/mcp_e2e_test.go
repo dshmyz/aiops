@@ -20,8 +20,10 @@ import (
 func TestMCPServerE2E(t *testing.T) {
 	root := t.TempDir()
 	pub := root + "/published"
-	os.MkdirAll(pub, 0o755)
-	os.WriteFile(pub+"/minio.read.yaml", []byte(`schema_version: 1
+	if err := os.MkdirAll(pub, 0o755); err != nil {
+		t.Fatalf("mkdir published: %v", err)
+	}
+	if err := os.WriteFile(pub+"/minio.read.yaml", []byte(`schema_version: 1
 name: minio.bucket.capacity.read
 status: published
 domain: minio
@@ -41,7 +43,9 @@ input_schema:
 auth: {roles: [viewer, operator, admin], environment_scoped: true}
 output: {kind: observation, summary_template: "Bucket {name} usage is {usage_pct}%", fields: {usage_pct: "$.data.usage_pct"}}
 ai: {description: 读取 MinIO 桶容量}
-`), 0o644)
+`), 0o644); err != nil {
+		t.Fatalf("write minio.yaml: %v", err)
+	}
 
 	store := capabilities.NewFileCapabilityStore(root)
 	fake := &fakeReadRunner{result: map[string]any{"usage_pct": 77, "limit_gb": 100}}
@@ -58,14 +62,17 @@ ai: {description: 读取 MinIO 桶容量}
 		fmt.Printf("DEBUG: tool=%s\n", name)
 	}
 
-	listener, _ := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
 	httpSrv := &http.Server{Handler: mcpSrv.Handler()}
-	go httpSrv.Serve(listener)
+	go func() { _ = httpSrv.Serve(listener) }()
 	t.Cleanup(func() { httpSrv.Close() })
 	addr := listener.Addr().String()
 
 	// initialize
-	resp, sessionID := mcpPostWithSession(t, addr, `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{}}`, "")
+	_, sessionID := mcpPostWithSession(t, addr, `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{}}`, "")
 	fmt.Printf("initialize: session=%s\n", sessionID)
 
 	// notifications/initialized (required by MCP protocol before tools/list)
@@ -73,7 +80,7 @@ ai: {description: 读取 MinIO 桶容量}
 	fmt.Println("notifications/initialized sent")
 
 	// tools/list (must carry session ID)
-	resp, _ = mcpPostWithSession(t, addr, `{"jsonrpc":"2.0","method":"tools/list","id":2}`, sessionID)
+	resp, _ := mcpPostWithSession(t, addr, `{"jsonrpc":"2.0","method":"tools/list","id":2}`, sessionID)
 	var listResult struct {
 		Result struct {
 			Tools []struct {
@@ -82,7 +89,9 @@ ai: {description: 读取 MinIO 桶容量}
 			} `json:"tools"`
 		} `json:"result"`
 	}
-	json.Unmarshal(resp, &listResult)
+	if err := json.Unmarshal(resp, &listResult); err != nil {
+		t.Fatalf("unmarshal tools/list: %v", err)
+	}
 	fmt.Printf("tools/list: %d tools\n", len(listResult.Result.Tools))
 	if len(listResult.Result.Tools) != 1 {
 		t.Fatalf("tools = %d, want 1", len(listResult.Result.Tools))
@@ -99,7 +108,9 @@ ai: {description: 读取 MinIO 桶容量}
 		} `json:"result"`
 		Error *struct{ Code int `json:"code"`; Message string `json:"message"` } `json:"error"`
 	}
-	json.Unmarshal(resp, &callResult)
+	if err := json.Unmarshal(resp, &callResult); err != nil {
+		t.Fatalf("unmarshal tools/call: %v", err)
+	}
 	if callResult.Error != nil {
 		t.Fatalf("tools/call error: code=%d msg=%s", callResult.Error.Code, callResult.Error.Message)
 	}
@@ -116,7 +127,10 @@ func mcpPostWithSession(t *testing.T, addr, body, sessionID string) ([]byte, str
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "POST", "http://"+addr+"/mcp", bytes.NewBufferString(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://"+addr+"/mcp", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if sessionID != "" {
 		req.Header.Set("Mcp-Session-Id", sessionID)
@@ -127,7 +141,9 @@ func mcpPostWithSession(t *testing.T, addr, body, sessionID string) ([]byte, str
 	}
 	defer resp.Body.Close()
 	var buf bytes.Buffer
-	buf.ReadFrom(resp.Body)
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		t.Fatalf("read body: %v", err)
+	}
 	newSessionID := resp.Header.Get("Mcp-Session-Id")
 	return buf.Bytes(), newSessionID
 }

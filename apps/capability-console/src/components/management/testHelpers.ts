@@ -23,6 +23,13 @@ export function makeCapabilities(overrides: Partial<UseCapabilities> = {}): UseC
   const importPreview = ref<ImportPreview | null>(null);
   const importBatch = ref<ImportBatch | null>(null);
 
+  // 若 overrides 提供 capabilities，注入到局部 ref 上，保证后续 computed
+  // （filteredCapabilities / paginatedCapabilities）仍引用同一个数据源。
+  if (overrides.capabilities) {
+    capabilities.value = overrides.capabilities.value;
+    delete overrides.capabilities;
+  }
+
   const stats = computed(() => ({
     published: 0,
     review: 0,

@@ -2,34 +2,8 @@ package assistant
 
 import (
 	"context"
-	"fmt"
 	"testing"
-
-	"github.com/cloudwego/eino/schema"
 )
-
-// mockChatModelForTest 是测试用的 LLM mock
-type mockChatModelForTest struct {
-	responses []*schema.Message
-	callIdx   int
-}
-
-func (m *mockChatModelForTest) Generate(_ context.Context, _ []*schema.Message, _ ...interface{}) (*schema.Message, error) {
-	if m.callIdx >= len(m.responses) {
-		return nil, fmt.Errorf("no more responses")
-	}
-	resp := m.responses[m.callIdx]
-	m.callIdx++
-	return resp, nil
-}
-
-func (m *mockChatModelForTest) Stream(ctx context.Context, messages []*schema.Message, opts ...interface{}) (*schema.StreamReader[*schema.Message], error) {
-	msg, err := m.Generate(ctx, messages)
-	if err != nil {
-		return nil, err
-	}
-	return schema.StreamReaderFromArray([]*schema.Message{msg}), nil
-}
 
 func TestAgentExecutor_CompressToolOutput(t *testing.T) {
 	tests := []struct {

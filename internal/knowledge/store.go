@@ -13,8 +13,7 @@ import (
 // MemoryStore is an thread-unsafe in-memory vector store for tests and small
 // deployments. Cosine similarity is computed in memory.
 type MemoryStore struct {
-	docs   []EmbeddedDocument
-	nextID int
+	docs []EmbeddedDocument
 }
 
 func (m *MemoryStore) Add(_ context.Context, doc EmbeddedDocument) error {

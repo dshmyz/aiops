@@ -158,7 +158,7 @@ func TestIsTransientChatError(t *testing.T) {
 			t.Errorf("isTransient(%q) = %v, want %v", c.msg, got, c.ok)
 		}
 	}
-	if isTransientChatError(nil, errors.New("boom")) {
+	if isTransientChatError(context.TODO(), errors.New("boom")) {
 		t.Error("nil ctx should not be transient")
 	}
 }

@@ -25,8 +25,6 @@ func testSQLite(t *testing.T) *sql.DB {
 	return db
 }
 
-func day(t time.Time) time.Time { return t.UTC() }
-
 func TestSQLDailyLimiterCountStartsAtZero(t *testing.T) {
 	db := testSQLite(t)
 	l := NewSQLDailyLimiter(db)

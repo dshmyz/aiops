@@ -89,8 +89,3 @@ func (e *cachedAliasExpander) refreshIfNeeded(ctx context.Context) {
 	e.lastLoad = time.Now()
 	e.mu.Unlock()
 }
-
-// staticAliasExpander is a no-op expander used when no store is configured.
-type staticAliasExpander struct{}
-
-func (staticAliasExpander) Expand(_ context.Context, envs []string) []string { return envs }

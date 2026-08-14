@@ -65,16 +65,6 @@ type draftToolSequenceRule struct {
 	risk     string
 }
 
-// runnableTools 是生成草稿时可引用的合法只读工具名（tools.Registry 静态元工具）。
-var runnableTools = []string{
-	tools.AlertQuery,      // alert.query
-	tools.EventQuery,      // event.query
-	tools.TaskQuery,       // task.query
-	tools.ClusterStatusRead, // cluster.status.read
-	tools.QuerySystemPosture, // system.posture.read
-	tools.IncidentView,    // incident.view
-}
-
 // draftRules 按主题键分派。每个可落 runbook 的主题一条规则。
 var draftRules = map[string]draftToolSequenceRule{
 	"retention": {
