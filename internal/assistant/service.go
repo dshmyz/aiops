@@ -509,6 +509,7 @@ func (s *Service) runAgentLoopInStream(ctx context.Context, events chan<- Stream
 		return s.executeAgentStep(stepCtx, user, message, intent, step)
 	}
 	loop := NewAgentLoop(s.planner, execute, agentMaxSteps()).
+		WithMaxControlSteps(agentMaxControlSteps()).
 		WithStreaming(func(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) (<-chan StreamEvent, error) {
 			return s.startPlannerStream(ctx, user, message, history, pageContext), nil
 		}, forward)

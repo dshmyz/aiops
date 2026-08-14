@@ -390,6 +390,23 @@ func agentMaxSteps() int {
 	return n
 }
 
+// agentMaxControlSteps reads the control step budget from
+// COPILOT_AGENT_MAX_CONTROL_STEPS, defaulting to defaultMaxControlSteps.
+// Values below 1 (or unparsable) fall back to the default.
+const envAgentMaxControlSteps = "COPILOT_AGENT_MAX_CONTROL_STEPS"
+
+func agentMaxControlSteps() int {
+	v := strings.TrimSpace(os.Getenv(envAgentMaxControlSteps))
+	if v == "" {
+		return defaultMaxControlSteps
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return defaultMaxControlSteps
+	}
+	return n
+}
+
 // stepEventFromOutcome renders an executed advisory step as a StreamEvent for
 // the frontend step timeline.
 func stepEventFromOutcome(out StepOutcome) StreamEvent {

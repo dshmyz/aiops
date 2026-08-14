@@ -16,6 +16,11 @@ import (
 // loop request. Overridable via COPILOT_ASSISTANT_MAX_STEPS.
 const defaultAgentMaxSteps = 8
 
+// defaultMaxControlSteps bounds how many steering / failure-feedback turns are
+// tolerated within a single run before giving up, regardless of remaining
+// execution steps. Overridable via COPILOT_AGENT_MAX_CONTROL_STEPS.
+const defaultMaxControlSteps = 6
+
 // maxAgentFailures bounds how many consecutive read failures the loop tolerates
 // while feeding errors back for fallback replanning, so a planner that keeps
 // selecting a broken tool cannot spin forever.
@@ -81,6 +86,10 @@ const (
 	TerminalHandoff
 	// TerminalClarification: the planner asked for missing parameters.
 	TerminalClarification
+	// TerminalControlExhausted: steering or failure-feedback turns consumed
+	// the control step budget before the execution budget was spent — the
+	// loop could not make progress because replanning itself was too costly.
+	TerminalControlExhausted
 )
 
 // AgentRun is the outcome of a full agent-loop iteration.
@@ -111,31 +120,60 @@ type AgentRun struct {
 // with a fake planner + fake executor.
 type AgentExecute func(intent Intent, stepIndex int) (StepOutcome, error)
 
+// StepState drives the loop's next iteration.
+type StepState int
+
+const (
+	// StateSteer: a control step (sequence steering or failure feedback) was
+	// appended; the loop continues with another planOnce.
+	StateSteer StepState = iota
+	// StateExec: the intent should be executed.
+	StateExec
+	// StateDone: the run has reached a terminal outcome (written to run.Reason).
+	StateDone
+	// StateHandoff: the intent is a write that requires human approval.
+	StateHandoff
+	// StateClarify: the planner needs more information.
+	StateClarify
+)
+
+// stepBudget tracks execution vs control step consumption independently. Exec
+// steps are real tool invocations; control steps are replanning overhead
+// (sequence steers, failure retries) that must not eat the execution budget.
+type stepBudget struct {
+	exec          int
+	execLimit     int
+	control       int
+	controlLimit  int
+}
+
+func (b *stepBudget) canExec() bool    { return b.exec < b.execLimit }
+func (b *stepBudget) canControl() bool { return b.control < b.controlLimit }
+func (b *stepBudget) consumeExec()     { b.exec++ }
+func (b *stepBudget) consumeControl()  { b.control++ }
+
 // AgentLoop drives multi-step, read-only autonomous execution: it plans, runs
 // advisory tools, feeds each result back into the planner's history, and
 // replans until the planner concludes (final_answer), asks for clarification,
-// queues a write for approval, or exhausts maxSteps. Writes are never executed
-// by the loop — reaching one stops the loop and hands back to the human.
+// queues a write for approval, or exhausts the execution budget. Writes are
+// never executed by the loop — reaching one stops the loop and hands back to
+// the human.
 //
-// When the wiring supplies a planStream callback (from a PlanStream-capable
-// planner) plus an onEvent forwarder, each planning iteration streams — the
-// loop consumes the LLM deltas/thinking and forwards them live to the client
-// while still feeding results back between iterations. Without them the loop
-// falls back to one-shot Planner.Plan per iteration.
+// Execution steps (real tool invocations) and control steps (steering /
+// failure feedback) are budgeted independently, so replanning overhead cannot
+// starve tool execution.
 type AgentLoop struct {
 	planner    Planner
 	execute    AgentExecute
 	maxSteps   int
-	planStream func(context.Context, identity.CurrentUser, string, []Turn, PageContext) (<-chan StreamEvent, error)
-	onEvent    func(StreamEvent)
-	// sequence is an optional product-declared evidence-collection order (from a
-	// matched runbook's tool_sequence, e.g. alert-root-cause-sequence →
-	// [alert.query, event.query]). When set, the loop treats it as a conclusion
-	// gate: a model final_answer is not honored while sequence members remain
-	// untouched — the loop steers the planner back to collect them. Declared
-	// sequence steps that cannot resolve are best-effort skipped rather than
-	// stalling the loop.
-	sequence []string
+	// maxControlSteps bounds how many steering / failure-feedback turns the loop
+	// tolerates within a single run before giving up. Control turns are
+	// replanning overhead (sequence steers, error retries) that should not eat
+	// the execution-step budget.
+	maxControlSteps int
+	planStream      func(context.Context, identity.CurrentUser, string, []Turn, PageContext) (<-chan StreamEvent, error)
+	onEvent         func(StreamEvent)
+	sequence        []string
 }
 
 // NewAgentLoop builds an agent loop. execute must be non-nil. maxSteps bounds
@@ -145,7 +183,18 @@ func NewAgentLoop(planner Planner, execute AgentExecute, maxSteps int) *AgentLoo
 	if maxSteps < 1 {
 		maxSteps = defaultAgentMaxSteps
 	}
-	return &AgentLoop{planner: planner, execute: execute, maxSteps: maxSteps}
+	return &AgentLoop{planner: planner, execute: execute, maxSteps: maxSteps, maxControlSteps: defaultMaxControlSteps}
+}
+
+// WithMaxControlSteps overrides the default control step budget. Control steps
+// are steering and failure-feedback turns that should not eat the execution
+// budget; this limit is a safety backstop against replanning spin.
+func (l *AgentLoop) WithMaxControlSteps(n int) *AgentLoop {
+	if n < 1 {
+		n = defaultMaxControlSteps
+	}
+	l.maxControlSteps = n
+	return l
 }
 
 // WithStreaming wires a PlanStream-capable planner path so each planning
@@ -174,145 +223,188 @@ func (l *AgentLoop) WithRunbookSequence(sequence []string) *AgentLoop {
 func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message string, history []Turn, pageContext PageContext) *AgentRun {
 	run := &AgentRun{History: append([]Turn{}, history...)}
 	consecutiveFailures := 0
-	// seen records every advisory (read/diagnostic) execution in this run, keyed
-	// by the tool plus the concrete resource it targeted. It is the
-	// deterministic convergence backstop: if the planner repeats a read on a
-	// resource it already executed this run, the loop concludes instead of
-	// burning another step on the same data. Prompt feedback (feedbackText)
-	// nudges well-behaved models to conclude on their own; this guard guarantees
-	// it even when the model re-emits the same tool.
 	seen := map[string]struct{}{}
-	// sequenceTouched records which declared runbook-sequence members have been
-	// executed this run, advanced by advisory steps whose (resolved) tool name
-	// matches a member.
 	sequenceTouched := map[string]bool{}
+	budget := stepBudget{execLimit: l.maxSteps, controlLimit: l.maxControlSteps}
 
-	for step := 0; step < l.maxSteps; step++ {
+	_ = consecutiveFailures // used in executeAndEvaluate
+	for budget.canExec() || budget.canControl() {
 		if err := ctx.Err(); err != nil {
 			run.Reason = TerminalMaxSteps
 			run.Err = err
 			return run
 		}
-		intent, err := l.planOnce(ctx, user, message, run.History, pageContext)
-		if err != nil {
-			var clarification ClarificationError
-			if errors.As(err, &clarification) {
-				run.Reason = TerminalClarification
-				msg := strings.TrimSpace(clarification.Message)
-				if msg == "" {
-					msg = clarification.Error()
-				}
-				run.Clarified = clarifyWithCheckedSteps(run, msg)
+		intent, planErr := l.planOnce(ctx, user, message, run.History, pageContext)
+		state := l.classify(intent, planErr, seen, sequenceTouched, run)
+		if state != StateExec {
+			if l.handleNonExec(run, state, intent, planErr, &budget, sequenceTouched) {
 				return run
 			}
-			if errors.Is(err, ErrClarificationNeeded) {
-				run.Reason = TerminalClarification
-				run.Clarified = clarifyWithCheckedSteps(run, clarificationMessage)
+			// StateSteer consumed a control step; re-check.
+			if !budget.canExec() && !budget.canControl() {
+				run.Reason = TerminalControlExhausted
+				run.Fallback = true
 				return run
 			}
+			continue
+		}
+		if l.executeAndEvaluate(run, intent, &budget, seen, sequenceTouched, message, &consecutiveFailures) {
+			return run
+		}
+		// After a successful exec step, check if we can still steer. When
+		// control budget is exhausted, the next classify may return StateDone
+		// (planner concludes) even though the sequence wasn't fully satisfied —
+		// the user got a partial result, not a controlled completion.
+		if !budget.canExec() {
 			run.Reason = TerminalMaxSteps
-			run.Err = err
+			run.Fallback = true
 			return run
 		}
-		// Terminal: planner concluded with a human-facing answer.
-		if intent.Done {
-			// A declared runbook sequence (② chain skeleton) is a product-level
-			// conclusion gate: when the model calls final_answer BEFORE the
-			// declared evidence members have all been collected, the loop does not
-			// end — it steers the planner back to collect the remaining declared
-			// steps, turning "alert root cause collects a few checks" into a
-			// declared order instead of letting the model conclude on a whim. Only
-			// when the sequence is satisfied (or never declared) is the final_answer
-			// honored.
-			if pending := l.pendingSequenceMembers(sequenceTouched); len(pending) > 0 {
-				run.History = append(run.History, sequenceSteerTurn(pending))
-				continue
-			}
-			run.Reason = TerminalDone
-			run.FinalAnswer = intent.Answer
-			return run
+		if !budget.canControl() && len(run.Steps) > 0 {
+			// Control budget spent but we have executed steps. The planner
+			// may still conclude (StateDone), but we mark the run so the
+			// wiring can badge it as a controlled partial result.
+			run.Reason = TerminalControlExhausted
+			run.Fallback = true
+			// Don't return — let the next planOnce run; classify will set
+			// its own reason which takes precedence if it's non-zero.
 		}
-		// Write intent: execute it. A non-admitted write returns an executive
-		// (handoff) StepOutcome — stop and hand the pending plan to the human.
-		// A low-risk write admitted by the Low-Risk Admission Controller returns
-		// an advisory StepOutcome and the loop continues.
-		if isWriteIntent(intent) {
-			out, execErr := l.execute(intent, step)
-			if execErr != nil {
-				run.Reason = TerminalMaxSteps
-				run.Err = execErr
-				return run
-			}
-			out.StepIndex = step
-			if out.Kind != StepAdvisory {
-				// 硬禁止默认：写操作不自动执行，交出待确认 plan。
-				out.Kind = StepExecutive
-				run.Handoff = &out
-				run.Steps = append(run.Steps, out)
-				run.Reason = TerminalHandoff
-				return run
-			}
-			// 准入放行的低风险写：作为 advisory 步骤继续循环。
-			run.Steps = append(run.Steps, out)
-			if key, ok := intentAdvisoryKey(intent); ok {
-				seen[key] = struct{}{}
-			}
-			sequenceTrackTouched(sequenceTouched, l.sequence, out.Tool)
-			continue
-		}
-		// Convergence backstop: a read intent that replays a tool on a resource
-		// already executed this run cannot move the diagnosis forward. Conclude
-		// with the accumulated steps instead of re-running it.
-		if key, ok := intentAdvisoryKey(intent); ok {
-			if _, dup := seen[key]; dup && !isWriteIntent(intent) {
-				run.Reason = TerminalDone
-				run.Fallback = true // synthesized summary, not a model final_answer
-				run.FinalAnswer = stepsAnswer(run)
-				return run
-			}
-		}
-		// Advisory: run the read/diagnostic step.
-		out, execErr := l.execute(intent, step)
-		if execErr != nil {
-			// Feed the error back so the planner can fall back to another tool,
-			// but bound the retries to avoid an infinite failure loop.
-			consecutiveFailures++
-			if consecutiveFailures >= maxAgentFailures {
-				run.Reason = TerminalMaxSteps
-				run.Err = execErr
-				return run
-			}
-			run.History = append(run.History, failureTurn(intent, execErr))
-			continue
-		}
-		consecutiveFailures = 0
-		out.Kind = StepAdvisory
-		out.StepIndex = step
-		run.Steps = append(run.Steps, out)
-		if key, ok := intentAdvisoryKey(intent); ok {
-			seen[key] = struct{}{}
-		}
-		sequenceTrackTouched(sequenceTouched, l.sequence, out.Tool)
-		// Execution-layer short-circuit for single-turn diagnostics: a
-		// single-domain diagnostic (e.g. "检查 kafka 健康吗") that ran
-		// successfully is structurally conclusive — it already answered the
-		// question, so looping back to re-plan (letting the model self-enforce a
-		// final_answer) only burns extra LLM turns. This moves "single-turn
-		// question → done" from model discipline to a deterministic check.
-		// Multi-domain messages and explicit continuation cues ("然后/再/对比/
-		// 延伸") are exempt so genuine investigation chains still run.
-		if shouldShortCircuitSingleDiagnostic(message, intent, out) {
-			run.Reason = TerminalDone
-			run.FinalAnswer = singleDiagnosticAnswer(out)
-			return run
-		}
-		// Feed the result back into the agent history so the next Plan() call
-		// sees it (read-only chaining / fallback reasoning).
-		run.History = append(run.History, feedbackTurn(intent, out))
 	}
-	run.Reason = TerminalMaxSteps
-	run.Fallback = true // ran out of steps without a final_answer; summary is synthesized
+	// Budget exhausted. Determine whether execution or control ran out first.
+	if !budget.canExec() {
+		run.Reason = TerminalMaxSteps
+		run.Fallback = true
+	} else {
+		run.Reason = TerminalControlExhausted
+		run.Fallback = true
+	}
 	return run
+}
+
+// classify inspects the planner output (intent + error) and returns the
+// appropriate next state. It does not mutate any loop state.
+func (l *AgentLoop) classify(intent Intent, planErr error, seen map[string]struct{}, sequenceTouched map[string]bool, run *AgentRun) StepState {
+	if planErr != nil {
+		var clarification ClarificationError
+		if errors.As(planErr, &clarification) {
+			msg := strings.TrimSpace(clarification.Message)
+			if msg == "" {
+				msg = clarification.Error()
+			}
+			run.Clarified = clarifyWithCheckedSteps(run, msg)
+			return StateClarify
+		}
+		if errors.Is(planErr, ErrClarificationNeeded) {
+			run.Clarified = clarifyWithCheckedSteps(run, clarificationMessage)
+			return StateClarify
+		}
+		run.Err = planErr
+		run.Reason = TerminalMaxSteps
+		return StateDone
+	}
+	// Planner concluded with a human-facing answer.
+	if intent.Done {
+		if pending := l.pendingSequenceMembers(sequenceTouched); len(pending) > 0 {
+			return StateSteer
+		}
+		// Only set TerminalDone if no more specific reason was already set
+		// (e.g. TerminalControlExhausted from the previous iteration).
+		if run.Reason == 0 {
+			run.Reason = TerminalDone
+		}
+		run.FinalAnswer = intent.Answer
+		return StateDone
+	}
+	// Write intent: execute it. An admitted low-risk write returns an advisory
+	// StepOutcome; anything else hands off for human approval.
+	if isWriteIntent(intent) {
+		return StateExec
+	}
+	// Convergence backstop: a read on a resource already executed this run
+	// cannot move the diagnosis forward.
+	if key, ok := intentAdvisoryKey(intent); ok {
+		if _, dup := seen[key]; dup {
+			run.Reason = TerminalDone
+			run.Fallback = true
+			run.FinalAnswer = stepsAnswer(run)
+			return StateDone
+		}
+	}
+	return StateExec
+}
+
+// handleNonExec processes a non-execution state (steer, done, clarify) and
+// returns true when the caller should return the run. Returns false only for
+// StateSteer (loop continues after appending the steering turn).
+func (l *AgentLoop) handleNonExec(run *AgentRun, state StepState, intent Intent, planErr error, budget *stepBudget, sequenceTouched map[string]bool) bool {
+	switch state {
+	case StateSteer:
+		if !budget.canControl() {
+			run.Reason = TerminalControlExhausted
+			run.Fallback = true
+			return true
+		}
+		budget.consumeControl()
+		if pending := l.pendingSequenceMembers(sequenceTouched); len(pending) > 0 {
+			run.History = append(run.History, sequenceSteerTurn(pending))
+		}
+		return false
+	case StateClarify:
+		run.Reason = TerminalClarification
+		return true
+	case StateDone:
+		// classify always sets run.Reason for StateDone; no override needed.
+		return true
+	case StateHandoff:
+		run.Reason = TerminalHandoff
+		return true
+	default:
+		return true
+	}
+}
+
+// executeAndEvaluate runs the intent as an advisory step, feeds the result
+// (or error) back, and returns true when the caller should return the run.
+func (l *AgentLoop) executeAndEvaluate(run *AgentRun, intent Intent, budget *stepBudget, seen map[string]struct{}, sequenceTouched map[string]bool, message string, consecutiveFailures *int) bool {
+	// When control budget is exhausted, no further replanning is possible.
+	// The run terminates here — either as a controlled partial result (if we
+	// have steps) or as a control-exhausted failure (if we don't).
+	if !budget.canControl() {
+		run.Reason = TerminalControlExhausted
+		run.Fallback = true
+		return true
+	}
+	step := budget.exec
+	out, execErr := l.execute(intent, step)
+	if execErr != nil {
+		(*consecutiveFailures)++
+		if *consecutiveFailures >= maxAgentFailures {
+			run.Reason = TerminalMaxSteps
+			run.Err = execErr
+			return true
+		}
+		if budget.canControl() {
+			budget.consumeControl()
+		}
+		run.History = append(run.History, failureTurn(intent, execErr))
+		return false
+	}
+	(*consecutiveFailures) = 0
+	budget.consumeExec()
+	out.Kind = StepAdvisory
+	out.StepIndex = step
+	run.Steps = append(run.Steps, out)
+	if key, ok := intentAdvisoryKey(intent); ok {
+		seen[key] = struct{}{}
+	}
+	sequenceTrackTouched(sequenceTouched, l.sequence, out.Tool)
+	if shouldShortCircuitSingleDiagnostic(message, intent, out) {
+		run.Reason = TerminalDone
+		run.FinalAnswer = singleDiagnosticAnswer(out)
+		return true
+	}
+	run.History = append(run.History, feedbackTurn(intent, out))
+	return false
 }
 
 // intentAdvisoryKey canonicalizes an advisory (read/diagnostic) intent into a
