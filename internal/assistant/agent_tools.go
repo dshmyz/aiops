@@ -218,7 +218,7 @@ func (t *HTTPProbeTool) InvokableRun(ctx context.Context, argumentsInJSON string
 	// 发请求（校验 URL 防止 SSRF 和 nil dereference）
 	start := time.Now()
 	client := &http.Client{Timeout: time.Duration(args.TimeoutSeconds) * time.Second}
-	if err := validateProbeURL(args.URL); err != nil {
+	if err := validateProbeURL(ctx, args.URL); err != nil {
 		return "", err
 	}
 	req, err := http.NewRequest(args.Method, args.URL, nil)
@@ -272,7 +272,9 @@ var dnsResolve = func(ctx context.Context, host string) ([]net.IP, error) {
 }
 
 // validateProbeURL 校验探测 URL，防止 SSRF 攻击。
-func validateProbeURL(raw string) error {
+// ctx 用于 DNS 复查的超时与取消传导：请求被取消时，探测中的 DNS 查询也会中止，
+// 而不是继续占用 3s 的独立后台超时。
+func validateProbeURL(ctx context.Context, raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
@@ -300,7 +302,7 @@ func validateProbeURL(raw string) error {
 	// DNS 复查：域名虽不是内网字面量，但解析结果可能指向内网
 	//（如 /etc/hosts 把 public.example.com 指向 10.0.0.1，或内网 DNS）。
 	// 任一解析结果命中内网地址即拦截，防止戴域名马甲的 SSRF。
-	ips, err := dnsResolve(context.Background(), host)
+	ips, err := dnsResolve(ctx, host)
 	if err != nil {
 		// 解析失败时返回明确的 SSRF 拒绝理由，避免静默放行。
 		return fmt.Errorf("resolve %q: %w", host, err)

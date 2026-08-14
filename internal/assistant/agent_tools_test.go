@@ -97,7 +97,7 @@ func TestValidateProbeURL_SSRF(t *testing.T) {
 			}
 			defer func() { dnsResolve = old }()
 
-			err := validateProbeURL(tc.raw)
+			err := validateProbeURL(context.Background(), tc.raw)
 			blocked := err != nil
 			if blocked != tc.wantBlock {
 				t.Fatalf("validateProbeURL(%q) blocked=%v, want blocked=%v (err=%v)", tc.raw, blocked, tc.wantBlock, err)
