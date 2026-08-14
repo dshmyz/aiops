@@ -121,9 +121,11 @@ describe('formatDateGroup', () => {
   });
 
   test('respects local timezone for day boundary', () => {
-    // 2026-07-26T16:00:00Z in UTC+8 = 2026-07-27T00:00:00 local
-    // 与 now (2026-07-27T10:30:00Z = 2026-07-27T18:30:00 local) 同一天
-    const result = formatDateGroup('2026-07-26T16:00:00Z', now);
+    // 构造与 now 相同本地日期、但时间不同的输入，验证 "今天" 判定只依赖
+    // 本地日期而非时刻。用 now 的本地年月日 + 12:00 构造，保证任何时区都
+    // 与 now 落在同一天，且远离本地午夜边界。
+    const sameDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0).toISOString();
+    const result = formatDateGroup(sameDay, now);
     expect(result.label).toBe('今天');
   });
 });
