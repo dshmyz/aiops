@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
+	"github.com/gracegaoya/ai-operations-copilot/internal/store"
 )
 
 // TestFormatAssistantTurnNilIntent asserts that a nil Intent returns the
@@ -373,4 +374,140 @@ func itoa(i int) string {
 		b = append([]byte{'-'}, b...)
 	}
 	return string(b)
+}
+
+// TestHistoryMessagesReplayedToolStep asserts that a persisted tool_step turn
+// replayed with a populated Result renders as structured tool feedback rather
+// than a bare assistant text turn — the cross-turn resume path.
+func TestHistoryMessagesReplayedToolStep(t *testing.T) {
+	t.Parallel()
+	history := []Turn{
+		{Role: "user", Content: "深挖那个告警"},
+		{
+			Role:         "assistant",
+			ResponseType: responseTypeToolStep,
+			Content:      "broker 异常",
+			Result: map[string]any{
+				"tool":       "domain.read",
+				"step_index": float64(0),
+				"result":     map[string]any{"severity": "critical"},
+			},
+		},
+		{Role: "user", Content: "继续"},
+	}
+	msgs := historyMessages(history)
+	if len(msgs) != 3 {
+		t.Fatalf("len(msgs) = %d, want 3", len(msgs))
+	}
+	leader := msgs[1].Content
+	if !contains(leader, "[已执行的工具步骤]") {
+		t.Fatalf("tool_step msg missing feedback header: %q", leader)
+	}
+	if !contains(leader, "tool: domain.read") {
+		t.Fatalf("tool_step msg missing tool name: %q", leader)
+	}
+	if !contains(leader, `"severity":"critical"`) {
+		t.Fatalf("tool_step msg missing structured result: %q", leader)
+	}
+	if !contains(leader, "summary: broker 异常") {
+		t.Fatalf("tool_step msg missing summary: %q", leader)
+	}
+}
+
+// TestHistoryMessagesInLoopToolStepBackwardCompat asserts that an in-loop
+// tool_step turn (nil Result, data carried in Content/Intent) is unaffected by
+// the resume branch — it still renders through formatAssistantTurn with the
+// [Last Intent] block, preserving existing single-request behavior.
+func TestHistoryMessagesInLoopToolStepBackwardCompat(t *testing.T) {
+	t.Parallel()
+	history := []Turn{
+		{Role: "user", Content: "查 lag"},
+		{
+			Role:         "assistant",
+			ResponseType: responseTypeToolStep,
+			Content:      "lag = 1234",
+			Intent: &Intent{
+				ToolName: "kafka.consumer_lag.read",
+				Input:    map[string]any{"environment": "prod"},
+			},
+		},
+		{Role: "user", Content: "同 environment 再查 minio"},
+	}
+	msgs := historyMessages(history)
+	if len(msgs) != 3 {
+		t.Fatalf("len(msgs) = %d, want 3", len(msgs))
+	}
+	leader := msgs[1].Content
+	if contains(leader, "[已执行的工具步骤]") {
+		t.Fatalf("in-loop tool_step should not take the resume branch: %q", leader)
+	}
+	if !contains(leader, "[Last Intent]") {
+		t.Fatalf("in-loop tool_step missing [Last Intent]: %q", leader)
+	}
+}
+
+// TestToPlannerTurnCarriesResult asserts that toPlannerTurn copies the persisted
+// ResponsePayload into Result so the resume path can reconstruct tool feedback.
+func TestToPlannerTurnCarriesResult(t *testing.T) {
+	t.Parallel()
+	payload := map[string]any{"tool": "domain.read", "step_index": float64(1)}
+	turn := toPlannerTurn(store.Turn{
+		Role:            "assistant",
+		Content:         "done",
+		ResponseType:    responseTypeToolStep,
+		ResponsePayload: payload,
+	})
+	if turn.Result == nil {
+		t.Fatalf("Result = nil, want payload carried")
+	}
+	if turn.Result["tool"] != "domain.read" {
+		t.Fatalf("Result missing tool: %v", turn.Result)
+	}
+}
+
+// TestHistoryMessagesFallbackAnswerMarked asserts that a replayed
+// answer_converged terminal turn is rendered with an explicit "not concluded"
+// marker, so a continuation builds on prior tool_steps instead of reading the
+// fallback as a finished answer.
+func TestHistoryMessagesFallbackAnswerMarked(t *testing.T) {
+	t.Parallel()
+	history := []Turn{
+		{Role: "user", Content: "深挖告警"},
+		{
+			Role:         "assistant",
+			ResponseType: responseTypeFallbackAnswer,
+			Content:      "综合严重级别 critical，未达到明确结论",
+		},
+		{Role: "user", Content: "继续"},
+	}
+	msgs := historyMessages(history)
+	if len(msgs) != 3 {
+		t.Fatalf("len(msgs) = %d, want 3", len(msgs))
+	}
+	leader := msgs[1].Content
+	if !contains(leader, "[上一轮未达到明确结论（兜底收尾）]") {
+		t.Fatalf("fallback turn missing not-concluded marker: %q", leader)
+	}
+	if !contains(leader, "继续深挖") {
+		t.Fatalf("fallback turn missing continuation guidance: %q", leader)
+	}
+}
+
+// TestHistoryMessagesPlainAnswerUntagged asserts that a genuine completed
+// answer turn is not tagged as a fallback, so only un-converged exits carry the
+// resume marker.
+func TestHistoryMessagesPlainAnswerUntagged(t *testing.T) {
+	t.Parallel()
+	history := []Turn{
+		{Role: "user", Content: "查 lag"},
+		{Role: "assistant", ResponseType: "answer", Content: "lag 正常，结论明确"},
+		{Role: "user", Content: "谢谢"},
+	}
+	msgs := historyMessages(history)
+	if len(msgs) != 3 {
+		t.Fatalf("len(msgs) = %d, want 3", len(msgs))
+	}
+	if contains(msgs[1].Content, "[上一轮未达到明确结论（兜底收尾）]") {
+		t.Fatalf("plain answer turn should not carry fallback marker: %q", msgs[1].Content)
+	}
 }

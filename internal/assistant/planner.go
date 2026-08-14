@@ -139,7 +139,14 @@ type Turn struct {
 	Role         string
 	Content      string
 	ResponseType string
-	Intent       *Intent
+	// Result carries the structured tool outcome for a persisted tool_step turn
+	// replayed into a later planner call. It is the cross-turn counterpart of the
+	// in-loop feedback intent: where Intent lets a later step reuse extracted
+	// parameters, Result lets a resumed step see what the previous turn actually
+	// found (tool, input, raw output, summary) so a continuation reads as tool
+	// feedback rather than a bare text transcript.
+	Result map[string]any
+	Intent *Intent
 }
 
 type Planner interface {

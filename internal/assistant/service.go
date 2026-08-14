@@ -1368,6 +1368,9 @@ func toPlannerTurn(t store.Turn) Turn {
 		Content:      t.Content,
 		ResponseType: t.ResponseType,
 	}
+	if t.ResponsePayload != nil {
+		turn.Result = t.ResponsePayload
+	}
 	return turn
 }
 

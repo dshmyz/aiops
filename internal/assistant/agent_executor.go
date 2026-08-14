@@ -455,7 +455,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 		Answer:    resp.Content,
 		ToolCalls: allToolCalls,
 		Reasoning: reasoningTrail,
-		TurnCount: e.maxSteps + 1,
+		TurnCount: e.maxSteps,
 	}
 	// 知识积累：保存诊断记录
 	e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)

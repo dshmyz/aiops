@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -422,10 +423,61 @@ func historyMessages(history []Turn) []*schema.Message {
 		case "user":
 			messages = append(messages, schema.UserMessage(content))
 		case "assistant":
+			// A persisted tool_step turn (from a prior request that ended on
+			// maxSteps/fallback) replays as tool feedback, not a bare text turn.
+			// This is the cross-turn counterpart of the loop's in-run feedback:
+			// rendering the executed tool + raw result structurally lets a resumed
+			// step continue from what the previous run already found instead of
+			// re-reading it as prose. A plain assistant turn (including a prior
+			// terminal answer) stays a normal assistant message.
+			if turn.ResponseType == responseTypeToolStep && len(turn.Result) > 0 {
+				messages = append(messages, schema.AssistantMessage(formatToolStepTurn(turn), nil))
+				continue
+			}
+			// A persisted answer_converged terminal turn is the honest "not fully
+			// reasoned through" marker from a prior maxSteps/fallback exit. Mark it
+			// explicitly so a continuation reads the preceding tool_steps as a
+			// completed first segment to build on, not as a finished conclusion.
+			if turn.ResponseType == responseTypeFallbackAnswer {
+				messages = append(messages, schema.AssistantMessage(formatFallbackAnswerTurn(content), nil))
+				continue
+			}
 			messages = append(messages, schema.AssistantMessage(formatAssistantTurn(content, turn.Intent), nil))
 		}
 	}
 	return messages
+}
+
+// formatToolStepTurn renders a replayed tool_step turn as structured tool
+// feedback: which tool ran, its input, and the raw result it returned, plus the
+// intent block when present — the same shape the in-loop feedbackTurn feeds the
+// replanning LLM, so a continuation behaves like an in-run next step.
+func formatToolStepTurn(turn Turn) string {
+	var b strings.Builder
+	b.WriteString("[已执行的工具步骤]\n")
+	if tool, ok := turn.Result["tool"].(string); ok && tool != "" {
+		b.WriteString("tool: " + tool + "\n")
+	}
+	if idx, ok := turn.Result["step_index"]; ok {
+		b.WriteString("step_index: " + fmt.Sprint(idx) + "\n")
+	}
+	if input, ok := turn.Result["input"]; ok {
+		if inJSON, err := json.Marshal(input); err == nil {
+			b.WriteString("input: " + string(inJSON) + "\n")
+		}
+	}
+	if result, ok := turn.Result["result"]; ok {
+		if rJSON, err := json.Marshal(result); err == nil {
+			b.WriteString("result: " + string(rJSON) + "\n")
+		}
+	}
+	b.WriteString("summary: " + turn.Content + "\n")
+	// Keep the intent block so later turns can resolve references the same way
+	// the in-loop feedback does.
+	if turn.Intent != nil {
+		b.WriteString(formatAssistantTurn("", turn.Intent))
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // formatAssistantTurn appends a [Last Intent] block to the assistant message
@@ -455,6 +507,14 @@ func formatAssistantTurn(content string, intent *Intent) string {
 		return content
 	}
 	return content + "\n\n[Last Intent]\ntool_name: " + intent.ToolName + "\ninput: " + string(inputJSON)
+}
+
+// formatFallbackAnswerTurn renders a replayed answer_converged terminal turn so
+// the resumed planner treats the prior run as an incomplete first segment. A
+// follow-up that continues should build on the already-executed tool_steps
+// rather than interpreting this as a final, authoritative conclusion.
+func formatFallbackAnswerTurn(content string) string {
+	return "[上一轮未达到明确结论（兜底收尾）]\n" + content + "\n如本次继续深挖，请基于上述已执行的工具步骤继续，而不要重复执行已完成的部分。"
 }
 
 // estimateTurnChars estimates the character footprint of a turn in the LLM
