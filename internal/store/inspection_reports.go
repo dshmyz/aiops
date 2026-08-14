@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 )
 
@@ -111,6 +113,15 @@ func NewSQLInspectionReportStore(db *sql.DB) *SQLInspectionReportStore {
 }
 
 func (s *SQLInspectionReportStore) CreateReport(ctx context.Context, report InspectionReport) (InspectionReport, error) {
+	// 幂等认领：同一 (period, window_start) 只在多节点上生成一份日报。
+	// 窗口由截断到天的时钟算出，各实例对同一天算出的 window_start 一致，
+	// 故 (period, window_start) 唯一索引天然让"先到先写、其余实例认领已存在那份"。
+	if existing, err := s.getByPeriodAndWindow(ctx, report.Period, report.WindowStart); err == nil {
+		return existing, nil
+	} else if !errors.Is(err, ErrInspectionReportNotFound) {
+		return InspectionReport{}, err
+	}
+
 	if report.ID == "" {
 		report.ID = uuid.NewString()
 	}
@@ -124,9 +135,39 @@ func (s *SQLInspectionReportStore) CreateReport(ctx context.Context, report Insp
 		report.ID, report.Period, report.WindowStart, report.WindowEnd, report.GeneratedAt,
 		report.TotalTasks, report.SucceededTasks, report.FailedTasks, string(summariesJSON), report.HTMLContent)
 	if err != nil {
+		// 并发竞态：另一实例刚写入了同一窗口 → 撞唯一键，认领它生成的那份。
+		if isUniqueConstraintViolation(err) {
+			if existing, getErr := s.getByPeriodAndWindow(ctx, report.Period, report.WindowStart); getErr == nil {
+				return existing, nil
+			}
+		}
 		return InspectionReport{}, fmt.Errorf("insert inspection report: %w", err)
 	}
 	return report, nil
+}
+
+// getByPeriodAndWindow 按 (period, window_start) 查找已存在的报告，用于幂等认领。
+func (s *SQLInspectionReportStore) getByPeriodAndWindow(ctx context.Context, period string, windowStart time.Time) (InspectionReport, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, period, window_start, window_end, generated_at, total_tasks, succeeded_tasks, failed_tasks, task_summaries, html_content
+		FROM copilot_inspection_reports WHERE period = ? AND window_start = ?`, period, windowStart)
+	report, err := scanInspectionReport(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return InspectionReport{}, ErrInspectionReportNotFound
+		}
+		return InspectionReport{}, fmt.Errorf("find report by window: %w", err)
+	}
+	return report, nil
+}
+
+// isUniqueConstraintViolation 判断错误是否为唯一约束冲突（MySQL 1062 / SQLite UNIQUE）。
+// 用于幂等插入撞键时的认领-回读路径。
+func isUniqueConstraintViolation(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1062
+	}
+	return strings.Contains(err.Error(), "UNIQUE")
 }
 
 func (s *SQLInspectionReportStore) GetReport(ctx context.Context, id string) (InspectionReport, error) {
