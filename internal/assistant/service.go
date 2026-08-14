@@ -630,8 +630,11 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 		return
 	}
 
-	// 用 RunWithCallback 逐步推送工具调用事件
-	result := s.agentExecutor.RunWithCallback(ctx, message, history, func(step AgentStepEvent) {
+	// 用 RunWithCallback 逐步推送工具调用事件。
+	// 关键：把真实请求者身份注入 ctx。缺了它，CapabilityTool 会走到空的
+	// fallback 身份并被策略拒绝（RBAC 归属错误 + 审计不可归因 + 缓存串用户）。
+	toolCtx := WithToolUser(ctx, user)
+	result := s.agentExecutor.RunWithCallback(toolCtx, message, history, func(step AgentStepEvent) {
 		send(StreamEvent{
 			Step: &StepEvent{
 				Tool:      step.Tool,
@@ -711,7 +714,10 @@ func (s *Service) handleStatelessWithHistory(ctx context.Context, user identity.
 
 // handleWithAgentExecutor 用 AgentExecutor（LLM function calling）处理请求。
 func (s *Service) handleWithAgentExecutor(ctx context.Context, user identity.CurrentUser, message string, history []Turn) (Response, error) {
-	result := s.agentExecutor.Run(ctx, message, history)
+	// 注入真实请求者身份到 ctx（与 runAgentExecutorInStream 一致），
+	// 避免工具执行回退到硬编码 admin 身份。
+	toolCtx := WithToolUser(ctx, user)
+	result := s.agentExecutor.Run(toolCtx, message, history)
 	if result.Error != nil {
 		return Response{}, result.Error
 	}

@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"sync"
@@ -35,8 +36,10 @@ func NewResponseCache(maxSize int, ttl time.Duration) *ResponseCache {
 }
 
 // Get 从缓存获取响应。miss 返回 nil。
-func (c *ResponseCache) Get(query string) *AgentRunResult {
-	key := cacheKey(query)
+// 缓存 key 同时包含请求者身份：同一 query 在不同用户之间不共享，
+// 防止 B 用户命中 A 用户（以 admin 权限采集）的结果。
+func (c *ResponseCache) Get(ctx context.Context, query string) *AgentRunResult {
+	key := cacheKey(subjectFromCtx(ctx), query)
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	c.mu.RUnlock()
@@ -46,9 +49,9 @@ func (c *ResponseCache) Get(query string) *AgentRunResult {
 	return entry.response
 }
 
-// Set 存入缓存。
-func (c *ResponseCache) Set(query string, result *AgentRunResult) {
-	key := cacheKey(query)
+// Set 存入缓存。key 同样按请求者身份隔离。
+func (c *ResponseCache) Set(ctx context.Context, query string, result *AgentRunResult) {
+	key := cacheKey(subjectFromCtx(ctx), query)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// 简单淘汰：超过 maxSize 时清空
@@ -62,15 +65,24 @@ func (c *ResponseCache) Set(query string, result *AgentRunResult) {
 }
 
 // Invalidate 使缓存失效。
-func (c *ResponseCache) Invalidate(query string) {
-	key := cacheKey(query)
+func (c *ResponseCache) Invalidate(ctx context.Context, query string) {
+	key := cacheKey(subjectFromCtx(ctx), query)
 	c.mu.Lock()
 	delete(c.entries, key)
 	c.mu.Unlock()
 }
 
-// cacheKey 生成缓存键（query 的 hash）。
-func cacheKey(query string) string {
-	h := sha256.Sum256([]byte(query))
+// cacheKey 生成缓存键：请求者身份 + query 的 hash。
+func cacheKey(subject, query string) string {
+	h := sha256.Sum256([]byte(subject + "\x00" + query))
 	return fmt.Sprintf("%x", h[:16])
+}
+
+// subjectFromCtx 取请求者标识做缓存隔离维度；无身份时用固定占位符，
+// 使系统/内部发起的请求（如定时诊断）仍能互相去重，同时不与其他用户混淆。
+func subjectFromCtx(ctx context.Context) string {
+	if user, ok := toolUserFromContext(ctx); ok && user.Subject != "" {
+		return user.Subject
+	}
+	return "system"
 }

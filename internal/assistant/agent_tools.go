@@ -99,11 +99,13 @@ func (t *CapabilityTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		return "", fmt.Errorf("execute %s: %w", t.cap.Name, err)
 	}
 
-	// 4. 审计记录
+	// 4. 审计记录（绑定执行者身份，使 tool_executed 可归因）
 	if t.audit != nil {
 		_ = t.audit.Record(ctx, audit.Event{
-			Action:   "tool_executed",
-			ToolName: t.cap.Name,
+			Action:    "tool_executed",
+			Subject:   caller.Subject,
+			RequestID: caller.RequestID,
+			ToolName:  t.cap.Name,
 			Metadata: map[string]any{
 				"input":  input,
 				"status": result.Severity,
@@ -163,14 +165,11 @@ func CapabilityToolsFromCapabilities(
 // --- 通用运维工具 ---
 
 // HTTPProbeTool 通用 HTTP 探活工具：对任意 URL 发请求，返回状态码、响应时间、TLS 证书等。
-type HTTPProbeTool struct {
-	client *http.Client
-}
+// 注意：不发请求时无状态，每次调用按需 new 一个带超时的 client（超时可随参数变化）。
+type HTTPProbeTool struct{}
 
 func NewHTTPProbeTool() *HTTPProbeTool {
-	return &HTTPProbeTool{
-		client: &http.Client{Timeout: 10 * time.Second},
-	}
+	return &HTTPProbeTool{}
 }
 
 func (t *HTTPProbeTool) Info(_ context.Context) (*schema.ToolInfo, error) {
@@ -264,6 +263,14 @@ func (t *HTTPProbeTool) InvokableRun(ctx context.Context, argumentsInJSON string
 	return result, nil
 }
 
+// dnsResolve 解析主机名，供 validateProbeURL 做 SSRF 的 DNS 复查。
+// 包级变量便于测试注入 mock（security 控制必须可单测）。
+var dnsResolve = func(ctx context.Context, host string) ([]net.IP, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+}
+
 // validateProbeURL 校验探测 URL，防止 SSRF 攻击。
 func validateProbeURL(raw string) error {
 	u, err := url.Parse(raw)
@@ -279,9 +286,10 @@ func validateProbeURL(raw string) error {
 	}
 	// 阻止访问内部网络
 	if ip := net.ParseIP(host); ip != nil {
-		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || ip.IsUnspecified() {
+		if isBlockedIP(ip) {
 			return fmt.Errorf("internal address %q blocked", host)
 		}
+		return nil
 	}
 	// 阻止知名内部域名
 	for _, blocked := range []string{"localhost", "metadata.google.internal", "169.254.169.254"} {
@@ -289,7 +297,28 @@ func validateProbeURL(raw string) error {
 			return fmt.Errorf("internal host %q blocked", host)
 		}
 	}
+	// DNS 复查：域名虽不是内网字面量，但解析结果可能指向内网
+	//（如 /etc/hosts 把 public.example.com 指向 10.0.0.1，或内网 DNS）。
+	// 任一解析结果命中内网地址即拦截，防止戴域名马甲的 SSRF。
+	ips, err := dnsResolve(context.Background(), host)
+	if err != nil {
+		// 解析失败时返回明确的 SSRF 拒绝理由，避免静默放行。
+		return fmt.Errorf("resolve %q: %w", host, err)
+	}
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			return fmt.Errorf("internal address %q resolves to blocked IP %s", host, ip)
+		}
+	}
 	return nil
+}
+
+// isBlockedIP 判断 IP 是否属于禁止探测的内网/保留地址。
+func isBlockedIP(ip net.IP) bool {
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsMulticast()
 }
 
 func escapeJSON(s string) string {

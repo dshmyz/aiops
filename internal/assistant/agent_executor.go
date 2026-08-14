@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/capabilities"
@@ -56,12 +57,12 @@ func NewAgentExecutor(cfg AgentExecutorConfig) (*AgentExecutor, error) {
 		cfg.MaxSteps = 10
 	}
 
-	// 把动态能力包装为 eino tools
-	user := identity.CurrentUser{
-		Subject:             "assistant-agent",
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{"prod", "staging", "dev"},
-	}
+	// 把动态能力包装为 eino tools。
+	// 构造时的 user 仅作 fallback（ctx 无身份时），这里刻意保持空身份：
+	// 空角色在 policy.Evaluate 里一律拒绝，确保漏注入 ctx 身份时 fail-closed
+	//（拒绝执行），而不是静默以管理员身份运行。真实身份由调用方在
+	// Run/HandleMessage 等入口通过 WithToolUser 注入 ctx。
+	user := identity.CurrentUser{}
 	einoTools := CapabilityToolsFromCapabilities(cfg.Capabilities, cfg.Adapter, cfg.AuditService, user)
 	// 通用运维工具：HTTP 探活
 	einoTools = append(einoTools, NewHTTPProbeTool())
@@ -167,12 +168,50 @@ func errMsgOf(err error) string {
 	return err.Error()
 }
 
+// logWithCtx 输出带请求关联信息的日志。从 ctx 提取 trace_id（OTel span）和
+// 请求者 request_id/subject，让 agent 路径的每条日志可归因到具体请求和用户，
+// 便于跨日志断排障。ctx 无身份/无 span 时退化为普通 log.Printf，不引入噪声。
+func logWithCtx(ctx context.Context, format string, args ...any) {
+	if prefix := logPrefix(ctx); prefix != "" {
+		log.Printf("%s "+format, append([]any{prefix}, args...)...)
+		return
+	}
+	log.Printf(format, args...)
+}
+
+// logPrefix 计算日志的关联信息前缀 "[trace=... user=... req=...]"，无关联信息时返回空串。
+func logPrefix(ctx context.Context) string {
+	traceID := ""
+	if sc := trace.SpanContextFromContext(ctx); sc.HasTraceID() {
+		traceID = sc.TraceID().String()
+	}
+	reqID, subject := "", ""
+	if user, ok := toolUserFromContext(ctx); ok {
+		reqID = user.RequestID
+		subject = user.Subject
+	}
+	var attrs []string
+	if traceID != "" {
+		attrs = append(attrs, "trace="+traceID)
+	}
+	if reqID != "" {
+		attrs = append(attrs, "req="+reqID)
+	}
+	if subject != "" {
+		attrs = append(attrs, "user="+subject)
+	}
+	if len(attrs) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(attrs, " ") + "]"
+}
+
 // runWithCallback 是 RunWithCallback 的实现（defer 指标在包装层处理）。
 func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
 	// 缓存检查：相同问题直接返回缓存结果
 	if e.cache != nil {
-		if cached := e.cache.Get(message); cached != nil {
-			log.Printf("[agent] cache hit for: %s", message[:min(50, len(message))])
+		if cached := e.cache.Get(ctx, message); cached != nil {
+			logWithCtx(ctx, "[agent] cache hit for: %s", message[:min(50, len(message))])
 			return cached
 		}
 	}
@@ -269,13 +308,13 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 		}
 		// 连续失败熔断：同一工具连续失败 3 次则停止循环
 		if consecutiveErrors >= 3 {
-			log.Printf("[agent] stopping after %d consecutive tool failures", consecutiveErrors)
+			logWithCtx(ctx, "[agent] stopping after %d consecutive tool failures", consecutiveErrors)
 			break
 		}
 
 		// 调 LLM（带 tools 参数）
 		toolInfos := e.toolInfosFiltered(relevantTools)
-		log.Printf("[agent] calling LLM with %d tools: %v", len(toolInfos), toolNames(toolInfos))
+		logWithCtx(ctx, "[agent] calling LLM with %d tools: %v", len(toolInfos), toolNames(toolInfos))
 		e.acquireLLM()
 		resp, err := e.chat.Generate(ctx, messages,
 			model.WithTools(toolInfos),
@@ -286,7 +325,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 			agentMetrics.recordRequest(false, err.Error())
 			return &AgentRunResult{Error: fmt.Errorf("LLM generate: %w", err), ToolCalls: allToolCalls, TurnCount: step + 1}
 		}
-		log.Printf("[agent] LLM returned: content=%d chars, tool_calls=%d", len(resp.Content), len(resp.ToolCalls))
+		logWithCtx(ctx, "[agent] LLM returned: content=%d chars, tool_calls=%d", len(resp.Content), len(resp.ToolCalls))
 		// 决策链：记录本轮 LLM 的中间推理
 		if len(resp.Content) > 0 && len(resp.ToolCalls) > 0 {
 			reasoningTrail = append(reasoningTrail, resp.Content)
@@ -305,7 +344,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 					TurnCount: step + 1,
 				}
 				if e.cache != nil {
-					e.cache.Set(message, result)
+					e.cache.Set(ctx, message, result)
 				}
 				return result
 			}
@@ -330,7 +369,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 				TurnCount: step + 1,
 			}
 			if e.cache != nil && result.Answer != "" {
-				e.cache.Set(message, result)
+				e.cache.Set(ctx, message, result)
 			}
 			return result
 		}
@@ -345,7 +384,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 			// 去重：同一工具+参数不重复调用
 			dedupKey := toolName + ":" + toolArgs
 			if seen[dedupKey] {
-				log.Printf("[agent] step %d: skipping duplicate %s", len(allToolCalls)+1, toolName)
+				logWithCtx(ctx, "[agent] step %d: skipping duplicate %s", len(allToolCalls)+1, toolName)
 				// 必须为这个 tool_call_id 补一条 ToolMessage，否则下一次
 				// Generate 会因为缺少配对 tool message 而 400。
 				dupMsg := schema.ToolMessage(`{"skipped": true, "reason": "duplicate tool call"}`, tc.ID)
@@ -356,7 +395,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 			seen[dedupKey] = true
 
 			stepIdx := len(allToolCalls)
-			log.Printf("[agent] step %d: calling %s(%s)", stepIdx+1, toolName, toolArgs)
+			logWithCtx(ctx, "[agent] step %d: calling %s(%s)", stepIdx+1, toolName, toolArgs)
 
 			// 执行工具
 			result, execErr := e.executeTool(ctx, toolName, toolArgs)
@@ -366,7 +405,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 			if execErr != nil {
 				toolLog.Error = execErr.Error()
 				consecutiveErrors++
-				log.Printf("[agent] step %d: %s failed: %v (consecutive_errors=%d)", stepIdx+1, toolName, execErr, consecutiveErrors)
+				logWithCtx(ctx, "[agent] step %d: %s failed: %v (consecutive_errors=%d)", stepIdx+1, toolName, execErr, consecutiveErrors)
 				// 错误恢复：告诉 LLM 失败了，可以换工具
 				errorHint := fmt.Sprintf("⚠️ 工具 %s 调用失败: %v。你可以尝试其他工具，或换一种方式检查。", toolName, execErr)
 				errorMsg := schema.ToolMessage(errorHint, tc.ID)
@@ -379,7 +418,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 					if status, _ := toolLog.Output["status"].(string); status == "error" {
 						consecutiveErrors++
 						errMsg, _ := toolLog.Output["error"].(string)
-						log.Printf("[agent] step %d: %s returned error: %v (consecutive_errors=%d)", stepIdx+1, toolName, errMsg, consecutiveErrors)
+						logWithCtx(ctx, "[agent] step %d: %s returned error: %v (consecutive_errors=%d)", stepIdx+1, toolName, errMsg, consecutiveErrors)
 						// 错误恢复：工具返回了错误状态
 						errorHint := fmt.Sprintf("⚠️ 工具 %s 返回错误: %s。可以尝试其他工具或换种方式。", toolName, errMsg)
 						errorMsg := schema.ToolMessage(errorHint, tc.ID)
@@ -391,7 +430,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 				} else {
 					consecutiveErrors = 0
 				}
-				log.Printf("[agent] step %d: %s result: %s", step+1, toolName, result[:min(200, len(result))])
+				logWithCtx(ctx, "[agent] step %d: %s result: %s", step+1, toolName, result[:min(200, len(result))])
 			}
 			allToolCalls = append(allToolCalls, toolLog)
 
@@ -437,7 +476,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 				TurnCount: lastStep + 1,
 			}
 			if e.cache != nil {
-				e.cache.Set(message, result)
+				e.cache.Set(ctx, message, result)
 			}
 			return result
 		}
@@ -461,7 +500,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 	e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
 	// 缓存：存入响应缓存
 	if e.cache != nil && result.Answer != "" {
-		e.cache.Set(message, result)
+		e.cache.Set(ctx, message, result)
 	}
 	return result
 }
@@ -569,17 +608,17 @@ func (e *AgentExecutor) analyze(ctx context.Context, userMessage string, toolCal
 		schema.UserMessage(sb.String()),
 	}
 
-	log.Printf("[agent] analysis: sending %d tool results to reasoning model", len(toolCalls))
+	logWithCtx(ctx, "[agent] analysis: sending %d tool results to reasoning model", len(toolCalls))
 	start := time.Now()
 	e.acquireLLM()
 	resp, err := chat.Generate(ctx, messages)
 	e.releaseLLM()
 	latency := time.Since(start)
 	if err != nil {
-		log.Printf("[agent] analysis failed: %v (%dms)", err, latency.Milliseconds())
+		logWithCtx(ctx, "[agent] analysis failed: %v (%dms)", err, latency.Milliseconds())
 		return ""
 	}
-	log.Printf("[agent] analysis completed: %d chars (%dms)", len(resp.Content), latency.Milliseconds())
+	logWithCtx(ctx, "[agent] analysis completed: %d chars (%dms)", len(resp.Content), latency.Milliseconds())
 	return resp.Content
 }
 
