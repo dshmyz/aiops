@@ -322,16 +322,11 @@ func extractDomain(text string) (string, bool) {
 }
 
 func defaultResourceType(domain string) string {
-	switch domain {
-	case "glusterfs":
-		return "volume"
-	case "minio":
-		return "bucket"
-	case "kafka":
-		return "consumer_group"
-	default:
-		return "resource"
+	// 资源类型派生自注册表，避免硬编码域→资源类型映射。
+	if rt := tools.ResourceTypeForDomain(domain); rt != "" {
+		return rt
 	}
+	return "resource"
 }
 
 func extractResourceName(text, domain string) string {

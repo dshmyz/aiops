@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
+
+	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 // KnowledgeStore 存储和检索历史诊断经验
@@ -225,16 +228,14 @@ func (s *KnowledgeStore) SaveFromToolCalls(ctx context.Context, alertTitle strin
 	}
 	domain := ""
 	if len(toolCalls) > 0 {
-		// 从工具名推断 domain
-		toolName := toolCalls[0].Tool
-		for _, d := range []string{"kafka", "minio", "glusterfs", "moonlightbox"} {
-			if len(toolName) > len(d) && toolName[:len(d)] == d {
-				domain = d
-				break
-			}
+		// 从注册表取工具域，避免硬编码域名前缀。
+		if tool, ok := tools.Lookup(toolCalls[0].Tool); ok {
+			domain = tool.Domain
 		}
 	}
-	_ = s.Save(ctx, alertTitle, domain, toolsCalled, fmt.Sprint(findings), "")
+	if err := s.Save(ctx, alertTitle, domain, toolsCalled, fmt.Sprint(findings), ""); err != nil {
+		log.Printf("[knowledge] save diagnostic record failed: %v", err)
+	}
 }
 
 // SaveFromToolCallsWithReasoning 保存工具调用记录并附带 LLM 决策链。
@@ -256,15 +257,13 @@ func (s *KnowledgeStore) SaveFromToolCallsWithReasoning(ctx context.Context, ale
 	}
 	domain := ""
 	if len(toolCalls) > 0 {
-		toolName := toolCalls[0].Tool
-		for _, d := range []string{"kafka", "minio", "glusterfs", "moonlightbox"} {
-			if len(toolName) > len(d) && toolName[:len(d)] == d {
-				domain = d
-				break
-			}
+		if tool, ok := tools.Lookup(toolCalls[0].Tool); ok {
+			domain = tool.Domain
 		}
 	}
-	_ = s.SaveWithReasoning(ctx, alertTitle, domain, toolsCalled, fmt.Sprint(findings), "", reasoning)
+	if err := s.SaveWithReasoning(ctx, alertTitle, domain, toolsCalled, fmt.Sprint(findings), "", reasoning); err != nil {
+		log.Printf("[knowledge] save diagnostic record (with reasoning) failed: %v", err)
+	}
 }
 
 // ConversationSummary 结构化对话摘要

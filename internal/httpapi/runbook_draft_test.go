@@ -10,6 +10,7 @@ import (
 )
 
 func TestInferRunbookDraftRetentionProducesSequence(t *testing.T) {
+	ensureMiddlewareTools(t)
 	draft := httpapi.InferRunbookDraft("id-1", "retention", []string{"把保留改成 72 小时"})
 	if draft.MissingReason != "" {
 		t.Fatalf("MissingReason = %q, want empty for runbookable topic", draft.MissingReason)
@@ -17,7 +18,7 @@ func TestInferRunbookDraftRetentionProducesSequence(t *testing.T) {
 	if draft.Name == "" || draft.RiskLevel != "low" {
 		t.Fatalf("draft = %+v, want name/risk populated", draft)
 	}
-	if len(draft.ToolSequence) == 0 || draft.ToolSequence[0] != tools.TopicRetentionSet {
+	if len(draft.ToolSequence) == 0 || draft.ToolSequence[0] != "topic.retention.set" {
 		t.Fatalf("ToolSequence = %v, want to include topic.retention.set", draft.ToolSequence)
 	}
 	if len(draft.IntentPattern) == 0 {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -619,10 +620,12 @@ func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Req
 	}
 	if r.auth == nil || r.capability == nil {
 		// 能力管理未启用（无 DB 且 COPILOT_CAPABILITIES_DIR 未配置）。
-		// GET 返回空列表 200（UI 可正常加载管理页面）；
+		// GET 返回空列表 200（UI 可正常加载管理页面），并显式标注
+		// configured=false，让调用方区分"确实没有能力"与"子系统未启用"，
+		// 而不是把未配置误读成零能力。
 		// 写操作返回 503（无存储后端，无法保存/发布）。
 		if request.Method == http.MethodGet && request.URL.Path == "/v1/capabilities" {
-			writeJSONWithLimit(writer, map[string]any{"capabilities": []any{}, "total": 0}, maxCapabilityResponseBytes)
+			writeJSONWithLimit(writer, map[string]any{"capabilities": []any{}, "total": 0, "configured": false}, maxCapabilityResponseBytes)
 			return
 		}
 		writeError(writer, http.StatusServiceUnavailable, "capability storage is not configured")
@@ -1442,7 +1445,7 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 		if errors.Is(err, assistant.ErrPolicyDenied) || errors.Is(err, assistant.ErrForeignConversation) {
 			r.writeForbidden(writer, request, user, err.Error(), request.URL.Path)
 			return
-		} else if errors.Is(err, diagnostics.ErrUnsupportedDomain) || errors.Is(err, diagnostics.ErrInvalidRequest) {
+		} else if errors.Is(err, diagnostics.ErrInvalidRequest) {
 			status = http.StatusBadRequest
 		}
 		writeError(writer, status, err.Error())
@@ -1550,7 +1553,7 @@ func (r *Router) serveAssistantStream(writer http.ResponseWriter, request *http.
 			// Headers already sent; record audit directly without re-writing the
 			// error body (R2: HTTP 403 权限拒绝审计)。
 			r.recordForbidden(request, user, err.Error())
-		} else if errors.Is(err, diagnostics.ErrUnsupportedDomain) || errors.Is(err, diagnostics.ErrInvalidRequest) {
+		} else if errors.Is(err, diagnostics.ErrInvalidRequest) {
 			status = http.StatusBadRequest
 		}
 		// Headers already sent; write error as SSE event.
@@ -2884,6 +2887,9 @@ func (r *Router) serveAdminAlertActions(writer http.ResponseWriter, request *htt
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	defer cancel()
+
 	name := strings.TrimPrefix(request.URL.Path, "/v1/admin/alert-actions")
 	name = strings.TrimPrefix(name, "/")
 	name = strings.TrimSpace(name)
@@ -2906,11 +2912,21 @@ func (r *Router) serveAdminAlertActions(writer http.ResponseWriter, request *htt
 			writeError(writer, http.StatusBadRequest, "name is required")
 			return
 		}
-		// TODO: 写入 DB + 热重载
+		// 真实落库 + 热重载（修复前是 TODO，只返回假成功）。
+		if err := r.alertActions.Upsert(ctx, body); err != nil {
+			writeError(writer, http.StatusInternalServerError, "save alert action: "+err.Error())
+			return
+		}
+		log.Printf("[httpapi] alert action %q upserted", body.Name)
 		writeCappedJSON(writer, map[string]any{"status": "created", "name": body.Name})
 
 	case request.Method == http.MethodDelete && name != "":
-		// TODO: 从 DB 删除 + 热重载
+		// 真实删除 + 热重载（修复前是 TODO，只返回假成功）。
+		if err := r.alertActions.Delete(ctx, name); err != nil {
+			writeError(writer, http.StatusInternalServerError, "delete alert action: "+err.Error())
+			return
+		}
+		log.Printf("[httpapi] alert action %q deleted", name)
 		writeCappedJSON(writer, map[string]any{"status": "deleted", "name": name})
 
 	default:

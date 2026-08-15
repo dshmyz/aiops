@@ -22,7 +22,7 @@ func runbookTestRunbooks() []assistant.RunbookSummary {
 		{
 			Slug:          "kafka-retention-low-risk",
 			IntentPattern: []string{"保留", "retention", "留存"},
-			ToolSequence:  []string{tools.TopicRetentionSet},
+			ToolSequence:  []string{"topic.retention.set"},
 			RiskLevel:     "low",
 			IsEnabled:     true,
 		},
@@ -40,7 +40,7 @@ func TestRunbookRouterMatchesLowRiskRetention(t *testing.T) {
 	t.Parallel()
 	router := assistant.NewRunbookRouter(fakeRunbookLookup{runbooks: runbookTestRunbooks()})
 
-	rb, ok := router.Match(context.Background(), "把 prod orders 的保留调成 72 小时", tools.TopicRetentionSet)
+	rb, ok := router.Match(context.Background(), "把 prod orders 的保留调成 72 小时", "topic.retention.set")
 	if !ok {
 		t.Fatal("Match returned false, want low-risk retention runbook")
 	}
@@ -74,7 +74,7 @@ func TestRunbookRouterNoMatch(t *testing.T) {
 func TestRunbookRouterNilLookupBackwardCompatible(t *testing.T) {
 	t.Parallel()
 	router := assistant.NewRunbookRouter(nil)
-	if _, ok := router.Match(context.Background(), "把保留调成 72 小时", tools.TopicRetentionSet); ok {
+	if _, ok := router.Match(context.Background(), "把保留调成 72 小时", "topic.retention.set"); ok {
 		t.Fatal("Match with nil lookup should return false")
 	}
 }
@@ -82,10 +82,10 @@ func TestRunbookRouterNilLookupBackwardCompatible(t *testing.T) {
 func TestRunbookRouterDisabledRunbookIgnored(t *testing.T) {
 	t.Parallel()
 	runbooks := []assistant.RunbookSummary{
-		{Slug: "disabled-rb", IntentPattern: []string{"保留"}, ToolSequence: []string{tools.TopicRetentionSet}, RiskLevel: "low", IsEnabled: false},
+		{Slug: "disabled-rb", IntentPattern: []string{"保留"}, ToolSequence: []string{"topic.retention.set"}, RiskLevel: "low", IsEnabled: false},
 	}
 	router := assistant.NewRunbookRouter(fakeRunbookLookup{runbooks: runbooks})
-	if _, ok := router.Match(context.Background(), "把保留调成 72 小时", tools.TopicRetentionSet); ok {
+	if _, ok := router.Match(context.Background(), "把保留调成 72 小时", "topic.retention.set"); ok {
 		t.Fatal("Match matched a disabled runbook")
 	}
 }

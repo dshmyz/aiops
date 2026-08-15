@@ -137,3 +137,56 @@ func TestExecuteReadNoTimeoutWhenDisabled(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 }
+
+// TestExecuteTrustedReadAsRecordsAudit 验证可信读也做 read 级审计（可归因到
+// 任务配置者身份），修复前可信读无 read 级审计、数据不可追溯。
+func TestExecuteTrustedReadAsRecordsAudit(t *testing.T) {
+	t.Parallel()
+	repository := store.NewMemoryActionPlanStore()
+	auditService := audit.NewService(repository)
+	service := execution.NewReadOnlyService(immediateReadRunner{result: map[string]any{"status": "ok"}}, auditService)
+
+	_, err := service.ExecuteTrustedReadAs(context.Background(), viewerUser(), tools.ClusterStatusRead, map[string]any{"environment": "prod"})
+	if err != nil {
+		t.Fatalf("ExecuteTrustedReadAs: %v", err)
+	}
+
+	events := repository.AuditEvents()
+	var executed []audit.Event
+	for _, ev := range events {
+		if ev.Action == audit.ActionReadonlyToolExecuted && ev.Decision == audit.DecisionPermitted {
+			executed = append(executed, ev)
+		}
+	}
+	if len(executed) != 1 {
+		t.Fatalf("readonly_tool_executed events = %d, want 1 (trusted read must be audited)", len(executed))
+	}
+	if executed[0].Subject != viewerUser().Subject {
+		t.Fatalf("audit subject = %q, want %q (attributable to task creator)", executed[0].Subject, viewerUser().Subject)
+	}
+}
+
+// TestExecuteTrustedReadAsRejectsUnregistered 验证未注册 capability 被审计标记
+// rejected，让"任务显示成功、能力却不存在"可被察觉。
+func TestExecuteTrustedReadAsRejectsUnregistered(t *testing.T) {
+	t.Parallel()
+	repository := store.NewMemoryActionPlanStore()
+	auditService := audit.NewService(repository)
+	service := execution.NewReadOnlyService(immediateReadRunner{result: map[string]any{"status": "ok"}}, auditService)
+
+	_, err := service.ExecuteTrustedReadAs(context.Background(), viewerUser(), "ghost.capability.read", map[string]any{"environment": "prod"})
+	if err != nil {
+		t.Fatalf("ExecuteTrustedReadAs: %v", err)
+	}
+
+	events := repository.AuditEvents()
+	var rejected []audit.Event
+	for _, ev := range events {
+		if ev.Action == audit.ActionReadonlyToolRejected {
+			rejected = append(rejected, ev)
+		}
+	}
+	if len(rejected) != 1 {
+		t.Fatalf("readonly_tool_rejected events = %d, want 1", len(rejected))
+	}
+}

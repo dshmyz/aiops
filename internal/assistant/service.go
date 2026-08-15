@@ -99,6 +99,9 @@ type Service struct {
 	// 不为 nil 时，handleStatelessWithHistory 走新路径（LLM 自主选工具），
 	// 跳过旧的 planner + capability matching 链路。
 	agentExecutor *AgentExecutor
+	// supervisor 是顶层编排者：按 Action 的 AgentRole 分派执行。
+	// WithAgentExecutor 注入 executor 时自动创建，nil 时退化为直接调用 executor。
+	supervisor *Supervisor
 }
 
 // ExecutionRunner 自动执行已确认的 plan（低风险 Runbook 路径）。
@@ -230,8 +233,10 @@ func (s *Service) WithAutonomy(c *autonomy.Controller) *Service {
 
 // WithAgentExecutor 注入基于 LLM function calling 的执行器。
 // 设置后 handleStatelessWithHistory 走新路径：LLM 自主选工具、自动循环。
+// 同时自动创建 Supervisor 用于按 Action 角色分派执行。
 func (s *Service) WithAgentExecutor(e *AgentExecutor) *Service {
 	s.agentExecutor = e
+	s.supervisor = NewSupervisor(e)
 	return s
 }
 
@@ -279,6 +284,10 @@ type Response struct {
 	Message            string               `json:"message,omitempty"`
 	Diagnostic         *diagnostics.Package `json:"diagnostic,omitempty"`
 	RecommendationPlan *PlanSummary         `json:"recommendation_plan,omitempty"`
+	// Recommendations 记录诊断包中每条可执行推荐的处理结果（建 plan / 执行读 /
+	// 跳过+原因）。让操作员看到每条推荐为何落地或未落地，而不是静默丢弃。
+	// RecommendationPlan 兼容保留，指向第一个成功建 plan 的推荐。
+	Recommendations []RecommendationStatus `json:"recommendations,omitempty"`
 	Trace              *AssistantTrace      `json:"trace,omitempty"`
 	// Blocks 是结构化响应块，对齐 SxDevOps AIOps 2.0 的 block 协议。
 	// 前端按 Block.Type 分发到对应渲染组件（证据时间线、审批表单、风险提示等）。
@@ -300,6 +309,23 @@ type PlanSummary struct {
 	Risk                 string `json:"risk"`
 	RequiresConfirmation bool   `json:"requires_confirmation"`
 	ExpiresAt            string `json:"expires_at,omitempty"`
+}
+
+// RecommendationStatus 记录诊断包中一条可执行推荐的处理结果。
+// Status 取值：
+//   - "plan_created": 写工具已建 plan，等待人工确认（PlanID 非空）
+//   - "read_executed": 读工具已直接执行，结果在 Answer/事实集中
+//   - "skipped": 未能落地，Reason 说明原因（工具未注册 / 策略拒绝 / 建 plan 失败）
+//
+// 未落地的推荐也要如实上报原因，避免"诊断给了建议却静默消失"。
+type RecommendationStatus struct {
+	Tool     string `json:"tool"`
+	Summary  string `json:"summary,omitempty"`
+	Status   string `json:"status"`
+	Reason   string `json:"reason,omitempty"`
+	PlanID   string `json:"plan_id,omitempty"`
+	Risk     string `json:"risk,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
 // AssistantTrace exposes the planner's reasoning (which capabilities were
@@ -625,16 +651,15 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 		}
 	}()
 
-	// 发送 progress 事件：正在规划
-	if !send(StreamEvent{Progress: &ProgressEvent{Stage: "planning"}}) {
-		return
-	}
+	// 不在此重复发 planning：流式入口（HandleMessageStream）已发过一次
+	//（见 handleStream 的 emitProgress(ProgressPlanning)）。重复发会产出两条
+	// 同毫秒的 planning 阶段，前端时间线显得机械/像编造。
 
 	// 用 RunWithCallback 逐步推送工具调用事件。
 	// 关键：把真实请求者身份注入 ctx。缺了它，CapabilityTool 会走到空的
 	// fallback 身份并被策略拒绝（RBAC 归属错误 + 审计不可归因 + 缓存串用户）。
 	toolCtx := WithToolUser(ctx, user)
-	result := s.agentExecutor.RunWithCallback(toolCtx, message, history, func(step AgentStepEvent) {
+	result := s.supervisor.Dispatch(toolCtx, message, history, func(step AgentStepEvent) {
 		send(StreamEvent{
 			Step: &StepEvent{
 				Tool:      step.Tool,
@@ -717,8 +742,11 @@ func (s *Service) handleWithAgentExecutor(ctx context.Context, user identity.Cur
 	// 注入真实请求者身份到 ctx（与 runAgentExecutorInStream 一致），
 	// 避免工具执行回退到硬编码 admin 身份。
 	toolCtx := WithToolUser(ctx, user)
-	result := s.agentExecutor.Run(toolCtx, message, history)
-	if result.Error != nil {
+	result := s.supervisor.Dispatch(toolCtx, message, history, nil)
+	if result == nil || result.Error != nil {
+		if result == nil {
+			return Response{}, nil
+		}
 		return Response{}, result.Error
 	}
 	if result.Answer == "" {
@@ -841,29 +869,35 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 				Done:  true,
 			})
 		}
+		// 域未接入能力时 diagnostics 返回通用检查框架包（framework=true），
+		// Answer 与摘要都如实标注为框架而非"诊断完成"。
+		framework := false
+		if len(pkg.Observations) > 0 {
+			framework, _ = pkg.Observations[0].Data["framework"].(bool)
+		}
+		diagSummary := fmt.Sprintf("诊断完成：%d 个观察，%d 个发现，%d 个建议", len(pkg.Observations), len(pkg.Findings), len(pkg.Recommendations))
+		if framework && len(pkg.Observations) > 0 {
+			checkpoints, _ := pkg.Observations[0].Data["checkpoints"].([]string)
+			diagSummary = fmt.Sprintf("%s 域未接入精确诊断能力，返回通用检查框架（%d 个检查点，非实测数据）", pkg.Domains, len(checkpoints))
+		}
 		response := Response{
 			Type:       "answer",
 			Tool:       toolName,
-			Answer:     map[string]any{"message": "Diagnostic package is ready."},
+			Answer:     map[string]any{"message": diagSummary},
 			Diagnostic: &pkg,
 		}
-		// 诊断→修复链路: 当诊断产出的 recommendation 包含可执行 tool_name 时,
-		// 自动构造 action plan. 复用现有的写操作 plan 创建链路 (tools.Lookup →
-		// policy.Evaluate → plans.CreatePlan) 或直接执行读操作 (reads.ExecuteRead).
-		// 该步骤为 best-effort: 工具未注册、策略拒绝、plan 创建或读执行失败时,
-		// RecommendationPlan 保持 nil, 诊断包照常返回, 不向上抛错.
-		//
-		// 注意: diagnostics agent 正在同步添加 HasActionableRecommendations()
-		// 与 ToPlanInput() 方法; 此处以内联等价逻辑实现 (扫描 ToolName 非空的
-		// recommendation), 待 diagnostics 包更新后可直接替换为方法调用.
-		//
-		// 缺口-4 (事实集聚合): 先执行推荐链路收集读工具事实, 再与诊断包事实
-		// 合并成 FactSet 传给 formatter。这样兜底草稿能包含诊断 + 推荐执行
-		// 的完整信息, 而非只看单个 Answer。
+		// 诊断→修复链路: 把诊断包中所有可执行 recommendation 转成 action plan
+		// 或执行读操作。复用现有的写操作 plan 创建链路 (tools.Lookup →
+		// policy.Evaluate → plans.CreatePlan) 或直接执行读操作 (reads.ExecuteRead)。
+		// 该步骤为 best-effort: 工具未注册、策略拒绝、plan 创建或读执行失败时
+		// 不向上抛错，但每条推荐的处理结果如实写入 response.Recommendations
+		// （含未落地原因），避免"诊断给了建议却静默消失"。
 		var factSet []ToolFact
-		if rec, ok := firstActionableRecommendation(pkg); ok {
-			if fact, executed := s.enrichWithRecommendationPlan(ctx, user, rec, &response); executed {
+		for _, rec := range actionableRecommendations(pkg) {
+			if fact, executed, status := s.enrichRecommendation(ctx, user, rec, &response); executed {
 				factSet = append(factSet, fact)
+			} else if status != nil {
+				response.Recommendations = append(response.Recommendations, *status)
 			}
 		}
 		// 诊断包事实: 把诊断包的关键摘要作为一个 ToolFact 纳入 FactSet。
@@ -873,7 +907,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 			Tool:  toolName,
 			Input: map[string]any{"domain": intent.Diagnostic.Domain, "environment": intent.Diagnostic.Environment},
 			Result: map[string]any{
-				"summary":         fmt.Sprintf("诊断完成：%d 个观察，%d 个发现，%d 个建议", len(pkg.Observations), len(pkg.Findings), len(pkg.Recommendations)),
+				"summary":         diagSummary,
 				"environment":     pkg.Environment,
 				"domains":         pkg.Domains,
 				"recommendations": len(pkg.Recommendations),
@@ -1104,90 +1138,103 @@ func (s *Service) formatResponse(ctx context.Context, response Response, intent 
 	return response
 }
 
-// firstActionableRecommendation returns the first recommendation in pkg whose
-// ToolName is non-empty, i.e. an executable suggestion surfaced by the
-// diagnostics agent. It is the inline equivalent of the diagnostics agent's
-// HasActionableRecommendations() combined with selecting the first actionable
-// recommendation; once the diagnostics package exposes that method this helper
-// can delegate to it directly.
-func firstActionableRecommendation(pkg diagnostics.Package) (diagnostics.Recommendation, bool) {
+// actionableRecommendations 返回诊断包中所有可执行（ToolName 非空）的推荐。
+func actionableRecommendations(pkg diagnostics.Package) []diagnostics.Recommendation {
+	var out []diagnostics.Recommendation
 	for _, rec := range pkg.Recommendations {
 		if strings.TrimSpace(rec.ToolName) != "" {
-			return rec, true
+			out = append(out, rec)
 		}
 	}
-	return diagnostics.Recommendation{}, false
+	return out
 }
 
-// enrichWithRecommendationPlan turns an actionable recommendation into either
-// an executed read result (stored in response.Answer) or a pending action plan
-// (stored in response.RecommendationPlan). It reuses the existing write-plan
-// creation chain (tools.Lookup → policy.Evaluate → plans.CreatePlan) and the
+// enrichRecommendation turns a single actionable recommendation into either an
+// executed read result (factSet) or a pending action plan, and reports its
+// status (plan_created / read_executed / skipped+reason). It reuses the existing
+// write-plan chain (tools.Lookup → policy.Evaluate → plans.CreatePlan) and the
 // read execution path (reads.ExecuteRead).
 //
 // The method is best-effort: when the recommended tool is not registered, the
-// policy denies the operation, or plan creation / read execution fails, the
-// response is left unchanged so the diagnostic package is still delivered to
-// the operator. This satisfies the requirement that a policy denial must not
-// surface as an error — the recommendation is simply marked not executable
-// (RecommendationPlan stays nil) and the diagnostic package is returned
-// normally.
+// policy denies the operation, or plan creation / read execution fails, it does
+// not surface an error — the recommendation is marked skipped with the reason so
+// the operator sees why it did not land.
 //
-// 返回值 (缺口-4: 事实集聚合): 当推荐读工具成功执行时, 返回该工具调用的
-// ToolFact (Tool/Input/Result) 和 true, 供调用方纳入 FactSet 传给 formatter。
-// 写工具创建 plan 时不产生事实 (plan 尚未执行, 无结果), 返回 (zero, false)。
-// 其他未执行路径 (工具未注册/策略拒绝/执行失败) 同样返回 (zero, false)。
-func (s *Service) enrichWithRecommendationPlan(ctx context.Context, user identity.CurrentUser, rec diagnostics.Recommendation, response *Response) (ToolFact, bool) {
+// 返回值: (fact, executed, status)。
+//   - executed=true 且 fact 非零: 推荐读工具已直接执行, fact 纳入 FactSet
+//   - executed=false 且 status 非 nil: 该推荐的处理状态（plan_created 或
+//     skipped+reason）, 由调用方写入 response.Recommendations
+func (s *Service) enrichRecommendation(ctx context.Context, user identity.CurrentUser, rec diagnostics.Recommendation, response *Response) (ToolFact, bool, *RecommendationStatus) {
 	toolName := strings.TrimSpace(rec.ToolName)
+	status := &RecommendationStatus{Tool: toolName, Summary: rec.Summary}
 	if toolName == "" {
-		return ToolFact{}, false
+		return ToolFact{}, false, nil
 	}
 	// ToPlanInput() 等价: 从 recommendation 取 toolName + candidate input.
 	tool, ok := tools.Lookup(toolName)
 	if !ok {
-		return ToolFact{}, false
+		status.Status = "skipped"
+		status.Reason = "工具未注册，无法执行"
+		return ToolFact{}, false, status
 	}
 	input := rec.CandidateInput
 	decision := policy.Evaluate(user, tool, input)
 	if !decision.Allowed {
-		return ToolFact{}, false
+		status.Status = "skipped"
+		status.Reason = "策略拒绝：" + string(decision.Reason)
+		return ToolFact{}, false, status
 	}
 	if tool.Operation == tools.Read {
 		// risk=low: 直接执行读操作, 结果写入 Answer, 操作员可立即看到结果.
 		if s.reads == nil {
-			return ToolFact{}, false
+			status.Status = "skipped"
+			status.Reason = "读执行服务未配置"
+			return ToolFact{}, false, status
 		}
 		readCtx, readSpan := tracer().Start(ctx, "execute_recommendation_read",
 			trace.WithAttributes(attribute.String("tool.name", tool.Name)))
 		answer, err := s.reads.ExecuteRead(readCtx, user, tool.Name, input)
 		readSpan.End()
 		if err != nil {
-			return ToolFact{}, false
+			status.Status = "skipped"
+			status.Reason = "读执行失败：" + err.Error()
+			return ToolFact{}, false, status
 		}
 		response.Answer = answer
-		// 缺口-4: 返回读工具事实, 供诊断分支纳入 FactSet。
-		return ToolFact{Tool: tool.Name, Input: input, Result: answer}, true
+		status.Status = "read_executed"
+		return ToolFact{Tool: tool.Name, Input: input, Result: answer}, true, status
 	}
 	// risk>=medium: 创建 pending plan, 等待人工确认. 复用现有 plan 创建链路.
 	if s.plans == nil {
-		return ToolFact{}, false
+		status.Status = "skipped"
+		status.Reason = "plan 服务未配置"
+		return ToolFact{}, false, status
 	}
 	planCtx, planSpan := tracer().Start(ctx, "create_recommendation_plan",
 		trace.WithAttributes(attribute.String("tool.name", tool.Name)))
 	plan, err := s.plans.CreatePlan(planCtx, user, decision, input)
 	planSpan.End()
 	if err != nil {
-		return ToolFact{}, false
+		status.Status = "skipped"
+		status.Reason = "创建 plan 失败：" + err.Error()
+		return ToolFact{}, false, status
 	}
-	response.RecommendationPlan = &PlanSummary{
-		PlanID:               plan.ID,
-		Tool:                 tool.Name,
-		Risk:                 string(tool.Risk),
-		RequiresConfirmation: decision.RequiresConfirmation,
-		ExpiresAt:            plan.ExpiresAt.UTC().Format(time.RFC3339),
+	status.Status = "plan_created"
+	status.PlanID = plan.ID
+	status.Risk = string(tool.Risk)
+	status.ExpiresAt = plan.ExpiresAt.UTC().Format(time.RFC3339)
+	// 兼容：第一个成功建 plan 的推荐仍写入 RecommendationPlan（前端旧契约）。
+	if response.RecommendationPlan == nil {
+		response.RecommendationPlan = &PlanSummary{
+			PlanID:               plan.ID,
+			Tool:                 tool.Name,
+			Risk:                 string(tool.Risk),
+			RequiresConfirmation: decision.RequiresConfirmation,
+			ExpiresAt:            plan.ExpiresAt.UTC().Format(time.RFC3339),
+		}
 	}
 	// 写工具创建 plan, 尚未执行, 无结果事实。
-	return ToolFact{}, false
+	return ToolFact{}, false, status
 }
 
 // resolveConversation either fetches an existing conversation (verifying it
@@ -1484,9 +1531,6 @@ func buildAssistantTrace(intent Intent, toolName string, input map[string]any, r
 }
 
 func summarizePlan(toolName string, input map[string]any) string {
-	if toolName == tools.TopicRetentionSet {
-		return fmt.Sprintf("Set topic %v retention in %v to %v hours.", input["topic"], input["environment"], input["retention_hours"])
-	}
 	return fmt.Sprintf("Create action plan for %s.", toolName)
 }
 

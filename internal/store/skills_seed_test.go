@@ -25,7 +25,7 @@ func TestSeedBuiltinSkillsIdempotent(t *testing.T) {
 		t.Fatal("SeedBuiltinSkills did not seed any skills")
 	}
 
-	// 验证所有内置 Skill 都已播种（P0 3 个 + P1 9 个 + P2 5 个 + 告警查询 1 个 = 18 个）
+	// 验证所有内置 Skill 都已播种（P0 3 个 + P1 9 个 + P2 5 个 + 告警查询 1 个 + 新 8 个 = 26 个）
 	wantSlugs := []string{
 		"middleware-evidence-checklist",
 		"alert-evidence-checklist",
@@ -45,6 +45,14 @@ func TestSeedBuiltinSkillsIdempotent(t *testing.T) {
 		"health-check-guide",           // P2
 		"performance-bottleneck-guide", // P2
 		"alert-query-guide",            // 告警准专项
+		"on-call-handover",             // 值班交接
+		"incident-severity-guide",      // 故障定级
+		"triage-methodology",           // 排障方法论
+		"rollback-first-mentality",     // 回滚优先
+		"slo-budget-guide",             // SLO/错误预算
+		"runbook-authoring-sop",        // runbook 编写规范
+		"change-window-guide",          // 变更窗口
+		"audit-trail-guide",            // 审计留痕
 	}
 	if len(first) != len(wantSlugs) {
 		t.Fatalf("seeded skill count = %d, want %d", len(first), len(wantSlugs))

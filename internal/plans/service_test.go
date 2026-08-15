@@ -149,7 +149,7 @@ func TestCreatePlanReevaluatesCallerSuppliedDecision(t *testing.T) {
 	service := plans.NewService(store.NewMemoryActionPlanStore(), fixedClock())
 
 	t.Run("write cannot disable confirmation", func(t *testing.T) {
-		forged := policy.Decision{Allowed: true, RequiresConfirmation: false, Tool: registeredTool(t, tools.TopicRetentionSet)}
+		forged := policy.Decision{Allowed: true, RequiresConfirmation: false, Tool: registeredTool(t, "topic.retention.set")}
 		plan, err := service.CreatePlan(ctx, user(), forged, retentionInput())
 		if err != nil {
 			t.Fatalf("create plan: %v", err)
@@ -169,7 +169,7 @@ func TestCreatePlanReevaluatesCallerSuppliedDecision(t *testing.T) {
 	t.Run("forged allow cannot bypass role policy", func(t *testing.T) {
 		viewer := user()
 		viewer.Roles = []string{"viewer"}
-		_, err := service.CreatePlan(ctx, viewer, policy.Decision{Allowed: true, Tool: registeredTool(t, tools.TopicRetentionSet)}, retentionInput())
+		_, err := service.CreatePlan(ctx, viewer, policy.Decision{Allowed: true, Tool: registeredTool(t, "topic.retention.set")}, retentionInput())
 		if !errors.Is(err, plans.ErrPlanNotPermitted) {
 			t.Fatalf("forged allowed decision error = %v, want ErrPlanNotPermitted", err)
 		}
@@ -233,7 +233,7 @@ func TestConfirmPlanReturnsRejectionAuditFailure(t *testing.T) {
 func createWritePlan(t *testing.T, ctx context.Context, service *plans.Service) plans.Plan {
 	t.Helper()
 	ensureMiddlewareWriteTool(t)
-	decision := policy.Evaluate(user(), registeredTool(t, tools.TopicRetentionSet), retentionInput())
+	decision := policy.Evaluate(user(), registeredTool(t, "topic.retention.set"), retentionInput())
 	if !decision.Allowed || !decision.RequiresConfirmation {
 		t.Fatalf("test policy decision = %+v", decision)
 	}
@@ -277,10 +277,10 @@ func ensureMiddlewareWriteTool(t *testing.T) {
 	t.Helper()
 	ensureMiddlewareWriteMu.Lock()
 	defer ensureMiddlewareWriteMu.Unlock()
-	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+	if _, ok := tools.Lookup("topic.retention.set"); !ok {
 		if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
 			Tool: tools.Tool{
-				Name:                tools.TopicRetentionSet,
+				Name:                "topic.retention.set",
 				Operation:           tools.Write,
 				Risk:                tools.Medium,
 				RollbackDescription: "reset_to_previous",
@@ -298,7 +298,7 @@ func ensureMiddlewareWriteTool(t *testing.T) {
 		}
 	}
 	policy.RegisterDynamicRolePermissions(map[string][]string{
-		tools.TopicRetentionSet: {"operator", "admin"},
+		"topic.retention.set": {"operator", "admin"},
 	})
 }
 

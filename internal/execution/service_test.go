@@ -74,7 +74,7 @@ func TestUnconfirmedWriteDoesNotExecute(t *testing.T) {
 	ctx := context.Background()
 	repository := store.NewMemoryActionPlanStore()
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time { return fixedTime }))
-	decision := policy.Evaluate(testUser(), tool(t, tools.TopicRetentionSet), writeInput())
+	decision := policy.Evaluate(testUser(), tool(t, "topic.retention.set"), writeInput())
 	plan, err := planService.CreatePlan(ctx, testUser(), decision, writeInput())
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -95,7 +95,7 @@ func TestExpiredConfirmedPlanDoesNotExecuteAndIsAudited(t *testing.T) {
 	repository := store.NewMemoryActionPlanStore()
 	expiredAt := time.Now().UTC().Add(-11 * time.Minute)
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time { return expiredAt }))
-	decision := policy.Evaluate(testUser(), tool(t, tools.TopicRetentionSet), writeInput())
+	decision := policy.Evaluate(testUser(), tool(t, "topic.retention.set"), writeInput())
 	plan, err := planService.CreatePlan(ctx, testUser(), decision, writeInput())
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -244,7 +244,7 @@ func TestExecuteConfirmedPlanPopulatesVerificationWhenVerifierConfigured(t *test
 	repository := store.NewMemoryActionPlanStore()
 	now := time.Now().UTC()
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time { return now }))
-	decision := policy.Evaluate(testUser(), tool(t, tools.TopicRetentionSet), writeInput())
+	decision := policy.Evaluate(testUser(), tool(t, "topic.retention.set"), writeInput())
 	plan, err := planService.CreatePlan(ctx, testUser(), decision, writeInput())
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -315,7 +315,7 @@ func TestExecuteConfirmedPlanReusedExecutionSkipsVerifier(t *testing.T) {
 	repository := store.NewMemoryActionPlanStore()
 	now := time.Now().UTC()
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time { return now }))
-	decision := policy.Evaluate(testUser(), tool(t, tools.TopicRetentionSet), writeInput())
+	decision := policy.Evaluate(testUser(), tool(t, "topic.retention.set"), writeInput())
 	plan, err := planService.CreatePlan(ctx, testUser(), decision, writeInput())
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -353,7 +353,7 @@ func TestExecuteConfirmedPlanVerifierFailureDoesNotBlockExecution(t *testing.T) 
 	repository := store.NewMemoryActionPlanStore()
 	now := time.Now().UTC()
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time { return now }))
-	decision := policy.Evaluate(testUser(), tool(t, tools.TopicRetentionSet), writeInput())
+	decision := policy.Evaluate(testUser(), tool(t, "topic.retention.set"), writeInput())
 	plan, err := planService.CreatePlan(ctx, testUser(), decision, writeInput())
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -409,7 +409,7 @@ func confirmedWritePlan(t *testing.T) (context.Context, *execution.Service, plan
 	repository := store.NewMemoryActionPlanStore()
 	now := time.Now().UTC()
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time { return now }))
-	decision := policy.Evaluate(testUser(), tool(t, tools.TopicRetentionSet), writeInput())
+	decision := policy.Evaluate(testUser(), tool(t, "topic.retention.set"), writeInput())
 	plan, err := planService.CreatePlan(ctx, testUser(), decision, writeInput())
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -468,10 +468,10 @@ func ensureMiddlewareWriteTool(t *testing.T) {
 	t.Helper()
 	ensureMiddlewareWriteMu.Lock()
 	defer ensureMiddlewareWriteMu.Unlock()
-	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+	if _, ok := tools.Lookup("topic.retention.set"); !ok {
 		if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
 			Tool: tools.Tool{
-				Name:                tools.TopicRetentionSet,
+				Name:                "topic.retention.set",
 				Operation:           tools.Write,
 				Risk:                tools.Medium,
 				RollbackDescription: "reset_to_previous",
@@ -491,7 +491,7 @@ func ensureMiddlewareWriteTool(t *testing.T) {
 	// Policy grants are additive/idempotent; re-inject so a policy-level reset
 	// elsewhere cannot leave the write un-routable for admin/operator.
 	policy.RegisterDynamicRolePermissions(map[string][]string{
-		tools.TopicRetentionSet: {"operator", "admin"},
+		"topic.retention.set": {"operator", "admin"},
 	})
 }
 
@@ -532,8 +532,8 @@ func TestExecutionObserverNotifiedOnSuccess(t *testing.T) {
 	if event.Status != "succeeded" {
 		t.Fatalf("event.Status = %q, want succeeded", event.Status)
 	}
-	if event.ToolName != tools.TopicRetentionSet {
-		t.Fatalf("event.ToolName = %q, want %q", event.ToolName, tools.TopicRetentionSet)
+	if event.ToolName != "topic.retention.set" {
+		t.Fatalf("event.ToolName = %q, want %q", event.ToolName, "topic.retention.set")
 	}
 	if event.PlanID != plan.ID {
 		t.Fatalf("event.PlanID = %q, want %q", event.PlanID, plan.ID)
@@ -548,7 +548,7 @@ func TestExecutionObserverNotifiedOnFailure(t *testing.T) {
 	repository := store.NewMemoryActionPlanStore()
 	now := time.Now().UTC()
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time { return now }))
-	decision := policy.Evaluate(testUser(), tool(t, tools.TopicRetentionSet), writeInput())
+	decision := policy.Evaluate(testUser(), tool(t, "topic.retention.set"), writeInput())
 	plan, _ := planService.CreatePlan(ctx, testUser(), decision, writeInput())
 	plan, _ = planService.ConfirmPlan(ctx, plan.ID, plan.Version, plan.ConfirmationToken, testUser())
 
@@ -602,7 +602,7 @@ func TestExecuteConfirmedPlanPersistsRealErrorSummary(t *testing.T) {
 	repository := store.NewMemoryActionPlanStore()
 	now := time.Now().UTC()
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time { return now }))
-	decision := policy.Evaluate(testUser(), tool(t, tools.TopicRetentionSet), writeInput())
+	decision := policy.Evaluate(testUser(), tool(t, "topic.retention.set"), writeInput())
 	plan, _ := planService.CreatePlan(ctx, testUser(), decision, writeInput())
 	plan, _ = planService.ConfirmPlan(ctx, plan.ID, plan.Version, plan.ConfirmationToken, testUser())
 
@@ -689,7 +689,7 @@ func TestExecutionEventContainsRequestIDOnFailure(t *testing.T) {
 	repository := store.NewMemoryActionPlanStore()
 	now := time.Now().UTC()
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time { return now }))
-	decision := policy.Evaluate(testUser(), tool(t, tools.TopicRetentionSet), writeInput())
+	decision := policy.Evaluate(testUser(), tool(t, "topic.retention.set"), writeInput())
 	plan, _ := planService.CreatePlan(ctx, testUser(), decision, writeInput())
 	plan, _ = planService.ConfirmPlan(ctx, plan.ID, plan.Version, plan.ConfirmationToken, testUser())
 

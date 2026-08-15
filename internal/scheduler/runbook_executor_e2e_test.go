@@ -31,7 +31,7 @@ func registerLowRiskWriteTool(t *testing.T) {
 	t.Cleanup(tools.ResetDynamicToolsForTest)
 	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
 		Tool: tools.Tool{
-			Name:                tools.TopicRetentionSet,
+			Name:                "topic.retention.set",
 			Operation:           tools.Write,
 			Risk:                tools.Low,
 			RollbackDescription: "reset_to_previous",
@@ -49,7 +49,7 @@ func registerLowRiskWriteTool(t *testing.T) {
 	}
 	policy.ResetDynamicRolePermissionsForTest()
 	policy.RegisterDynamicRolePermissions(map[string][]string{
-		tools.TopicRetentionSet: {"admin"},
+		"topic.retention.set": {"admin"},
 	})
 }
 
@@ -62,7 +62,7 @@ func registerMediumWriteTool(t *testing.T) {
 	t.Cleanup(tools.ResetDynamicToolsForTest)
 	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
 		Tool: tools.Tool{
-			Name:                tools.TopicRetentionSet,
+			Name:                "topic.retention.set",
 			Operation:           tools.Write,
 			Risk:                tools.Medium,
 			RollbackDescription: "reset_to_previous",
@@ -80,7 +80,7 @@ func registerMediumWriteTool(t *testing.T) {
 	}
 	policy.ResetDynamicRolePermissionsForTest()
 	policy.RegisterDynamicRolePermissions(map[string][]string{
-		tools.TopicRetentionSet: {"admin"},
+		"topic.retention.set": {"admin"},
 	})
 }
 
@@ -175,7 +175,7 @@ func enabledCfg() autonomy.Config {
 	return autonomy.Config{
 		Enabled:      true,
 		DailyLimit:   0, // 不设上限，聚焦准入成功路径
-		LowRiskTools: map[string]bool{tools.TopicRetentionSet: true},
+		LowRiskTools: map[string]bool{"topic.retention.set": true},
 	}
 }
 
@@ -183,14 +183,14 @@ func enabledCfg() autonomy.Config {
 // 真实执行——plan 已确认、写工具被真执行、审计 permitted、返回结果含 steps。
 func TestRunbookExecutorE2EAdmittedWriteExecutes(t *testing.T) {
 	f := newE2EFixture(t, enabledCfg(), nil)
-	f.seedRunbook(t, "minio-retention-low-risk", []string{tools.TopicRetentionSet})
+	f.seedRunbook(t, "minio-retention-low-risk", []string{"topic.retention.set"})
 
 	result, err := f.executor.Execute(context.Background(), f.runbookTask("minio-retention-low-risk"))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if got := f.exec.executed(); len(got) != 1 || got[0] != tools.TopicRetentionSet {
-		t.Fatalf("executed tools = %v, want [%s]", got, tools.TopicRetentionSet)
+	if got := f.exec.executed(); len(got) != 1 || got[0] != "topic.retention.set" {
+		t.Fatalf("executed tools = %v, want [%s]", got, "topic.retention.set")
 	}
 	if result["runbook"] != "minio-retention-low-risk" {
 		t.Errorf("runbook = %v", result["runbook"])
@@ -199,8 +199,8 @@ func TestRunbookExecutorE2EAdmittedWriteExecutes(t *testing.T) {
 	if !ok || len(steps) != 1 {
 		t.Fatalf("steps = %#v, want 1 stepResult", result["steps"])
 	}
-	if steps[0].Tool != tools.TopicRetentionSet || steps[0].Status != "succeeded" {
-		t.Errorf("step = %+v, want tool=%s status=succeeded", steps[0], tools.TopicRetentionSet)
+	if steps[0].Tool != "topic.retention.set" || steps[0].Status != "succeeded" {
+		t.Errorf("step = %+v, want tool=%s status=succeeded", steps[0], "topic.retention.set")
 	}
 	if steps[0].PlanID == "" || steps[0].ExecutionID == "" {
 		t.Errorf("step missing plan/execution id: %+v", steps[0])
@@ -250,7 +250,7 @@ func TestRunbookExecutorE2EDeniedWithoutController(t *testing.T) {
 
 	if _, err := rbStore.CreateRunbook(context.Background(), store.Runbook{
 		ID: "rb-1", Slug: "minio-retention-low-risk", Name: "x",
-		IntentPattern: []string{"test"}, ToolSequence: []string{tools.TopicRetentionSet},
+		IntentPattern: []string{"test"}, ToolSequence: []string{"topic.retention.set"},
 		RiskLevel: "low", IsEnabled: true,
 	}); err != nil {
 		t.Fatalf("create runbook: %v", err)
@@ -273,7 +273,7 @@ func TestRunbookExecutorE2ESkipsReadStepsKeepsWrite(t *testing.T) {
 	f := newE2EFixture(t, enabledCfg(), nil)
 	// 序列：read 打头 + 写。只读工具（cluster.status.read 静态注册）应被跳过，
 	// 写工具应被执行。
-	sequence := []string{tools.ClusterStatusRead, tools.TopicRetentionSet}
+	sequence := []string{tools.ClusterStatusRead, "topic.retention.set"}
 	f.seedRunbook(t, "mixed-read-write", sequence)
 
 	result, err := f.executor.Execute(context.Background(), f.runbookTask("mixed-read-write"))
@@ -281,15 +281,15 @@ func TestRunbookExecutorE2ESkipsReadStepsKeepsWrite(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	// 只读工具不产生执行；仅写工具被真执行。
-	if got := f.exec.executed(); len(got) != 1 || got[0] != tools.TopicRetentionSet {
-		t.Fatalf("executed tools = %v, want only [%s] (read skipped)", got, tools.TopicRetentionSet)
+	if got := f.exec.executed(); len(got) != 1 || got[0] != "topic.retention.set" {
+		t.Fatalf("executed tools = %v, want only [%s] (read skipped)", got, "topic.retention.set")
 	}
 	steps, ok := result["steps"].([]stepResult)
 	if !ok || len(steps) != 1 {
 		t.Fatalf("steps = %#v, want 1 write stepResult", result["steps"])
 	}
-	if steps[0].Tool != tools.TopicRetentionSet {
-		t.Errorf("step tool = %q, want %s", steps[0].Tool, tools.TopicRetentionSet)
+	if steps[0].Tool != "topic.retention.set" {
+		t.Errorf("step tool = %q, want %s", steps[0].Tool, "topic.retention.set")
 	}
 }
 
@@ -312,7 +312,7 @@ func TestRunbookExecutorE2EDeniedToolNotInWhitelist(t *testing.T) {
 	// 白名单为空且 Enabled=true → 任何写工具都不在名单 → 拒绝。
 	cfg := autonomy.Config{Enabled: true, DailyLimit: 0, LowRiskTools: map[string]bool{}}
 	f := newE2EFixture(t, cfg, nil)
-	f.seedRunbook(t, "minio-retention-low-risk", []string{tools.TopicRetentionSet})
+	f.seedRunbook(t, "minio-retention-low-risk", []string{"topic.retention.set"})
 
 	if _, err := f.executor.Execute(context.Background(), f.runbookTask("minio-retention-low-risk")); !errors.Is(err, ErrRunbookDenied) {
 		t.Fatalf("Execute = %v, want ErrRunbookDenied (not whitelisted)", err)
@@ -328,16 +328,16 @@ func TestRunbookExecutorE2EDeniedToolNotInWhitelist(t *testing.T) {
 // 空档。模板评审准入（AdmitRunbook）以 runbook 模板风险为授权单元：Medium 工具 + low 模板
 // 应放行并真执行——证明该空档被补上。
 func TestRunbookExecutorE2EMediumToolLowTemplateNowExecutes(t *testing.T) {
-	cfg := autonomy.Config{Enabled: true, DailyLimit: 0, LowRiskTools: map[string]bool{tools.TopicRetentionSet: true}}
+	cfg := autonomy.Config{Enabled: true, DailyLimit: 0, LowRiskTools: map[string]bool{"topic.retention.set": true}}
 	f := newE2EFixtureWithTool(t, cfg, nil, registerMediumWriteTool)
-	f.seedRunbook(t, "minio-retention-low-risk", []string{tools.TopicRetentionSet})
+	f.seedRunbook(t, "minio-retention-low-risk", []string{"topic.retention.set"})
 
 	result, err := f.executor.Execute(context.Background(), f.runbookTask("minio-retention-low-risk"))
 	if err != nil {
 		t.Fatalf("Execute = %v, want success (medium tool + low template archives)", err)
 	}
-	if got := f.exec.executed(); len(got) != 1 || got[0] != tools.TopicRetentionSet {
-		t.Fatalf("executed tools = %v, want [%s]", got, tools.TopicRetentionSet)
+	if got := f.exec.executed(); len(got) != 1 || got[0] != "topic.retention.set" {
+		t.Fatalf("executed tools = %v, want [%s]", got, "topic.retention.set")
 	}
 	steps, ok := result["steps"].([]stepResult)
 	if !ok || len(steps) != 1 || steps[0].Status != "succeeded" {

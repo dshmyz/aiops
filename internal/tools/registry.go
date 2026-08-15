@@ -14,10 +14,6 @@ import (
 
 const (
 	ClusterStatusRead       = "cluster.status.read"
-	TopicRetentionSet       = "topic.retention.set"
-	GlusterVolumeHealthRead = "glusterfs.volume.health.read"
-	MinIOBucketHealthRead   = "minio.bucket.health.read"
-	KafkaConsumerLagRead    = "kafka.consumer_lag.read"
 	// QuerySystemPosture is the system-level posture read tool (借鉴-1: 系统
 	// 态势 SLA 入口). It aggregates multi-domain health/SLA status into a
 	// single view so the operator can ask "系统怎么样" and get an overview
@@ -576,7 +572,7 @@ func validateToolDefinition(tool Tool) error {
 	if tool.Operation == Write && strings.TrimSpace(tool.RollbackDescription) == "" {
 		return fmt.Errorf("write tool %q requires a rollback description", tool.Name)
 	}
-	if strings.Contains(tool.Name, ".") && tool.Name != ClusterStatusRead && tool.Name != TopicRetentionSet && tool.Name != QuerySystemPosture && tool.Name != IncidentView {
+	if strings.Contains(tool.Name, ".") && tool.Name != ClusterStatusRead && tool.Name != QuerySystemPosture && tool.Name != IncidentView {
 		if strings.TrimSpace(tool.Domain) == "" || strings.TrimSpace(tool.ResourceType) == "" {
 			return fmt.Errorf("domain tool %q requires domain and resource type", tool.Name)
 		}

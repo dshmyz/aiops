@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/cloudwego/eino/components/model"
@@ -44,27 +45,49 @@ func (g *TemplateRecommendationGenerator) Generate(_ context.Context, domain, na
 }
 
 // recommendationAction returns a candidate tool name and input for an automated
-// fix based on domain and severity. When no automated fix is available for the
-// given domain/severity combination, toolName is empty.
+// fix based on domain and severity. The fix tool is derived from the tool
+// registry (any write tool registered for the domain), never hardcoded. When no
+// write tool is registered for the given domain, toolName is empty.
 func recommendationAction(domain string, severity Severity, environment, name string) (string, map[string]any) {
-	switch domain {
-	case "kafka":
-		switch severity {
-		case SeverityCritical:
-			return tools.TopicRetentionSet, map[string]any{
-				"environment":      environment,
-				"topic":            name,
-				"retention_hours":  24,
-			}
-		case SeverityWarning:
-			return tools.TopicRetentionSet, map[string]any{
-				"environment":      environment,
-				"topic":            name,
-				"retention_hours":  48,
+	if severity != SeverityCritical && severity != SeverityWarning {
+		return "", nil
+	}
+	tool, ok := tools.FindDomainWriteTool(domain)
+	if !ok {
+		return "", nil
+	}
+	input := map[string]any{"environment": environment}
+	if schema, ok := tools.DynamicInputSchema(tool.Name); ok {
+		fields := make([]string, 0, len(schema))
+		for field := range schema {
+			if field != "environment" {
+				fields = append(fields, field)
 			}
 		}
+		sort.Strings(fields)
+		switch {
+		case fieldInSchema(fields, tool.ResourceType):
+			input[tool.ResourceType] = name
+		case fieldInSchema(fields, "name"):
+			input["name"] = name
+		case len(fields) > 0:
+			input[fields[0]] = name
+		default:
+			input["name"] = name
+		}
+	} else {
+		input["name"] = name
 	}
-	return "", nil
+	return tool.Name, input
+}
+
+func fieldInSchema(fields []string, target string) bool {
+	for _, f := range fields {
+		if f == target {
+			return true
+		}
+	}
+	return false
 }
 
 // LLMRecommendationGenerator 使用 LLM 生成动态建议

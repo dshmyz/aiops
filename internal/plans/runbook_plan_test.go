@@ -9,7 +9,6 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/plans"
 	"github.com/gracegaoya/ai-operations-copilot/internal/policy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/store"
-	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 func TestCreateRunbookPlanLowRiskAutoConfirms(t *testing.T) {
@@ -18,7 +17,7 @@ func TestCreateRunbookPlanLowRiskAutoConfirms(t *testing.T) {
 	ctx := context.Background()
 	repository := store.NewMemoryActionPlanStore()
 	service := plans.NewService(repository, fixedClock())
-	decision := policy.Evaluate(user(), registeredTool(t, tools.TopicRetentionSet), retentionInput())
+	decision := policy.Evaluate(user(), registeredTool(t, "topic.retention.set"), retentionInput())
 
 	plan, err := service.CreateRunbookPlan(ctx, user(), decision, retentionInput(), "kafka-retention-low-risk", "low")
 	if err != nil {
@@ -56,7 +55,7 @@ func TestCreateRunbookPlanMediumRiskRequiresConfirmation(t *testing.T) {
 	ctx := context.Background()
 	repository := store.NewMemoryActionPlanStore()
 	service := plans.NewService(repository, fixedClock())
-	decision := policy.Evaluate(user(), registeredTool(t, tools.TopicRetentionSet), retentionInput())
+	decision := policy.Evaluate(user(), registeredTool(t, "topic.retention.set"), retentionInput())
 
 	plan, err := service.CreateRunbookPlan(ctx, user(), decision, retentionInput(), "alert-root-cause-sequence", "medium")
 	if err != nil {
@@ -77,7 +76,7 @@ func TestCreateRunbookPlanRejectsNotPermittedDecision(t *testing.T) {
 	repository := store.NewMemoryActionPlanStore()
 	service := plans.NewService(repository, fixedClock())
 	// 用一个 viewer 无法访问的写工具决策（viewer 无 TopicRetentionSet 权限）
-	decision := policy.Evaluate(viewerUser(), registeredTool(t, tools.TopicRetentionSet), retentionInput())
+	decision := policy.Evaluate(viewerUser(), registeredTool(t, "topic.retention.set"), retentionInput())
 
 	if _, err := service.CreateRunbookPlan(ctx, viewerUser(), decision, retentionInput(), "kafka-retention-low-risk", "low"); !errors.Is(err, plans.ErrPlanNotPermitted) {
 		t.Fatalf("CreateRunbookPlan = %v, want ErrPlanNotPermitted", err)

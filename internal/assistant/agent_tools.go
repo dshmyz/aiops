@@ -415,7 +415,7 @@ func (t *K8sPodListTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	// 这里用环境变量 K8S_API_SERVER 配置 API 地址
 	apiServer := os.Getenv("K8S_API_SERVER")
 	if apiServer == "" {
-		return `{"error":"K8S_API_SERVER not configured","hint":"set K8S_API_SERVER env var to your Kubernetes API server URL"}`, nil
+		return "", fmt.Errorf("K8S_API_SERVER not configured: set K8S_API_SERVER env var to your Kubernetes API server URL")
 	}
 	apiURL := fmt.Sprintf("%s/api/v1/namespaces/%s/pods", apiServer, args.Namespace)
 	if args.LabelSelector != "" {
@@ -480,7 +480,7 @@ func (t *K8sPodLogsTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	}
 	apiServer := os.Getenv("K8S_API_SERVER")
 	if apiServer == "" {
-		return `{"error":"K8S_API_SERVER not configured"}`, nil
+		return "", fmt.Errorf("K8S_API_SERVER not configured: set K8S_API_SERVER env var to your Kubernetes API server URL")
 	}
 	apiURL := fmt.Sprintf("%s/api/v1/namespaces/%s/pods/%s/log?tailLines=%d", apiServer, args.Namespace, args.PodName, args.TailLines)
 	if args.Container != "" {
@@ -582,7 +582,7 @@ func (t *AlertCorrelateTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 		Desc: "查询活跃告警并按关联性分组。用于发现同一根因引发的多条告警，减少告警噪音，定位核心问题。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"environment": {Desc: "环境筛选（prod/staging/dev）", Required: false, Type: schema.String},
-			"domain":      {Desc: "领域筛选（kafka/minio/glusterfs）", Required: false, Type: schema.String},
+			"domain":      {Desc: "领域筛选（已注册/已发布能力的域）", Required: false, Type: schema.String},
 			"severity":    {Desc: "严重级别筛选（critical/warning/info）", Required: false, Type: schema.String},
 		}),
 	}, nil

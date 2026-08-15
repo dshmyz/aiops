@@ -181,41 +181,40 @@ func SuggestStrategy(tool tools.Tool, result DryRunResult, input map[string]any)
 	return strategy
 }
 
-// TopicRetentionDryRunHandler previews a topic.retention.set operation. It
-// derives the affected topic, the kafka-configs command, and a warning that
-// shortening retention may delete messages beyond the new window — all from
-// the input, without touching the cluster.
-func TopicRetentionDryRunHandler(ctx context.Context, input map[string]any) (DryRunResult, error) {
+// GenericDryRunHandler previews a registered write tool's operation in a
+// domain-agnostic way: it derives the affected resource from the tool's
+// resource type and the input, and summarizes the intended change without
+// touching the target system. Tool-specific handlers may override this generic
+// behavior by registering their own handler for a tool name.
+func GenericDryRunHandler(ctx context.Context, input map[string]any) (DryRunResult, error) {
 	environment, _ := input["environment"].(string)
-	topic, _ := input["topic"].(string)
-	retentionHours := hoursFromInput(input["retention_hours"])
-
-	affected := fmt.Sprintf("topic:%s@%s", topic, environment)
-	summary := fmt.Sprintf("将把 %s 环境的 topic %s 的消息保留时间设置为 %d 小时。", environment, topic, retentionHours)
-	command := fmt.Sprintf("kafka-configs --bootstrap-server <broker> --entity-type topics --entity-name %s --alter --add-config retention.hours=%d", topic, retentionHours)
-	warning := fmt.Sprintf("缩短保留时间可能导致超过 %d 小时的历史消息被删除，请确认下游消费和审计需求。", retentionHours)
-
+	var resourceName string
+	for _, key := range []string{"name", "topic", "bucket", "volume", "group"} {
+		if v, ok := input[key].(string); ok && v != "" {
+			resourceName = v
+			break
+		}
+	}
+	affected := ""
+	if resourceName != "" {
+		affected = fmt.Sprintf("resource:%s@%s", resourceName, environment)
+	}
+	summary := "将执行一次写操作。"
+	if resourceName != "" {
+		summary = fmt.Sprintf("将对 %s 执行写操作。", affected)
+	}
 	return DryRunResult{
 		Summary:           summary,
-		AffectedResources: []string{affected},
-		Commands:          []string{command},
-		Warnings:          []string{warning},
+		AffectedResources: nonEmptyStrings(affected),
 	}, nil
 }
 
-// hoursFromInput normalizes the retention_hours input (int, int64, float64,
-// json.Number) into an int for display. Returns 0 when the value is missing or
-// not a number; the caller still produces a preview with a 0-hour placeholder
-// rather than failing, because dry-run is best-effort.
-func hoursFromInput(value any) int {
-	switch v := value.(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	default:
-		return 0
+func nonEmptyStrings(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v != "" {
+			out = append(out, v)
+		}
 	}
+	return out
 }

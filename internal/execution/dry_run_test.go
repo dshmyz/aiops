@@ -10,15 +10,16 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
-// TestDryRunTopicRetentionPreview 验证 TopicRetentionSet 的 dry-run 预演：
-// 返回摘要、影响资源、将要执行的命令和风险警告，不实际执行写操作。
-func TestDryRunTopicRetentionPreview(t *testing.T) {
+// TestGenericDryRunPreview 验证已注册写工具的通用 dry-run 预演：
+// 返回摘要和影响资源，不实际执行写操作，也不包含具体命令（命令由真实
+// 执行系统解析）。
+func TestGenericDryRunPreview(t *testing.T) {
 	t.Parallel()
 	ensureMiddlewareWriteTool(t)
 	svc := execution.NewDryRunService()
-	svc.Register(tools.TopicRetentionSet, execution.TopicRetentionDryRunHandler)
+	svc.Register("topic.retention.set", execution.GenericDryRunHandler)
 
-	result, err := svc.DryRun(context.Background(), tools.TopicRetentionSet, map[string]any{
+	result, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{
 		"environment":     "prod",
 		"topic":           "orders",
 		"retention_hours": 72,
@@ -31,13 +32,6 @@ func TestDryRunTopicRetentionPreview(t *testing.T) {
 	}
 	if len(result.AffectedResources) == 0 {
 		t.Error("AffectedResources is empty, should list impacted topic")
-	}
-	if len(result.Commands) == 0 {
-		t.Error("Commands is empty, should list the command to be executed")
-	}
-	// retention 缩短场景应有警告
-	if len(result.Warnings) == 0 {
-		t.Error("Warnings is empty, shortening retention should warn about message deletion")
 	}
 }
 
@@ -56,7 +50,7 @@ func TestDryRunNoHandler(t *testing.T) {
 	t.Parallel()
 	svc := execution.NewDryRunService()
 	// TopicRetentionSet.SupportsDryRun=true，但未 Register handler
-	_, err := svc.DryRun(context.Background(), tools.TopicRetentionSet, map[string]any{})
+	_, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{})
 	if !errors.Is(err, execution.ErrDryRunNotSupported) {
 		t.Fatalf("err = %v, want ErrDryRunNotSupported", err)
 	}
@@ -81,9 +75,9 @@ func TestDryRunSuggestsStrategyForWriteTool(t *testing.T) {
 	t.Parallel()
 	ensureMiddlewareWriteTool(t)
 	svc := execution.NewDryRunService()
-	svc.Register(tools.TopicRetentionSet, execution.TopicRetentionDryRunHandler)
+	svc.Register("topic.retention.set", execution.GenericDryRunHandler)
 
-	result, err := svc.DryRun(context.Background(), tools.TopicRetentionSet, map[string]any{
+	result, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{
 		"environment":     "prod",
 		"topic":           "orders",
 		"retention_hours": 72,
@@ -110,9 +104,9 @@ func TestDryRunSuggestsStrategyForWriteTool(t *testing.T) {
 func TestSuggestStrategyBatchConcurrency(t *testing.T) {
 	t.Parallel()
 	ensureMiddlewareWriteTool(t)
-	tool, ok := tools.Lookup(tools.TopicRetentionSet)
+	tool, ok := tools.Lookup("topic.retention.set")
 	if !ok {
-		t.Fatalf("lookup %q", tools.TopicRetentionSet)
+		t.Fatalf("lookup %q", "topic.retention.set")
 	}
 	result := execution.DryRunResult{
 		AffectedResources: []string{"topic:a@prod", "topic:b@prod", "topic:c@prod"},
@@ -131,9 +125,9 @@ func TestSuggestStrategyBatchConcurrency(t *testing.T) {
 func TestSuggestStrategyLongCommandTimeout(t *testing.T) {
 	t.Parallel()
 	ensureMiddlewareWriteTool(t)
-	tool, ok := tools.Lookup(tools.TopicRetentionSet)
+	tool, ok := tools.Lookup("topic.retention.set")
 	if !ok {
-		t.Fatalf("lookup %q", tools.TopicRetentionSet)
+		t.Fatalf("lookup %q", "topic.retention.set")
 	}
 	tests := []struct {
 		name    string
@@ -161,9 +155,9 @@ func TestSuggestStrategyLongCommandTimeout(t *testing.T) {
 func TestSuggestStrategyTargetHostsFromInput(t *testing.T) {
 	t.Parallel()
 	ensureMiddlewareWriteTool(t)
-	tool, ok := tools.Lookup(tools.TopicRetentionSet)
+	tool, ok := tools.Lookup("topic.retention.set")
 	if !ok {
-		t.Fatalf("lookup %q", tools.TopicRetentionSet)
+		t.Fatalf("lookup %q", "topic.retention.set")
 	}
 	input := map[string]any{"hosts": []string{"broker-1", "broker-2"}}
 	strategy := execution.SuggestStrategy(tool, execution.DryRunResult{}, input)
@@ -179,11 +173,11 @@ func TestDryRunHandlerCanOverrideStrategy(t *testing.T) {
 	ensureMiddlewareWriteTool(t)
 	svc := execution.NewDryRunService()
 	custom := execution.SuggestedStrategy{Timeout: 120 * time.Second, Concurrency: 3, RiskLevel: "high"}
-	svc.Register(tools.TopicRetentionSet, func(_ context.Context, _ map[string]any) (execution.DryRunResult, error) {
+	svc.Register("topic.retention.set", func(_ context.Context, _ map[string]any) (execution.DryRunResult, error) {
 		return execution.DryRunResult{SuggestedStrategy: &custom}, nil
 	})
 
-	result, err := svc.DryRun(context.Background(), tools.TopicRetentionSet, map[string]any{})
+	result, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{})
 	if err != nil {
 		t.Fatalf("DryRun: %v", err)
 	}

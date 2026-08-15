@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -76,7 +77,10 @@ func (e *cachedAliasExpander) refreshIfNeeded(ctx context.Context) {
 
 	aliases, err := e.store.ListAliases(ctx, nil)
 	if err != nil {
-		return // keep stale cache; don't block auth on DB errors
+		// keep stale cache; don't block auth on DB errors。但静默保留旧缓存有
+		// 安全含义：删除别名（收权）在 TTL 内仍生效，刷新失败必须可观测。
+		log.Printf("[alias-expander] refresh failed, keeping stale cache: %v", err)
+		return
 	}
 
 	m := make(map[string][]string, len(aliases))

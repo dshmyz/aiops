@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -10,7 +11,39 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
 	"github.com/gracegaoya/ai-operations-copilot/internal/orchestrator"
+	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
+
+// TestMain 注册 SplitMessage/DomainsInText 用例依赖的测试域。域清单现派生自
+// 工具注册表（KnownDomains），不再硬编码，因此消息匹配用例需要在域注册后运行。
+func TestMain(m *testing.M) {
+	if err := tools.RegisterDynamicTools(testDomainDefs()); err != nil {
+		panic("register orchestrator test domains: " + err.Error())
+	}
+	code := m.Run()
+	tools.ResetDynamicToolsForTest()
+	os.Exit(code)
+}
+
+func testDomainDefs() []tools.DynamicToolDefinition {
+	defs := make([]tools.DynamicToolDefinition, 0, 3)
+	for _, d := range []struct {
+		domain string
+		kind   string
+	}{
+		{"kafka", "consumer_group"},
+		{"minio", "bucket"},
+		{"glusterfs", "volume"},
+	} {
+		defs = append(defs, tools.DynamicToolDefinition{
+			Tool: tools.Tool{Name: d.domain + ".test.read", Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+			},
+		})
+	}
+	return defs
+}
 
 // fakeRunner 是测试用的诊断 runner，按 domain 返回预设的 Package。
 type fakeRunner struct {

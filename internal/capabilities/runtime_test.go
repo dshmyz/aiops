@@ -457,11 +457,11 @@ func TestCapabilityWriteRunnerDelegatesUnknownToolToNextExecutor(t *testing.T) {
 	})
 	runner := capabilities.NewCapabilityWriteRunner(fallback, nil, nil)
 
-	result, err := runner.Execute(context.Background(), tools.TopicRetentionSet, map[string]any{"environment": "prod", "topic": "payments"})
+	result, err := runner.Execute(context.Background(), "topic.retention.set", map[string]any{"environment": "prod", "topic": "payments"})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
 	}
-	if !called || result["tool"] != tools.TopicRetentionSet {
+	if !called || result["tool"] != "topic.retention.set" {
 		t.Fatalf("result = %+v, called = %v; want fallback delegation", result, called)
 	}
 }

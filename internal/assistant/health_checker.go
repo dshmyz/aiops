@@ -86,12 +86,16 @@ func (h *HealthChecker) checkEndpoint(ctx context.Context, ep HealthEndpoint) {
 	var probeResult map[string]any
 	_ = json.Unmarshal([]byte(result), &probeResult)
 
-	status := "healthy"
+	// 默认 unknown：只有当 status_code 存在且判定健康时才记 healthy，
+	// 避免探测响应不完整时把端点无证据地记为健康。
+	status := "unknown"
 	if statusCode, ok := probeResult["status_code"].(float64); ok {
 		if statusCode >= 400 {
 			status = "unhealthy"
 		} else if statusCode >= 300 {
 			status = "degraded"
+		} else if statusCode >= 200 && statusCode < 300 {
+			status = "healthy"
 		}
 	}
 	if probeResult["status"] == "error" {

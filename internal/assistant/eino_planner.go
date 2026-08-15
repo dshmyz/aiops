@@ -576,7 +576,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 ## 输出格式
 只返回JSON，不要包含任何其他文本：
 {
-  "tool_name": string | null,      // 工具名称，如 "cluster.status.read"、"topic.retention.set"
+  "tool_name": string | null,      // 工具名称，如 "cluster.status.read"、动态能力的 tool_name
   "input": object | null,          // 工具输入参数，键值对形式
   "diagnostic": object | null,     // 诊断请求对象，仅用于健康/容量/延迟检查
   "confidence": number,            // 置信度，0.0-1.0
@@ -590,7 +590,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 ### tool_name（工具名称）
 - 字符串或null
 - 当用户请求普通工具操作时填写
-- 静态工具示例："cluster.status.read"、"topic.retention.set"
+- 静态工具示例："cluster.status.read"、"system.posture.read"
 - 动态能力：从下方"可用的动态能力"列表中选择匹配的 tool_name
 - 当用户请求诊断检查且没有匹配的动态能力时设为null
 
@@ -602,16 +602,19 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 
 ### diagnostic（诊断对象）
 - 对象或null
-- 仅用于GlusterFS、MinIO或Kafka的健康、容量或消费者延迟检查
+- 仅用于已注册中间件域的健康、容量或延迟检查
 - 当有匹配的动态能力时，优先用 tool_name 而不是 diagnostic
 - 结构：
   {
-    "domain": "glusterfs" | "minio" | "kafka",
+    "domain": string,
     "environment": "prod" | "staging" | "dev",
-    "resource_type": "volume" | "bucket" | "consumer_group",
+    "resource_type": string,
     "resource_name": string,
     "runbook": "health" | "capacity" | "consumer_lag"
   }
+- runbook 是诊断流程模板，按域适用语义选择：health=健康检查（通用），capacity=容量评估（通用），consumer_lag=消费者/复制滞后（仅适用于消息队列、DB 复制等有消费滞后的域）
+- domain 必须是已注册/已发布能力的域（以系统提示中的"可用的动态能力"为准），resource_type 与 domain 对应
+- 域未发布任何能力时不要凭空构造 diagnostic，改为提示用户该域未接入
 - 普通工具意图时必须设为null
 
 ### confidence（置信度）
@@ -635,7 +638,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 
 ### agent 循环收敛规则（重要）
 - **不要重复执行已运行过的工具**：如果历史[Last Intent]中某个工具已经执行过且返回值确定，就不要再次调用同一个工具。反复返回同一结果的重复调用是空转，应直接 final_answer: true 汇总。
-- **多能力系统要全面检查**：当用户请求涉及一个有多个能力的系统（如 moonlightbox 有 health/cache/security/dashboard），应该依次检查各个维度，收集完整信息后再给出综合结论。不要查一个就收尾。
+- **多能力系统要全面检查**：当用户请求涉及一个有多个能力（如 health/cache/security/dashboard 等多个维度）的系统时，应该依次检查各个维度，收集完整信息后再给出综合结论。不要查一个就收尾。
 - **单域诊断拿到结果后可以继续**：如果还有同 domain 的其他能力没查，继续检查下一个维度，直到覆盖主要方面再收尾。
 - 只有当你需要**新的信息**（另一个域、另一个资源、或排查异常的下一步证据）时才调用新工具，并且**换用与之前不同的工具**。
 - 若某工具执行失败，可根据错误换用其他候选工具，但失败次数超过预算仍无法推进时应 final_answer: true 汇总已知信息，而不是空转。
@@ -677,20 +680,20 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 }
 
 ### 示例2：诊断请求
-用户："检查kafka消费者的延迟情况"
+用户："检查消息队列消费者的延迟情况"
 输出：
 {
   "tool_name": null,
   "input": null,
   "diagnostic": {
-    "domain": "kafka",
+    "domain": "已注册的中间件域",
     "environment": "prod",
-    "resource_type": "consumer_group",
+    "resource_type": "该域对应的资源类型",
     "resource_name": "*",
     "runbook": "consumer_lag"
   },
   "confidence": 0.9,
-  "explanation": "用户想检查Kafka消费者延迟"
+  "explanation": "用户想检查消息队列消费者延迟"
 }
 
 ### 示例3：需要澄清
@@ -706,14 +709,14 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 
 ### 示例4：利用历史对话
 历史：[Last Intent] tool_name: cluster.status.read, input: {"environment": "prod", "cluster_name": "cluster-01"}
-用户："同environment再查topic状态"
+用户："同environment再查系统态势"
 输出：
 {
-  "tool_name": "topic.status.read",
+  "tool_name": "system.posture.read",
   "input": {"environment": "prod"},
   "diagnostic": null,
   "confidence": 0.85,
-  "explanation": "用户想在相同环境下查看topic状态"
+  "explanation": "用户想在相同环境下查看系统态势"
 }
 
 ### 示例5：告警查询
@@ -729,7 +732,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 }
 
 ### 示例6：工具结果反馈后完成回答
-历史：[Last Intent] tool_name: alert.query, input: {"environment":"prod"}, result: [{"name":"kafka 慢消费者","severity":"warning"}]
+历史：[Last Intent] tool_name: alert.query, input: {"environment":"prod"}, result: [{"name":"消息队列慢消费者","severity":"warning"}]
 用户："当前有哪些告警？"
 输出：
 {
@@ -739,21 +742,21 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
   "confidence": 0.95,
   "explanation": "已用告警工具取得生产环境告警，可以回答",
   "final_answer": true,
-  "summary": "生产环境当前有 1 条告警：kafka 慢消费者（warning）。"
+  "summary": "生产环境当前有 1 条告警：消息队列慢消费者（warning）。"
 }
 
 ### 示例7：单域健康检查完成立即收尾（不要空转重复同一工具）
-历史：[Last Intent] diagnostic: domain=glusterfs, environment=prod, resource_type=volume, resource_name=data；结果摘要：glusterfs.volume.health.read：诊断完成：1 个观察，1 个发现，1 个建议
-用户："检查 prod glusterfs data volume 健康"
+历史：[Last Intent] diagnostic: domain=消息队列域, environment=prod, resource_type=consumer_group, resource_name=orders；结果摘要：对应读工具：诊断完成：1 个观察，1 个发现，1 个建议
+用户："检查 prod 消息队列消费组健康"
 输出：
 {
   "tool_name": null,
   "input": null,
   "diagnostic": null,
   "confidence": 0.95,
-  "explanation": "glusterfs data volume 健康检查已完成并拿到结论，无需再次调用同一工具，直接汇总",
+  "explanation": "消息队列消费组健康检查已完成并拿到结论，无需再次调用同一工具，直接汇总",
   "final_answer": true,
-  "summary": "prod glusterfs data volume 健康检查完成：1 个观察、1 个发现、1 个建议。"
+  "summary": "prod 消息队列消费组健康检查完成：1 个观察、1 个发现、1 个建议。"
 }
 
 ## 重要约束

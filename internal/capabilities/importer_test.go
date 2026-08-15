@@ -12,6 +12,7 @@ import (
 
 func TestImportOpenAPICandidatesClassifiesWithoutManagedDrafts(t *testing.T) {
 	t.Parallel()
+	ensureImporterTestDomains(t)
 	body := []byte(`openapi: 3.0.0
 paths:
   /api/minio/{cluster}/buckets/{bucket}/capacity:
@@ -86,6 +87,7 @@ paths:
 
 func TestImportOpenAPICandidatesMarksDuplicatesAsNeedsAdjustment(t *testing.T) {
 	t.Parallel()
+	ensureImporterTestDomains(t)
 	body := []byte(`openapi: 3.0.0
 paths:
   /api/minio/{cluster}/buckets/{bucket}/capacity:
@@ -149,6 +151,7 @@ func TestApplyCandidateOverrideUsesAdminMetadata(t *testing.T) {
 
 func TestImportOpenAPIGeneratesReadAndWriteDrafts(t *testing.T) {
 	t.Parallel()
+	ensureImporterTestDomains(t)
 	body := []byte(`openapi: 3.0.0
 paths:
   /api/minio/clusters/{cluster}/buckets/{bucket}/capacity:
@@ -220,6 +223,7 @@ paths:
 
 func TestImportOpenAPIUsesStableOperationIDInName(t *testing.T) {
 	t.Parallel()
+	ensureImporterTestDomains(t)
 	body := []byte(`openapi: 3.0.0
 paths:
   /api/topics/{topic}:
@@ -427,6 +431,7 @@ func TestWriteDraftsRejectsPathTraversalBeforeWriting(t *testing.T) {
 
 func TestImportOpenAPIIgnoresPathMetadataAndUnsupportedMethods(t *testing.T) {
 	t.Parallel()
+	ensureImporterTestDomains(t)
 	body := []byte(`openapi: 3.0.0
 paths:
   /api/kafka/topics/{topic}/retention:
@@ -473,6 +478,7 @@ paths:
 
 func TestImportOpenAPIAssignsActionNameToNonUpdatePOST(t *testing.T) {
 	t.Parallel()
+	ensureImporterTestDomains(t)
 	body := []byte(`openapi: 3.0.0
 paths:
   /api/kafka/topics/{topic}/rebuild:

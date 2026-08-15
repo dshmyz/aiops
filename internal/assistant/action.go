@@ -48,6 +48,9 @@ type Action struct {
 	RiskLevel ActionRisk
 	// AgentMode 决定执行编排方式。
 	AgentMode AgentMode
+	// AgentRole 决定执行时的智能体角色（影响 system prompt 边界）。
+	// 未设置时按 RoleSupervisor（通用助手）处理。
+	AgentRole AgentRole
 	// Skills 是默认加载的 Skill slug 列表。
 	Skills []string
 }
@@ -58,10 +61,11 @@ var registeredActions = []Action{
 	{
 		Code:        "middleware.diagnose",
 		DisplayName: "中间件诊断",
-		Keywords:    []string{"kafka", "minio", "glusterfs", "健康", "状态", "health", "status", "容量", "capacity", "延迟", "lag"},
-		PromptHint:  "中间件诊断上下文：优先识别 domain（kafka/minio/glusterfs）、environment、resource_type，按健康检查 SOP 取证。",
+		Keywords:    []string{"健康", "状态", "health", "status", "容量", "capacity", "延迟", "lag", "中间件", "middleware"},
+		PromptHint:  "中间件诊断上下文：优先识别 domain（以已注册/已发布能力的域为准）、environment、resource_type，按健康检查 SOP 取证。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentDirect,
+		AgentRole:   RoleDiagnostic,
 		Skills:      []string{"middleware-evidence-checklist"},
 	},
 	{
@@ -71,6 +75,7 @@ var registeredActions = []Action{
 		PromptHint:  "告警根因分析上下文：必须输出结论、证据、影响范围和下一步动作，按告警证据清单 SOP 取证。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentReAct,
+		AgentRole:   RoleDiagnostic,
 		Skills:      []string{"alert-evidence-checklist"},
 	},
 	{
@@ -80,6 +85,7 @@ var registeredActions = []Action{
 		PromptHint:  "日志查询生成上下文：约束查询语句、过滤项、字段解释和可复制输出，按日志查询规范生成。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentDirect,
+		AgentRole:   RoleDiagnostic,
 		Skills:      []string{"log-query-guide"},
 	},
 	// --- P1 扩展 Action（7 个）---
@@ -90,6 +96,7 @@ var registeredActions = []Action{
 		PromptHint:  "容量规划上下文：基于当前用量和历史趋势给出扩容建议、资源预留和成本评估，按容量规划 SOP 输出。",
 		RiskLevel:   ActionDraft,
 		AgentMode:   AgentReAct,
+		AgentRole:   RoleAnalysis,
 		Skills:      []string{"capacity-planning-guide", "risk-assessment-guide"},
 	},
 	{
@@ -99,6 +106,7 @@ var registeredActions = []Action{
 		PromptHint:  "配置变更对比上下文：输出 before/after diff、影响面和回滚点，按配置变更检查清单 SOP 输出。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentDirect,
+		AgentRole:   RoleChange,
 		Skills:      []string{"config-change-checklist"},
 	},
 	{
@@ -108,6 +116,7 @@ var registeredActions = []Action{
 		PromptHint:  "发布回滚上下文：确认目标版本、回滚步骤、影响范围和数据兼容性，按发布回滚 SOP 输出回滚计划。",
 		RiskLevel:   ActionExecute,
 		AgentMode:   AgentPlanReAct,
+		AgentRole:   RoleChange,
 		Skills:      []string{"release-rollback-sop", "risk-assessment-guide"},
 	},
 	{
@@ -117,6 +126,7 @@ var registeredActions = []Action{
 		PromptHint:  "自愈推荐上下文：基于诊断证据推荐可执行的自愈动作，标注风险等级并要求确认，按自愈推荐指南 SOP 输出。",
 		RiskLevel:   ActionWrite,
 		AgentMode:   AgentReAct,
+		AgentRole:   RoleChange,
 		Skills:      []string{"self-heal-recommendation-guide", "risk-assessment-guide"},
 	},
 	{
@@ -126,6 +136,7 @@ var registeredActions = []Action{
 		PromptHint:  "仪表盘生成上下文：根据问题域生成监控仪表盘草稿（指标、布局、阈值），按仪表盘设计指南 SOP 输出。",
 		RiskLevel:   ActionDraft,
 		AgentMode:   AgentDirect,
+		AgentRole:   RoleAnalysis,
 		Skills:      []string{"dashboard-design-guide"},
 	},
 	{
@@ -135,6 +146,7 @@ var registeredActions = []Action{
 		PromptHint:  "告警规则草稿上下文：生成告警规则草稿（指标、阈值、持续时间、通知渠道），按告警规则草稿指南 SOP 输出。",
 		RiskLevel:   ActionDraft,
 		AgentMode:   AgentDirect,
+		AgentRole:   RoleChange,
 		Skills:      []string{"alert-rule-draft-guide"},
 	},
 	{
@@ -144,6 +156,7 @@ var registeredActions = []Action{
 		PromptHint:  "知识库问答上下文：检索运维知识库回答问题，标注来源文档，按知识检索指南 SOP 输出。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentDirect,
+		AgentRole:   RoleKnowledge,
 		Skills:      []string{"knowledge-retrieval-guide"},
 	},
 	// --- P2 扩展 Action（1 个）---
@@ -154,6 +167,7 @@ var registeredActions = []Action{
 		PromptHint:  "成本分析上下文：基于资源用量、利用率和成本数据，识别闲置资源并给出优化建议，按成本分析 SOP 输出。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentReAct,
+		AgentRole:   RoleAnalysis,
 		Skills:      []string{"cost-analysis-guide", "risk-assessment-guide"},
 	},
 	{
@@ -163,6 +177,7 @@ var registeredActions = []Action{
 		PromptHint:  "SLA 分析上下文：基于 SLI 指标（可用性/延迟/错误率）评估 SLA 达成度，识别违反风险与改进项，按 SLA 分析 SOP 输出。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentReAct,
+		AgentRole:   RoleAnalysis,
 		Skills:      []string{"sla-analysis-guide", "risk-assessment-guide"},
 	},
 	{
@@ -172,6 +187,7 @@ var registeredActions = []Action{
 		PromptHint:  "事故复盘上下文：基于事故时间线、告警、变更记录生成复盘报告（时间线/根因/影响/改进项），按事故复盘 SOP 输出。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentReAct,
+		AgentRole:   RoleAnalysis,
 		Skills:      []string{"incident-review-sop", "risk-assessment-guide"},
 	},
 	{
@@ -181,6 +197,7 @@ var registeredActions = []Action{
 		PromptHint:  "健康体检上下文：多维度巡检（集群/中间件/资源/SLI），输出整体健康评分和风险项清单，按健康体检 SOP 输出。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentReAct,
+		AgentRole:   RoleDiagnostic,
 		Skills:      []string{"health-check-guide"},
 	},
 	{
@@ -190,6 +207,7 @@ var registeredActions = []Action{
 		PromptHint:  "性能瓶颈定位上下文：基于资源指标（CPU/内存/磁盘/网络）和接口指标（QPS/延迟/错误率）定位瓶颈点，有 trace 则串联分析、无 trace 退化为指标维度，按性能瓶颈定位 SOP 输出。",
 		RiskLevel:   ActionReadOnly,
 		AgentMode:   AgentReAct,
+		AgentRole:   RoleDiagnostic,
 		Skills:      []string{"performance-bottleneck-guide", "risk-assessment-guide"},
 	},
 }

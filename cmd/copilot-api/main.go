@@ -288,8 +288,16 @@ func main() {
 				logger.Info("fallback model configured", zap.String("model", os.Getenv("COPILOT_FALLBACK_MODEL")))
 				chatModel = fallbackChat
 			}
+			// agent 执行器必须用无 response_format=json_object 的 chat（function
+			// calling）。planner 的 chat 带 JSON format，JSON 模式下模型即使拿到
+			// tools 也倾向返回 JSON 文本而非发起 tool call。用独立 tool chat，
+			// 失败时退回主模型。
+			agentChat := chatModel
+			if toolChat := assistant.NewToolChatModelFromEnv(serviceContext, reasoningEnv); toolChat != nil {
+				agentChat = toolChat
+			}
 			agentExec, agentErr := assistant.NewAgentExecutorWithCache(assistant.AgentExecutorConfig{
-				ChatModel:      chatModel,
+				ChatModel:      agentChat,
 				ReasoningModel: reasoningModel,
 				Capabilities:   loadedCapabilities,
 				Adapter:        capabilityAdapter,
@@ -333,7 +341,11 @@ func main() {
 	// (affected resources, commands, warnings) before confirming. Handlers are
 	// registered per write tool; unsupported tools are silently skipped.
 	dryRunService := execution.NewDryRunService()
-	dryRunService.Register(tools.TopicRetentionSet, execution.TopicRetentionDryRunHandler)
+	for _, tool := range tools.All() {
+		if tool.Operation == tools.Write {
+			dryRunService.Register(tool.Name, execution.GenericDryRunHandler)
+		}
+	}
 	assistantService.WithDryRunRunner(dryRunService)
 	// 借鉴-5: 低风险 Runbook 自动执行。命中低风险 Runbook 的写操作创建已确认
 	// plan 并立即执行，跳过人工确认。
@@ -440,8 +452,10 @@ func main() {
 		planCreator := alert.NewPlanCreator(planService, alertSvc)
 		chainDiag := alert.NewChainDiagnoser(diagService, alertSvc, planCreator, readService.ExecuteRead)
 		alertWebhook = alertWebhook.WithChainDiagnoser(chainDiag)
-		// 同时创建确定性 Diagnoser 作为 LLM fallback
-		fallbackDiag = alert.NewDiagnoser(diagService, alertSvc)
+		// 同时创建确定性 Diagnoser 作为 LLM fallback，并接入处置闭环：
+		// 诊断产出的可执行推荐自动建 plan 等待人工确认。
+		fallbackDiag = alert.NewDiagnoser(diagService, alertSvc).
+			WithRecommendationPlanCreator(planCreator)
 	}
 	if os.Getenv("COPILOT_ALERT_LLM_DIAGNOSE") == "1" {
 		if chatModel != nil {
@@ -570,6 +584,14 @@ func main() {
 	var mcpHandler http.Handler
 	if mcpCfg := mcp.MCPServerEnvConfigFromEnv(); mcpCfg.Enabled {
 		mcpSrv := mcp.NewMCPServer(capStore, readRunner, auditService)
+		if mcpCfg.Token == "" {
+			// 无鉴权启用是高风险配置：外部 AI 客户端可直接调用已发布读能力。
+			// 不强制拒绝（保持向后兼容），但必须醒目告警。
+			logger.Warn("mcp server enabled WITHOUT auth token (COPILOT_MCP_SERVER_TOKEN unset); any client reaching /mcp can invoke read tools as admin")
+		} else {
+			mcpSrv = mcpSrv.WithAuthToken(mcpCfg.Token)
+			logger.Info("mcp server bearer auth enabled")
+		}
 		if initErr := mcpSrv.Init(serviceContext); initErr != nil {
 			logger.Warn("mcp server init", zap.Error(initErr))
 		}
@@ -962,24 +984,34 @@ type staticReadRunner struct{}
 func (staticReadRunner) Read(_ context.Context, tool tools.Tool, input map[string]any) (map[string]any, error) {
 	switch tool.Name {
 	case tools.QuerySystemPosture:
-		// 系统态势聚合视图（借鉴-1）：返回多域摘要，让 operator 一眼看到整体状态。
-		// 静态 stub 返回固定数据；生产环境由 configurableReadRunner 聚合各域 API。
+		// 系统态势聚合视图（借鉴-1）：返回多域摘要。本 runner 是 capabilities 未配置
+		// 时的兜底链路，不伪造各域数据——真实数据由已发布能力（published capabilities）
+		// 经 CapabilityReadRunner 提供。这里如实返回"未配置数据源"。
 		return map[string]any{
 			"tool":           tool.Name,
 			"environment":    input["environment"],
-			"overall_status": "degraded",
-			"domains": []map[string]any{
-				{"domain": "kafka", "status": "warning", "summary": "1 consumer group lag超阈值"},
-				{"domain": "glusterfs", "status": "warning", "summary": "1 volume 容量 82.5%"},
-				{"domain": "minio", "status": "ok", "summary": "所有 bucket 健康"},
-			},
+			"overall_status": "unknown",
+			"domains":        []map[string]any{},
+			"note":           "no data sources configured",
 		}, nil
-	case tools.GlusterVolumeHealthRead, tools.MinIOBucketHealthRead, tools.KafkaConsumerLagRead:
-		// 中间件读工具已外置为 YAML published 能力（examples/capabilities/published），
-		// 经 CapabilityReadRunner + HTTPAdapter 执行，不落静态 stub。
-		return map[string]any{"tool": tool.Name, "environment": input["environment"], "status": "unavailable"}, nil
+	case tools.ClusterStatusRead:
+		// 集群整体状态。与 QuerySystemPosture 一样，本 runner 是 capabilities
+		// 未配置时的兜底链路，不伪造各域数据——真实数据由已发布能力经
+		// CapabilityReadRunner 提供。这里如实返回"未配置数据源"，而不是
+		// 谎报 available（修复前会让用户误以为集群健康）。
+		return map[string]any{
+			"tool":        tool.Name,
+			"environment": input["environment"],
+			"status":      "unknown",
+			"note":        "no data sources configured",
+		}, nil
 	default:
-		return map[string]any{"tool": tool.Name, "environment": input["environment"], "status": "available"}, nil
+		if !tools.IsStatic(tool.Name) {
+			// 非静态工具（已发布能力注册的动态工具）由 CapabilityReadRunner +
+			// HTTPAdapter 执行，不落静态 stub。
+			return map[string]any{"tool": tool.Name, "environment": input["environment"], "status": "unavailable"}, nil
+		}
+		return map[string]any{"tool": tool.Name, "environment": input["environment"], "status": "unknown", "note": "no data sources configured"}, nil
 	}
 }
 
@@ -1465,13 +1497,12 @@ func buildNotifier() notification.Notifier {
 
 type staticWriteExecutor struct{}
 
-func (staticWriteExecutor) Execute(_ context.Context, toolName string, input map[string]any) (map[string]any, error) {
-	return map[string]any{
-		"tool":        toolName,
-		"environment": input["environment"],
-		"topic":       input["topic"],
-		"status":      "applied",
-	}, nil
+// Execute 是 capabilities 未配置 / 写工具未发布为能力时的兜底。此前它谎报
+// "applied"，让 AI 误以为变更已生效；现在如实报错，避免无后端执行的假成功。
+// 真实写执行必须经已发布能力（published capabilities）→ CapabilityWriteRunner
+// → HTTPAdapter，否则写操作应失败，而不是假装成功。
+func (staticWriteExecutor) Execute(_ context.Context, toolName string, _ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("write tool %q has no configured backend: publish it as a capability or configure capabilities", toolName)
 }
 
 // loadDotEnv 解析 KEY=VALUE 格式的 .env 文件，把未在真实环境变量中设置的项

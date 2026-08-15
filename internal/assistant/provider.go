@@ -253,3 +253,51 @@ func NewReasoningModelFromEnv(ctx context.Context, env map[string]string) model.
 	}
 	return withChatRetry(chat, retryAttempts(env), retryBackoff(env))
 }
+
+// NewToolChatModelFromEnv 创建用于 LLM function calling 的 chat model（agent
+// executor 选工具执行用）。
+//
+// 关键区别：planner 用的 chat 带 response_format=json_object（planner 输出严格
+// JSON 意图）；agent executor 不能共用它——JSON 格式下模型即使拿到 tools 也倾向
+// 返回 JSON 文本而非发起 tool call，导致"说要用工具却不真调"。agent 的 chat
+// 不带 response_format，让模型正常发 tool call，只在收尾时输出自然语言回答。
+//
+// 未配置 LLM 或非 eino-openai provider 时返回 nil（调用方回退主模型）。
+func NewToolChatModelFromEnv(ctx context.Context, env map[string]string) model.BaseChatModel {
+	provider := strings.TrimSpace(env[envAssistantProvider])
+	if provider != "eino-openai" {
+		return nil
+	}
+	apiKey := strings.TrimSpace(env[envOpenAIAPIKey])
+	modelName := strings.TrimSpace(env[envOpenAIModel])
+	if apiKey == "" || modelName == "" {
+		return nil
+	}
+	temperature := float32(0)
+	maxTokens := 1024 // agent 需要给模型输出工具调用参数/回答留余量
+	if v := strings.TrimSpace(env[envOpenAIMaxTokens]); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxTokens = n
+		}
+	}
+	timeout := 60 * time.Second // agent 循环单轮可较慢
+	if v := strings.TrimSpace(env[envOpenAITimeout]); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+
+	chat, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+		APIKey:              apiKey,
+		BaseURL:             strings.TrimSpace(env[envOpenAIBaseURL]),
+		Model:               modelName,
+		Timeout:             timeout,
+		Temperature:         &temperature,
+		MaxCompletionTokens: &maxTokens,
+		// 无 ResponseFormat：让模型正常发起 tool call。
+	})
+	if err != nil {
+		return nil
+	}
+	return withChatRetry(chat, retryAttempts(env), retryBackoff(env))
+}

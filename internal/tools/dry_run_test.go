@@ -15,7 +15,7 @@ func registerMiddlewareWrite(t *testing.T) {
 	t.Cleanup(tools.ResetDynamicToolsForTest)
 	err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
 		Tool: tools.Tool{
-			Name:                tools.TopicRetentionSet,
+			Name:                "topic.retention.set",
 			Operation:           tools.Write,
 			Risk:                tools.Medium,
 			RollbackDescription: "reset_to_previous",
@@ -38,9 +38,9 @@ func registerMiddlewareWrite(t *testing.T) {
 // 写工具 TopicRetentionSet 默认开启 dry-run，读工具默认关闭。
 func TestToolSupportsDryRunField(t *testing.T) {
 	registerMiddlewareWrite(t)
-	writeTool, ok := tools.Lookup(tools.TopicRetentionSet)
+	writeTool, ok := tools.Lookup("topic.retention.set")
 	if !ok {
-		t.Fatalf("Lookup %s failed", tools.TopicRetentionSet)
+		t.Fatalf("Lookup %s failed", "topic.retention.set")
 	}
 	if !writeTool.SupportsDryRun {
 		t.Errorf("TopicRetentionSet.SupportsDryRun = false, want true (write tool should support dry-run)")
@@ -59,7 +59,7 @@ func TestToolSupportsDryRunField(t *testing.T) {
 func TestDryRunToolConstant(t *testing.T) {
 	// 确保写工具能被 Lookup 到，dry-run 集成测试依赖此能力
 	registerMiddlewareWrite(t)
-	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+	if _, ok := tools.Lookup("topic.retention.set"); !ok {
 		t.Fatal("TopicRetentionSet must be registered for dry-run integration")
 	}
 }

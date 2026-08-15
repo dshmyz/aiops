@@ -65,12 +65,12 @@ type draftToolSequenceRule struct {
 	risk     string
 }
 
-// draftRules 按主题键分派。每个可落 runbook 的主题一条规则。
+// draftRules 按主题键分派。每个可落 runbook 的主题一条规则。retention 主题的
+// 写工具在调用时从注册表派生（见 InferRunbookDraft），避免硬编码测试域。
 var draftRules = map[string]draftToolSequenceRule{
 	"retention": {
 		name:     "资源保留策略调整",
 		keywords: []string{"保留", "retention", "留存", "72 小时", "小时"},
-		sequence: []string{tools.TopicRetentionSet},
 		risk:     "low",
 	},
 	"capability-call": {
@@ -85,6 +85,17 @@ var draftRules = map[string]draftToolSequenceRule{
 		sequence: []string{tools.QuerySystemPosture, tools.AlertQuery},
 		risk:     "low",
 	},
+}
+
+// derivedWriteToolSequence 返回注册表中第一个已注册写工具名；无写工具时为空切片
+// （此时 retention 草稿不携带 tool_sequence，需人工补全）。
+func derivedWriteToolSequence() []string {
+	for _, tool := range tools.All() {
+		if tool.Operation == tools.Write {
+			return []string{tool.Name}
+		}
+	}
+	return nil
 }
 
 // runbookableTopics 是能落成 runbook 的主题键集合（其余如 format/unclassified 明确跳过）。
@@ -189,7 +200,12 @@ func InferRunbookDraft(id string, topicKey string, examples []string) RunbookDra
 	base.Name = rule.name
 	base.Slug = slugify("fb-"+topicKey+"-"+rule.name, patterns)
 	base.IntentPattern = patterns
-	base.ToolSequence = append([]string(nil), rule.sequence...)
+	// retention 主题的写工具序列在调用时从注册表派生，其他主题用静态序列。
+	sequence := rule.sequence
+	if topicKey == "retention" {
+		sequence = derivedWriteToolSequence()
+	}
+	base.ToolSequence = append([]string(nil), sequence...)
 	base.RiskLevel = rule.risk
 	return base
 }

@@ -626,8 +626,8 @@ func SKIP_TestAssistantMessagesPreservesTraceInDevTokenResponse(t *testing.T) {
 	if !strings.Contains(body, `"trace"`) || !strings.Contains(body, `"tool_invocation"`) {
 		t.Fatalf("body = %s, want trace with tool_invocation", body)
 	}
-	if !strings.Contains(body, tools.TopicRetentionSet) {
-		t.Fatalf("body = %s, want selected tool %s", body, tools.TopicRetentionSet)
+	if !strings.Contains(body, "topic.retention.set") {
+		t.Fatalf("body = %s, want selected tool %s", body, "topic.retention.set")
 	}
 }
 
@@ -668,7 +668,7 @@ func TestAssistantMessagesReturnsMiddlewareDiagnostic(t *testing.T) {
 		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
 	}
 	body := res.Body.String()
-	for _, want := range []string{`"type":"answer"`, `"tool":"` + tools.GlusterVolumeHealthRead + `"`, `"answer":{"message":"Diagnostic package is ready."}`, `"diagnostic"`, `"glusterfs"`, `"observations"`, `"recommendations"`} {
+	for _, want := range []string{`"type":"answer"`, `"tool":"` + "glusterfs.volume.health.read" + `"`, `"answer":{"message":"诊断完成：1 个观察，1 个发现，1 个建议"}`, `"diagnostic"`, `"glusterfs"`, `"observations"`, `"recommendations"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body = %s, want %s", body, want)
 		}
@@ -685,7 +685,6 @@ func TestAssistantMessagesMapsDiagnosticErrorsToExpectedStatus(t *testing.T) {
 		status int
 	}{
 		{name: "policy denial", err: assistant.ErrPolicyDenied, status: http.StatusForbidden},
-		{name: "unsupported domain", err: diagnostics.ErrUnsupportedDomain, status: http.StatusBadRequest},
 		{name: "invalid request", err: diagnostics.ErrInvalidRequest, status: http.StatusBadRequest},
 		{name: "infrastructure failure", err: errors.New("diagnostic runner unavailable"), status: http.StatusBadGateway},
 	}
@@ -1045,7 +1044,7 @@ func TestListActionPlansReturnsOnlyAllowedPendingPlans(t *testing.T) {
 	router, _, planService := testRouterWithPlans(t, &readRunner{})
 	prodPlan := createPendingPlan(t, planService)
 	stagingInput := map[string]any{"environment": "staging", "topic": "orders", "retention_hours": 72}
-	decision := policy.Evaluate(identity.CurrentUser{Subject: "admin-1", Roles: []string{"admin"}, AllowedEnvironments: []string{"staging"}, RequestID: "request-staging"}, tool(t, tools.TopicRetentionSet), stagingInput)
+	decision := policy.Evaluate(identity.CurrentUser{Subject: "admin-1", Roles: []string{"admin"}, AllowedEnvironments: []string{"staging"}, RequestID: "request-staging"}, tool(t, "topic.retention.set"), stagingInput)
 	stagingPlan, err := planService.CreatePlan(context.Background(), identity.CurrentUser{Subject: "admin-1", Roles: []string{"admin"}, AllowedEnvironments: []string{"staging"}, RequestID: "request-staging"}, decision, stagingInput)
 	if err != nil {
 		t.Fatalf("create staging plan: %v", err)
@@ -2666,7 +2665,7 @@ func capabilityTestRouter(t *testing.T, runner *readRunner) (http.Handler, *stor
 
 func createPendingPlan(t *testing.T, service *plans.Service) plans.Plan {
 	t.Helper()
-	decision := policy.Evaluate(admin(), tool(t, tools.TopicRetentionSet), retentionInput())
+	decision := policy.Evaluate(admin(), tool(t, "topic.retention.set"), retentionInput())
 	plan, err := service.CreatePlan(context.Background(), admin(), decision, retentionInput())
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -2704,7 +2703,7 @@ func createStoredPlanWithHash(t *testing.T, repository *store.MemoryActionPlanSt
 		ID:                    id,
 		RequestID:             "malformed-request",
 		CreatedBy:             "admin-1",
-		ToolName:              tools.TopicRetentionSet,
+		ToolName:              "topic.retention.set",
 		InputJSON:             []byte(input),
 		InputHash:             inputHash,
 		RiskLevel:             risk,
@@ -3031,7 +3030,7 @@ func ensureMiddlewareTools(t *testing.T) {
 	t.Helper()
 	ensureMiddlewareToolsMu.Lock()
 	defer ensureMiddlewareToolsMu.Unlock()
-	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+	if _, ok := tools.Lookup("topic.retention.set"); !ok {
 		if err := tools.RegisterDynamicTools(httpAPIMiddlewareDefinitions()); err != nil {
 			t.Fatalf("register middleware tools: %v", err)
 		}
@@ -3039,31 +3038,31 @@ func ensureMiddlewareTools(t *testing.T) {
 	// Role permissions are additive/idempotent; re-inject on every call so a
 	// policy-level reset elsewhere cannot leave the middleware tools unroutable.
 	policy.RegisterDynamicRolePermissions(map[string][]string{
-		tools.GlusterVolumeHealthRead: {"viewer", "operator", "admin"},
-		tools.MinIOBucketHealthRead:   {"viewer", "operator", "admin"},
-		tools.KafkaConsumerLagRead:    {"viewer", "operator", "admin"},
-		tools.TopicRetentionSet:       {"operator", "admin"},
+		"glusterfs.volume.health.read": {"viewer", "operator", "admin"},
+		"minio.bucket.health.read":   {"viewer", "operator", "admin"},
+		"kafka.consumer_lag.read":    {"viewer", "operator", "admin"},
+		"topic.retention.set":       {"operator", "admin"},
 	})
 }
 
 func httpAPIMiddlewareDefinitions() []tools.DynamicToolDefinition {
 	return []tools.DynamicToolDefinition{
 		{
-			Tool: tools.Tool{Name: tools.GlusterVolumeHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
+			Tool: tools.Tool{Name: "glusterfs.volume.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]tools.DynamicInputField{
 				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
-			Tool: tools.Tool{Name: tools.MinIOBucketHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
+			Tool: tools.Tool{Name: "minio.bucket.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]tools.DynamicInputField{
 				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
-			Tool: tools.Tool{Name: tools.KafkaConsumerLagRead, Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
+			Tool: tools.Tool{Name: "kafka.consumer_lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
 				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
@@ -3071,7 +3070,7 @@ func httpAPIMiddlewareDefinitions() []tools.DynamicToolDefinition {
 		},
 		{
 			Tool: tools.Tool{
-				Name:                tools.TopicRetentionSet,
+				Name:                "topic.retention.set",
 				Operation:           tools.Write,
 				Risk:                tools.Medium,
 				RollbackDescription: "reset_to_previous",

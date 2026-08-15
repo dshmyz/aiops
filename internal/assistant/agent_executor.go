@@ -16,7 +16,6 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/capabilities"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
-	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 // AgentExecutor 基于 LLM function calling 的执行器。
@@ -64,8 +63,8 @@ func NewAgentExecutor(cfg AgentExecutorConfig) (*AgentExecutor, error) {
 	// Run/HandleMessage 等入口通过 WithToolUser 注入 ctx。
 	user := identity.CurrentUser{}
 	einoTools := CapabilityToolsFromCapabilities(cfg.Capabilities, cfg.Adapter, cfg.AuditService, user)
-	// 通用运维工具：HTTP 探活
-	einoTools = append(einoTools, NewHTTPProbeTool())
+	// 注：http.probe 不进入 agent 工具集——探活由独立的健康检查器（HealthChecker）
+	// 承担，agent 专注已发布能力工具，避免通用工具被 LLM 滥用。
 
 	toolMap := make(map[string]tool.BaseTool, len(einoTools))
 	for _, t := range einoTools {
@@ -139,6 +138,24 @@ func (e *AgentExecutor) Run(ctx context.Context, message string, history []Turn)
 	return e.RunWithCallback(ctx, message, history, nil)
 }
 
+// RunWithRole 以指定智能体角色执行 agent loop（角色决定 system prompt 边界）。
+// role 为空或 supervisor 时行为与 Run 完全一致。
+func (e *AgentExecutor) RunWithRole(ctx context.Context, role AgentRole, message string, history []Turn) *AgentRunResult {
+	return e.RunWithRoleCallback(ctx, role, message, history, nil)
+}
+
+// RunWithRoleCallback 以指定角色执行并流式回调工具步骤。
+func (e *AgentExecutor) RunWithRoleCallback(ctx context.Context, role AgentRole, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
+	result := e.runWithCallbackRole(ctx, role, message, history, onStep)
+	// 指标：记录请求结果（覆盖所有 return 路径）
+	if result == nil {
+		agentMetrics.recordRequest(false, "agent returned nil result")
+	} else {
+		agentMetrics.recordRequest(result.Error == nil, errMsgOf(result.Error))
+	}
+	return result
+}
+
 // AgentStepEvent 是 agent 执行过程中的一个步骤事件（工具调用完成）。
 type AgentStepEvent struct {
 	Step    int    `json:"step"`
@@ -150,14 +167,7 @@ type AgentStepEvent struct {
 // RunWithCallback 执行 agent loop，每完成一个工具调用就回调 onStep。
 // onStep 为 nil 时等价于 Run。
 func (e *AgentExecutor) RunWithCallback(ctx context.Context, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
-	result := e.runWithCallback(ctx, message, history, onStep)
-	// 指标：记录请求结果（覆盖所有 return 路径）
-	if result == nil {
-		agentMetrics.recordRequest(false, "agent returned nil result")
-	} else {
-		agentMetrics.recordRequest(result.Error == nil, errMsgOf(result.Error))
-	}
-	return result
+	return e.RunWithRoleCallback(ctx, RoleSupervisor, message, history, onStep)
 }
 
 // errMsgOf 安全提取错误信息。
@@ -206,8 +216,8 @@ func logPrefix(ctx context.Context) string {
 	return "[" + strings.Join(attrs, " ") + "]"
 }
 
-// runWithCallback 是 RunWithCallback 的实现（defer 指标在包装层处理）。
-func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
+// runWithCallbackRole 是 RunWithRoleCallback 的实现（defer 指标在包装层处理）。
+func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
 	// 缓存检查：相同问题直接返回缓存结果
 	if e.cache != nil {
 		if cached := e.cache.Get(ctx, message); cached != nil {
@@ -216,8 +226,8 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 		}
 	}
 
-	// 构建初始消息
-	systemPrompt := loadPlanningPrompt()
+	// 构建初始消息：角色提示词（supervisor/空 → 通用助手提示词）
+	systemPrompt := roleSystemPrompt(role)
 
 	// 知识库检索：查找类似问题的历史诊断经验
 	if e.knowledge != nil {
@@ -252,24 +262,19 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 			fb.WriteString("\n请遵循以上用户反馈的偏好和纠错意见。")
 			systemPrompt += fb.String()
 		}
-		// SOP/Skill 检索：查找匹配用户意图的操作手册
+		// SOP/Skill：只列出可用 skill 名，不注入全文。
+		// 修复：全量注入 26 个 skill 的内容（每个截 500 字 ≈ 13000 字）会把
+		// system prompt 塞爆、淹没用户指令，是 agent "变笨"的主因之一。
 		if e.skills != nil {
 			if skillSummaries, err := e.skills.ListSkillsByAction(ctx, ""); err == nil && len(skillSummaries) > 0 {
 				var sb strings.Builder
-				sb.WriteString("\n\n## 可用的运维操作手册（SOP）\n")
+				sb.WriteString("\n\n可参考的运维手册（SOP）：")
+				slugs := make([]string, 0, len(skillSummaries))
 				for _, s := range skillSummaries {
-					sb.WriteString(fmt.Sprintf("\n### %s\n", s.Slug))
-					if s.Content != "" {
-						// 截取前 500 字避免 prompt 过长
-						content := s.Content
-						if len(content) > 500 {
-							content = content[:500] + "..."
-						}
-						sb.WriteString(content)
-						sb.WriteString("\n")
-					}
+					slugs = append(slugs, s.Slug)
 				}
-				sb.WriteString("\n如果用户请求匹配某个 SOP 的场景，按照 SOP 的步骤执行。")
+				sb.WriteString(strings.Join(slugs, "、"))
+				sb.WriteString("。如请求匹配某手册场景，遵循其要点执行；否则不要罗列手册内容。")
 				systemPrompt += sb.String()
 			}
 		}
@@ -294,8 +299,11 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 	lastStep := 0
 	seen := map[string]bool{} // 去重：同一工具+参数不重复调用
 
-	// 预过滤工具：根据用户消息选择最相关的工具子集，减少 LLM 选择困难
-	relevantTools := e.filterRelevantTools(message)
+	// 意图规划：先让 LLM 判断用户意图（知识型 / 工具型+涉及域），按意图裁剪
+	// 工具集。不用"域名+分隔符"这类用户不知道的规则——意图由 LLM 语义理解，
+	// 用户怎么问都行。知识型 → 空工具集，LLM 直接回答；工具型 → 只给该域工具。
+	intent := e.planIntent(ctx, message)
+	allTools := e.toolsForDomain(intent.Domain)
 
 	for step := 0; step < e.maxSteps; step++ {
 		lastStep = step
@@ -313,7 +321,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 		}
 
 		// 调 LLM（带 tools 参数）
-		toolInfos := e.toolInfosFiltered(relevantTools)
+		toolInfos := e.toolInfosFiltered(allTools)
 		logWithCtx(ctx, "[agent] calling LLM with %d tools: %v", len(toolInfos), toolNames(toolInfos))
 		e.acquireLLM()
 		resp, err := e.chat.Generate(ctx, messages,
@@ -483,7 +491,7 @@ func (e *AgentExecutor) runWithCallback(ctx context.Context, message string, his
 	}
 
 	// 无工具调用或分析失败 → 让执行层 LLM 总结
-	toolInfos := e.toolInfosFiltered(relevantTools)
+	toolInfos := e.toolInfosFiltered(allTools)
 	e.acquireLLM()
 	resp, err := e.chat.Generate(ctx, messages, model.WithTools(toolInfos))
 	e.releaseLLM()
@@ -523,18 +531,26 @@ func (e *AgentExecutor) saveKnowledgeWithReasoning(ctx context.Context, message 
 		// 保存结构化摘要
 		var toolsCalled []string
 		var keyFacts []string
+		anyFailed := false
 		for _, tc := range toolCalls {
 			toolsCalled = append(toolsCalled, tc.Tool)
 			if tc.Error != "" {
+				anyFailed = true
 				keyFacts = append(keyFacts, tc.Tool+" failed")
 			} else if summary, ok := tc.Output["summary"].(string); ok && summary != "" {
 				keyFacts = append(keyFacts, summary)
 			}
 		}
+		// 结论如实标记成败：全部成功 → success，任一失败 → failed，避免把
+		// 失败操作包装成"成功经验"注入后续 planner prompt。
+		outcome := "success"
+		if anyFailed {
+			outcome = "failed"
+		}
 		_ = e.knowledge.SaveConversationSummary(ctx, message, ConversationSummary{
 			Intent:   message,
 			Tools:    toolsCalled,
-			Outcome:  "success",
+			Outcome:  outcome,
 			KeyFacts: keyFacts,
 		})
 	}()
@@ -573,6 +589,12 @@ func (e *AgentExecutor) analyze(ctx context.Context, userMessage string, toolCal
 			summary := compressToolOutput(tc.Output)
 			if summary == "(无结果)" || summary == "" {
 				emptyCount++
+			} else if strings.Contains(strings.ToLower(summary), "error") ||
+				strings.Contains(strings.ToLower(summary), "failed") ||
+				strings.Contains(strings.ToLower(summary), "不可用") {
+				// 工具返回内容含 error/failed/不可用：如 K8s 未配置、探活失败等，
+				// 归入失败而非成功，避免把错误响应统计成"成功获取数据"。
+				failedCount++
 			} else {
 				successCount++
 			}
@@ -705,39 +727,100 @@ func (e *AgentExecutor) toolInfosFiltered(filtered []tool.BaseTool) []*schema.To
 	return infos
 }
 
-// filterRelevantTools 根据用户消息选择最相关的工具子集。
-// 策略：关键词匹配 + 通用工具（http.probe 始终保留）。
-func (e *AgentExecutor) filterRelevantTools(message string) []tool.BaseTool {
-	text := strings.ToLower(message)
-	relevant := []tool.BaseTool{}
+// intentPlan 是意图规划的输出：LLM 判断用户这次请求要工具还是直接回答。
+type intentPlan struct {
+	// Intent: "tool_call" | "knowledge"
+	Intent string `json:"intent"`
+	// Domain：tool_call 时涉及的工具域（如 kafka/minio），knowledge 时为 ""。
+	Domain string `json:"domain"`
+}
+
+// planIntent 让 LLM 判断用户意图（知识型 / 工具型+涉及域）。
+// 意图由 LLM 语义理解，用户怎么问都行——不依赖"域名+分隔符"这类用户不知道的
+// 规则。知识型（要命令/步骤/方法）→ Intent=knowledge，agent 不拿工具直接回答；
+// 工具型（查实时状态）→ Intent=tool_call + Domain，只给该域工具。
+//
+// 调用失败/解析失败时回退 Intent=tool_call、Domain=""（工具集为空，LLM 直接
+// 回答），保证知识型请求不被误伤、工具型请求也不会拿到无关工具乱用。
+func (e *AgentExecutor) planIntent(ctx context.Context, message string) intentPlan {
+	if e.chat == nil {
+		return intentPlan{Intent: "tool_call"}
+	}
+	const prompt = `判断用户请求的意图，只返回 JSON（不要 markdown 代码块）：
+{
+  "intent": "tool_call" | "knowledge",
+  "domain": "字符串或 null",
+  "explanation": "一句话判断依据"
+}
+
+判断标准：
+- tool_call：用户想查询/诊断某个系统的实时状态或数据，需要调用监控工具获取数据。domain 填涉及的中间件域（如 kafka、minio、glusterfs、redis）。
+- knowledge：用户想要命令清单、操作步骤、查询方法、排障思路等知识型回答，不需要调用工具。domain 填 null。
+- 判断不出来时优先 tool_call。
+
+用户消息：%s`
+
+	messages := []*schema.Message{
+		schema.SystemMessage("你是意图分类器，只返回 JSON。"),
+		schema.UserMessage(fmt.Sprintf(prompt, message)),
+	}
+	e.acquireLLM()
+	resp, err := e.chat.Generate(ctx, messages)
+	e.releaseLLM()
+	if err != nil {
+		logWithCtx(ctx, "[agent] intent planning failed: %v", err)
+		return intentPlan{Intent: "tool_call"}
+	}
+	var plan intentPlan
+	if err := json.Unmarshal([]byte(extractJSONBody(resp.Content)), &plan); err != nil {
+		logWithCtx(ctx, "[agent] intent planning parse failed, raw=%s", resp.Content)
+		return intentPlan{Intent: "tool_call"}
+	}
+	if plan.Intent != "knowledge" {
+		plan.Intent = "tool_call"
+	}
+	plan.Domain = strings.TrimSpace(plan.Domain)
+	logWithCtx(ctx, "[agent] intent: %s domain=%q", plan.Intent, plan.Domain)
+	return plan
+}
+
+// toolsForDomain 按意图规划的域裁剪工具集：只给该域已注册的能力工具。
+// 知识型（Domain 为空）→ 空工具集，LLM 只能直接文字回答；未注册域 → 空（LLM
+// 拿不到工具也直接回答）。http.probe 不进入 agent 工具集——探活由独立的健康
+// 检查器承担，agent 专注已发布能力工具，避免通用工具被 LLM 滥用。
+func (e *AgentExecutor) toolsForDomain(domain string) []tool.BaseTool {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return nil
+	}
+	out := make([]tool.BaseTool, 0, len(e.tools))
 	for _, t := range e.tools {
 		info, _ := t.Info(context.Background())
 		if info == nil {
 			continue
 		}
-		// http.probe 始终保留（通用工具）
-		if info.Name == tools.HTTPProbe {
-			relevant = append(relevant, t)
-			continue
-		}
-		// 关键词匹配：工具名或 domain 出现在消息中
-		if strings.Contains(text, info.Name) {
-			relevant = append(relevant, t)
-			continue
-		}
-		// domain 匹配
-		for _, word := range strings.Fields(text) {
-			if strings.Contains(info.Name, word) {
-				relevant = append(relevant, t)
-				break
-			}
+		if strings.HasPrefix(info.Name, domain+".") {
+			out = append(out, t)
 		}
 	}
-	// 如果没有匹配到任何工具，返回全部
-	if len(relevant) == 0 {
-		return e.tools
+	return out
+}
+
+// extractJSONBody 从 LLM 输出中提取 JSON：剥离可能的 ```json ... ``` 代码块包裹
+// 和首尾空白。输出不是 JSON 时原样返回（由调用方解析失败后回退）。
+func extractJSONBody(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if start := strings.Index(raw, "```"); start >= 0 {
+		raw = raw[start+3:]
+		if idx := strings.Index(raw, "```"); idx >= 0 {
+			raw = raw[:idx]
+		}
+		// 去掉可能的 "json" 语言标记行
+		raw = strings.TrimSpace(raw)
+		raw = strings.TrimPrefix(raw, "json")
+		raw = strings.TrimSpace(raw)
 	}
-	return relevant
+	return strings.TrimSpace(raw)
 }
 
 // toolNames 返回工具名列表（日志用）。
@@ -767,5 +850,9 @@ func loadPlanningPrompt() string {
 重要规则：
 - 用户的每个问题都必须先调用工具获取数据，不要凭空回答
 - 不要编造工具返回的数据
-- 工具返回错误时，如实告知用户`
+- 工具返回错误时，如实告知用户
+
+工具使用边界：
+- 只调用与用户请求相关的已注册工具（系统已按请求涉及的域裁剪好工具集，不在其中的工具不可用）。
+- 当用户请求的是"命令清单 / 操作步骤 / 查询方法 / 排障思路"这类**知识型问题**，且没有匹配的监控工具时：**直接以中文 Markdown 给出完整的命令清单或操作指南**（如集群工具、查询命令、配置项），不要编造探测结果，也不要只说"已整理"却省略内容。`
 }

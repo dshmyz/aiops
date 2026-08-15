@@ -3,6 +3,7 @@ package alert
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"sync"
 
@@ -66,6 +67,53 @@ func (r *AlertActionRegistry) List() []AlertAction {
 	out := make([]AlertAction, len(r.actions))
 	copy(out, r.actions)
 	return out
+}
+
+// Upsert 保存（新增/更新）一条规则并热重载，让管理后台的"新建/编辑规则"
+// 真实落库并立即生效（修复前 POST 是 TODO，只返回假成功）。
+func (r *AlertActionRegistry) Upsert(ctx context.Context, action AlertAction) error {
+	if r.store == nil {
+		return errors.New("alert action store not configured")
+	}
+	rec, err := serializeRule(action)
+	if err != nil {
+		return err
+	}
+	if err := r.store.Upsert(ctx, rec); err != nil {
+		return err
+	}
+	return r.Reload(ctx)
+}
+
+// Delete 删除一条规则并热重载。
+func (r *AlertActionRegistry) Delete(ctx context.Context, name string) error {
+	if r.store == nil {
+		return errors.New("alert action store not configured")
+	}
+	if err := r.store.Delete(ctx, name); err != nil {
+		return err
+	}
+	return r.Reload(ctx)
+}
+
+// serializeRule 把 AlertAction 序列化为 DB 记录（deserializeRule 的反向）。
+func serializeRule(action AlertAction) (store.AlertActionRuleRecord, error) {
+	alertMatch, err := json.Marshal(action.AlertMatch)
+	if err != nil {
+		return store.AlertActionRuleRecord{}, err
+	}
+	toolSequence, err := json.Marshal(action.ToolSequence)
+	if err != nil {
+		return store.AlertActionRuleRecord{}, err
+	}
+	return store.AlertActionRuleRecord{
+		Name:            action.Name,
+		AlertMatch:      alertMatch,
+		ToolSequence:    toolSequence,
+		ExecuteLastStep: action.ExecuteLastStep,
+		Description:     action.Description,
+		Enabled:         true,
+	}, nil
 }
 
 // deserializeRule 把 DB 记录反序列化为 AlertAction。

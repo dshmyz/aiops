@@ -266,6 +266,7 @@ func TestManagerTestExecutesReadCapabilityAndReturnsNormalizedResult(t *testing.
 
 func TestManagerImportOpenAPIFromURLWritesDiscoveredDrafts(t *testing.T) {
 	t.Parallel()
+	ensureImporterTestDomains(t)
 	specServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v3/api-docs" {
 			t.Fatalf("path = %q, want OpenAPI endpoint", request.URL.Path)
@@ -324,6 +325,7 @@ func TestManagerImportOpenAPIFromURLRejectsUnsupportedURL(t *testing.T) {
 
 func TestManagerPreviewOpenAPIFromURLDoesNotWriteDrafts(t *testing.T) {
 	t.Parallel()
+	ensureImporterTestDomains(t)
 	dir := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		_, _ = writer.Write([]byte(`openapi: 3.0.0

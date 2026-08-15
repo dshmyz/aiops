@@ -4,7 +4,25 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
+
+// TestMain 注册 importer 用例依赖的测试域。域清单派生自工具注册表，
+// 不再硬编码，因此从 OpenAPI 推断 minio 域前需先注册该域。
+func TestMain(m *testing.M) {
+	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
+		Tool: tools.Tool{Name: "minio.importer.test.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
+		InputSchema: map[string]tools.DynamicInputField{
+			"environment": {Type: "string", Required: true},
+		},
+	}}); err != nil {
+		panic("register importer test domain: " + err.Error())
+	}
+	code := m.Run()
+	tools.ResetDynamicToolsForTest()
+	os.Exit(code)
+}
 
 func TestRunImportsOpenAPIFile(t *testing.T) {
 	t.Parallel()

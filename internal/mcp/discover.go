@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
@@ -54,26 +55,38 @@ var supportedPropertyTypes = map[string]bool{
 //   - 输入 schema 按 supportedPropertyTypes 过滤，丢弃不支持类型的字段。
 //   - 若 MCP 工具 schema 不含 environment 字段，自动注入 required string
 //     environment，满足 tools.RegisterDynamicTools 的强制要求，并保持项目
-//     多环境隔离的一致性。
+//    多环境隔离的一致性。
 //
-// 任一服务器连接失败会立即返回错误，避免部分加载导致工具表不一致。
+// 部分成功语义：单台服务器连接失败（或某工具转换失败）时跳过该服务器并
+// 记录日志，其余健康服务器照常注册——一台坏服务器不拖垮全部工具（修复前
+// 全有或全无，坏一台导致所有 MCP 工具不可用且静默）。仅当所有服务器都失败
+// 时才返回聚合错误。
 func Discover(ctx context.Context, lister ToolLister, configs []MCPServerConfig) ([]tools.DynamicToolDefinition, error) {
 	if lister == nil {
 		return nil, fmt.Errorf("mcp discover: lister is nil")
 	}
 	var defs []tools.DynamicToolDefinition
+	var failures []string
 	for _, config := range configs {
 		mcpTools, err := lister.List(ctx, config)
 		if err != nil {
-			return nil, fmt.Errorf("mcp discover server %q: %w", config.Name, err)
+			failures = append(failures, fmt.Sprintf("server %q: %v", config.Name, err))
+			continue
 		}
 		for _, mt := range mcpTools {
 			def, err := convertMCPTool(config.Name, mt)
 			if err != nil {
-				return nil, fmt.Errorf("mcp convert tool %q.%q: %w", config.Name, mt.Name, err)
+				log.Printf("mcp discover: skip tool %q.%q: %v", config.Name, mt.Name, err)
+				continue
 			}
 			defs = append(defs, def)
 		}
+	}
+	if len(defs) == 0 && len(failures) > 0 {
+		return nil, fmt.Errorf("mcp discover: all servers failed: %s", strings.Join(failures, "; "))
+	}
+	if len(failures) > 0 {
+		log.Printf("mcp discover: %d server(s) skipped, %d tool(s) loaded; skipped: %s", len(failures), len(defs), strings.Join(failures, "; "))
 	}
 	return defs, nil
 }

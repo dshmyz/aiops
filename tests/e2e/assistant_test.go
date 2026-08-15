@@ -63,11 +63,11 @@ func TestAssistantReturnsMiddlewareDiagnosticPackage(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Type != "answer" || body.Tool != tools.GlusterVolumeHealthRead || body.Diagnostic.Environment != "prod" || len(body.Diagnostic.Observations) == 0 {
+	if body.Type != "answer" || body.Tool != "glusterfs.volume.health.read" || body.Diagnostic.Environment != "prod" || len(body.Diagnostic.Observations) == 0 {
 		t.Fatalf("body = %+v, want answer response with diagnostic package", body)
 	}
 	var auditCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM copilot_audit_events WHERE request_id = ? AND tool_name = ? AND action = 'readonly_tool_executed' AND decision = 'permitted'`, "assistant-diagnostic-e2e-request", tools.GlusterVolumeHealthRead).Scan(&auditCount); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM copilot_audit_events WHERE request_id = ? AND tool_name = ? AND action = 'readonly_tool_executed' AND decision = 'permitted'`, "assistant-diagnostic-e2e-request", "glusterfs.volume.health.read").Scan(&auditCount); err != nil {
 		t.Fatalf("count diagnostic audit events: %v", err)
 	}
 	if auditCount != 1 {
@@ -225,7 +225,7 @@ func ensureMiddlewareTools(t *testing.T) {
 	t.Helper()
 	e2eEnsureMiddlewareToolsMu.Lock()
 	defer e2eEnsureMiddlewareToolsMu.Unlock()
-	if _, ok := tools.Lookup(tools.TopicRetentionSet); !ok {
+	if _, ok := tools.Lookup("topic.retention.set"); !ok {
 		if err := tools.RegisterDynamicTools(e2eMiddlewareDefinitions()); err != nil {
 			t.Fatalf("register middleware tools: %v", err)
 		}
@@ -233,31 +233,31 @@ func ensureMiddlewareTools(t *testing.T) {
 	// Role permissions are additive/idempotent; re-inject on every call so a
 	// policy-level reset elsewhere cannot leave the middleware tools unroutable.
 	policy.RegisterDynamicRolePermissions(map[string][]string{
-		tools.GlusterVolumeHealthRead: {"viewer", "operator", "admin"},
-		tools.MinIOBucketHealthRead:   {"viewer", "operator", "admin"},
-		tools.KafkaConsumerLagRead:    {"viewer", "operator", "admin"},
-		tools.TopicRetentionSet:       {"operator", "admin"},
+		"glusterfs.volume.health.read": {"viewer", "operator", "admin"},
+		"minio.bucket.health.read":   {"viewer", "operator", "admin"},
+		"kafka.consumer_lag.read":    {"viewer", "operator", "admin"},
+		"topic.retention.set":       {"operator", "admin"},
 	})
 }
 
 func e2eMiddlewareDefinitions() []tools.DynamicToolDefinition {
 	return []tools.DynamicToolDefinition{
 		{
-			Tool: tools.Tool{Name: tools.GlusterVolumeHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
+			Tool: tools.Tool{Name: "glusterfs.volume.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]tools.DynamicInputField{
 				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
-			Tool: tools.Tool{Name: tools.MinIOBucketHealthRead, Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
+			Tool: tools.Tool{Name: "minio.bucket.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]tools.DynamicInputField{
 				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
-			Tool: tools.Tool{Name: tools.KafkaConsumerLagRead, Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
+			Tool: tools.Tool{Name: "kafka.consumer_lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
 				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
@@ -265,7 +265,7 @@ func e2eMiddlewareDefinitions() []tools.DynamicToolDefinition {
 		},
 		{
 			Tool: tools.Tool{
-				Name:                tools.TopicRetentionSet,
+				Name:                "topic.retention.set",
 				Operation:           tools.Write,
 				Risk:                tools.Medium,
 				RollbackDescription: "reset_to_previous",

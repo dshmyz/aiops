@@ -287,14 +287,15 @@ func executeTaskBody(ctx context.Context, reads *execution.ReadOnlyService, runb
 	return executeWithRecover(ctx, reads, task)
 }
 
-// executeWithRecover 调用 ExecuteTrustedRead 并 recover panic，避免调度器崩溃。
+// executeWithRecover 调用 ExecuteTrustedReadAs 并 recover panic，避免调度器崩溃。
+// 以任务配置者的身份执行并做 read 级审计，让可信读可归因、可追溯。
 func executeWithRecover(ctx context.Context, reads *execution.ReadOnlyService, task store.ScheduledTask) (result map[string]any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("scheduler: capability %q panicked: %v", task.CapabilityName, r)
 		}
 	}()
-	result, err = reads.ExecuteTrustedRead(ctx, task.CapabilityName, task.Input)
+	result, err = reads.ExecuteTrustedReadAs(ctx, scheduledAdminIdentity(task), task.CapabilityName, task.Input)
 	return
 }
 
@@ -325,6 +326,7 @@ func recordAudit(ctx context.Context, auditService *audit.Service, eventID strin
 }
 
 // summarizeResult 从执行结果生成简短摘要，用于 run 记录的 result_summary 字段。
+// 无 status 字段时返回 "-" 而非 "ok"：给未知状态盖章 ok 会掩盖结果实际内容。
 func summarizeResult(result map[string]any) string {
 	if result == nil {
 		return ""
@@ -332,5 +334,8 @@ func summarizeResult(result map[string]any) string {
 	if status, ok := result["status"].(string); ok && status != "" {
 		return status
 	}
-	return "ok"
+	if summary, ok := result["summary"].(string); ok && summary != "" {
+		return summary
+	}
+	return "-"
 }

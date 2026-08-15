@@ -14,6 +14,7 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
+	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 // LLMDiagnoser 用大模型做告警智能研判。
@@ -50,14 +51,13 @@ func (d *LLMDiagnoser) WithAudit(auditSvc *audit.Service, modelName string) *LLM
 
 // --- Prompt 1: 诊断计划 ---
 
-const llmDiagnosisPlanPrompt = `你是中间件运维的告警研判助手。分析以下告警，决定需要执行哪些诊断检查。
+// buildDiagnosisPlanPrompt 构造诊断计划提示词。可用领域清单派生自工具注册表，
+// 不再硬编码具体中间件（kafka/minio/glusterfs/moonlightbox 等测试域）。
+func buildDiagnosisPlanPrompt(title, desc, severity, env, labels, resourceType, resourceName, firedAt string, maxSteps int) string {
+	return fmt.Sprintf(`你是中间件运维的告警研判助手。分析以下告警，决定需要执行哪些诊断检查。
 
 ## 可用的诊断领域
-- kafka：消息队列（消费者组积压、Topic 健康）
-- minio：对象存储（桶健康、存储容量）
-- glusterfs：分布式文件系统（卷健康、容量）
-- moonlightbox：制品仓库管理（仓库健康状态、缓存命中率、安全漏洞、下载统计）
-
+%s
 ## 告警信息
 标题: %s
 描述: %s
@@ -72,7 +72,7 @@ const llmDiagnosisPlanPrompt = `你是中间件运维的告警研判助手。分
 {
   "diagnostic_steps": [
     {
-      "domain": "kafka|minio|glusterfs",
+      "domain": "%s",
       "runbook": "health|capacity|consumer_lag（可选，默认 health）",
       "reason": "为什么需要检查这个领域"
     }
@@ -84,8 +84,33 @@ const llmDiagnosisPlanPrompt = `你是中间件运维的告警研判助手。分
 规则：
 - 最多 %d 个诊断步骤
 - 只选择告警相关的领域，不要盲目全查
-- 从告警标题/标签中识别涉及的中间件类型
-- moonlightbox 相关告警（制品、仓库、npm/maven/pypi、缓存、安全扫描）优先查 moonlightbox 领域`
+- 从告警标题/标签中识别涉及的中间件类型`,
+		diagnosisDomainList(),
+		title, desc, severity, env, labels, resourceType, resourceName, firedAt,
+		diagnosisDomainEnum(),
+		maxSteps,
+	)
+}
+
+// diagnosisDomainList 生成提示中的可用领域描述清单。
+func diagnosisDomainList() string {
+	var b strings.Builder
+	for _, domain := range tools.KnownDomains() {
+		b.WriteString("- ")
+		b.WriteString(domain)
+		b.WriteString("：系统已注册能力对应的运维领域\n")
+	}
+	return b.String()
+}
+
+// diagnosisDomainEnum 生成输出 JSON 中 domain 字段的枚举值。
+func diagnosisDomainEnum() string {
+	domains := tools.KnownDomains()
+	if len(domains) == 0 {
+		return "string"
+	}
+	return strings.Join(domains, "|")
+}
 
 // diagnosisPlan 是 LLM 第一阶段的输出。
 type diagnosisPlan struct {
@@ -217,10 +242,10 @@ func (d *LLMDiagnoser) Diagnose(ctx context.Context, alert Alert) {
 
 // planDiagnosis 调 LLM 生成诊断计划。
 func (d *LLMDiagnoser) planDiagnosis(ctx context.Context, alert Alert) (diagnosisPlan, error) {
-	userMsg := fmt.Sprintf(llmDiagnosisPlanPrompt,
+	userMsg := buildDiagnosisPlanPrompt(
 		alert.Title,
 		alert.Description,
-		alert.Severity,
+		string(alert.Severity),
 		alert.Environment,
 		formatLabels(alert.Labels),
 		alert.ResourceType,

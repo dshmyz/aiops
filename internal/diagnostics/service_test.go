@@ -10,7 +10,6 @@ import (
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
-	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 func TestServiceRunsGlusterReadToolIntoDiagnosticPackage(t *testing.T) {
@@ -24,8 +23,8 @@ func TestServiceRunsGlusterReadToolIntoDiagnosticPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned %v", err)
 	}
-	if reads.toolName != tools.GlusterVolumeHealthRead {
-		t.Fatalf("tool = %q, want %q", reads.toolName, tools.GlusterVolumeHealthRead)
+	if reads.toolName != "glusterfs.volume.health.read" {
+		t.Fatalf("tool = %q, want %q", reads.toolName, "glusterfs.volume.health.read")
 	}
 	if pkg.ID == "" || pkg.Environment != "prod" || len(pkg.Resources) != 1 || len(pkg.Observations) != 1 || len(pkg.Findings) != 1 || len(pkg.Recommendations) != 1 {
 		t.Fatalf("package = %+v, want populated diagnostic", pkg)
@@ -38,17 +37,54 @@ func TestServiceRunsGlusterReadToolIntoDiagnosticPackage(t *testing.T) {
 	}
 }
 
-func TestServiceRejectsUnknownDomain(t *testing.T) {
+func TestServiceReturnsGenericFrameworkForUnknownDomain(t *testing.T) {
 	t.Parallel()
 	reads := &fakeReads{}
-	service := diagnostics.NewService(reads, nil)
+	service := diagnostics.NewService(reads, diagnostics.ClockFunc(func() time.Time {
+		return time.Date(2026, time.July, 22, 9, 0, 0, 0, time.UTC)
+	}))
 
-	_, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "shell", Environment: "prod", ResourceName: "root"})
-	if !errors.Is(err, diagnostics.ErrUnsupportedDomain) {
-		t.Fatalf("error = %v, want unsupported domain", err)
+	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "shell", Environment: "prod", ResourceName: "root", Runbook: "health"})
+	if err != nil {
+		t.Fatalf("Run returned %v, want graceful generic framework", err)
 	}
+	// 优雅降级：未注册域返回框架包（200 语义），不调用 reads，不带真实数据。
 	if reads.calls != 0 {
-		t.Fatalf("read calls = %d, want 0", reads.calls)
+		t.Fatalf("read calls = %d, want 0 for unregistered domain", reads.calls)
+	}
+	if len(pkg.Observations) != 1 || len(pkg.Findings) != 1 || len(pkg.Recommendations) != 1 {
+		t.Fatalf("package = %+v, want generic framework package", pkg)
+	}
+	if framework, _ := pkg.Observations[0].Data["framework"].(bool); !framework {
+		t.Fatalf("observation data = %v, want framework=true marker", pkg.Observations[0].Data)
+	}
+	if len(pkg.Observations[0].Data["checkpoints"].([]string)) == 0 {
+		t.Fatalf("generic framework should carry SOP checkpoints, got %v", pkg.Observations[0].Data)
+	}
+	if pkg.Recommendations[0].Actionable || pkg.Recommendations[0].ToolName != "" {
+		t.Fatalf("generic recommendation should not be actionable, got %+v", pkg.Recommendations[0])
+	}
+	if err := diagnostics.ValidatePackage(pkg); err != nil {
+		t.Fatalf("invalid package: %v", err)
+	}
+}
+
+func TestServiceGenericFrameworkPerRunbook(t *testing.T) {
+	t.Parallel()
+	for _, rb := range []string{"health", "capacity", "consumer_lag"} {
+		reads := &fakeReads{}
+		service := diagnostics.NewService(reads, nil)
+		pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "redis", Environment: "prod", ResourceName: "cache", Runbook: rb})
+		if err != nil {
+			t.Fatalf("Run(runbook=%s) = %v, want generic framework", rb, err)
+		}
+		if len(pkg.Observations) != 1 {
+			t.Fatalf("runbook=%s observations = %d, want 1", rb, len(pkg.Observations))
+		}
+		kind := pkg.Observations[0].Kind
+		if kind != "generic."+rb {
+			t.Errorf("runbook=%s observation kind = %q, want %q", rb, kind, "generic."+rb)
+		}
 	}
 }
 
@@ -293,8 +329,8 @@ func TestServiceFallsBackToSwitchWhenResolverMisses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned %v", err)
 	}
-	if reads.toolName != tools.KafkaConsumerLagRead {
-		t.Fatalf("tool = %q, want %q (hardcoded switch fallback)", reads.toolName, tools.KafkaConsumerLagRead)
+	if reads.toolName != "kafka.consumer_group.lag.read" {
+		t.Fatalf("tool = %q, want %q (registry-derived fallback)", reads.toolName, "kafka.consumer_group.lag.read")
 	}
 	if err := diagnostics.ValidatePackage(pkg); err != nil {
 		t.Fatalf("invalid package: %v", err)
@@ -349,8 +385,9 @@ func TestServiceFillsRecommendationToolNameForKafkaCritical(t *testing.T) {
 		t.Fatalf("expected 1 recommendation, got %d", len(pkg.Recommendations))
 	}
 	rec := pkg.Recommendations[0]
-	if rec.ToolName != tools.TopicRetentionSet {
-		t.Fatalf("toolName = %q, want %q", rec.ToolName, tools.TopicRetentionSet)
+	// 修复工具派生自注册表：kafka 域注册的写工具。
+	if rec.ToolName != "topic.retention.set" {
+		t.Fatalf("toolName = %q, want %q", rec.ToolName, "topic.retention.set")
 	}
 	if !rec.Actionable {
 		t.Fatal("expected actionable recommendation")
@@ -361,18 +398,15 @@ func TestServiceFillsRecommendationToolNameForKafkaCritical(t *testing.T) {
 	if rec.CandidateInput["topic"] != "orders-consumer" {
 		t.Fatalf("candidate input topic = %#v, want orders-consumer", rec.CandidateInput["topic"])
 	}
-	if rec.CandidateInput["retention_hours"] != 24 {
-		t.Fatalf("candidate input retention_hours = %#v, want 24", rec.CandidateInput["retention_hours"])
-	}
 	if !pkg.HasActionableRecommendations() {
 		t.Fatal("expected package to have actionable recommendations")
 	}
 	planTool, planInput, actionable := rec.ToPlanInput()
-	if !actionable || planTool != tools.TopicRetentionSet {
-		t.Fatalf("ToPlanInput = %q, actionable=%v, want %q, true", planTool, actionable, tools.TopicRetentionSet)
+	if !actionable || planTool != "topic.retention.set" {
+		t.Fatalf("ToPlanInput = %q, actionable=%v, want %q, true", planTool, actionable, "topic.retention.set")
 	}
-	if planInput["retention_hours"] != 24 {
-		t.Fatalf("plan input retention_hours = %#v, want 24", planInput["retention_hours"])
+	if planInput["topic"] != "orders-consumer" {
+		t.Fatalf("plan input topic = %#v, want orders-consumer", planInput["topic"])
 	}
 }
 
@@ -390,11 +424,11 @@ func TestServiceFillsRecommendationToolNameForKafkaWarning(t *testing.T) {
 		t.Fatalf("Run returned %v", err)
 	}
 	rec := pkg.Recommendations[0]
-	if rec.ToolName != tools.TopicRetentionSet {
-		t.Fatalf("toolName = %q, want %q", rec.ToolName, tools.TopicRetentionSet)
+	if rec.ToolName != "topic.retention.set" {
+		t.Fatalf("toolName = %q, want %q", rec.ToolName, "topic.retention.set")
 	}
-	if rec.CandidateInput["retention_hours"] != 48 {
-		t.Fatalf("retention_hours = %#v, want 48 for warning severity", rec.CandidateInput["retention_hours"])
+	if rec.CandidateInput["topic"] != "events-consumer" {
+		t.Fatalf("candidate input topic = %#v, want events-consumer", rec.CandidateInput["topic"])
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
+	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 // StepResult 是链式执行中单步的结果。
@@ -16,6 +17,9 @@ type StepResult struct {
 	Tool   string
 	Result map[string]any
 	Err    error
+	// Degraded 标记该步是降级结果（如域未接入返回通用检查框架），
+	// 不是真实数据；摘要中应如实体现。
+	Degraded bool
 }
 
 // ChainDiagnoser 从 AlertAction 的 ToolSequence 驱动多步执行。
@@ -124,11 +128,18 @@ func (d *ChainDiagnoser) executeStep(ctx context.Context, user identity.CurrentU
 			Environment: inputStr(input, "environment"),
 		})
 		if err == nil && len(pkg.Observations) > 0 {
-			return StepResult{Tool: toolName, Result: map[string]any{
-				"summary":     pkg.Observations[0].Summary,
-				"findings":    len(pkg.Findings),
-				"recs":        len(pkg.Recommendations),
+			// 域未接入能力时 diagnostics 返回"通用检查框架"包（framework=true），
+			// 不是实测数据。把它标为 degraded，而不是当成一次成功诊断步骤。
+			framework, _ := pkg.Observations[0].Data["framework"].(bool)
+			step := StepResult{Tool: toolName, Result: map[string]any{
+				"summary":  pkg.Observations[0].Summary,
+				"findings": len(pkg.Findings),
+				"recs":     len(pkg.Recommendations),
 			}}
+			if framework {
+				step.Degraded = true
+			}
+			return step
 		}
 		// diagnostics 失败或不支持该 domain，回退到直接 ReadRunner
 	}
@@ -142,14 +153,12 @@ func (d *ChainDiagnoser) executeStep(ctx context.Context, user identity.CurrentU
 }
 
 // toolDomain 判断工具名是否属于已知的 domain 诊断工具。
+// 域清单派生自工具注册表：工具名以 "<domain>." 前缀匹配。
 func toolDomain(toolName string) string {
-	switch {
-	case strings.HasPrefix(toolName, "kafka."):
-		return "kafka"
-	case strings.HasPrefix(toolName, "minio."):
-		return "minio"
-	case strings.HasPrefix(toolName, "glusterfs."):
-		return "glusterfs"
+	for _, domain := range tools.KnownDomains() {
+		if strings.HasPrefix(toolName, domain+".") {
+			return domain
+		}
 	}
 	return ""
 }
@@ -175,6 +184,10 @@ func (d *ChainDiagnoser) buildSummary(alert Alert, action AlertAction, results [
 			continue
 		}
 		summary := summarizeResult(r.Result)
+		if r.Degraded {
+			parts = append(parts, fmt.Sprintf("  步骤%d (%s): %s（该域未接入精确诊断，为通用检查框架）", r.Step+1, r.Tool, summary))
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("  步骤%d (%s): %s", r.Step+1, r.Tool, summary))
 	}
 

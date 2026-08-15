@@ -138,17 +138,41 @@ func (s *ReadOnlyService) ExecuteRead(ctx context.Context, user identity.Current
 // ExecuteTrustedRead 直接调用 runner 执行只读 capability，跳过 policy 鉴权。
 // 仅供可信内部调用方（如 scheduler）使用：定时任务由 admin 配置时已完成鉴权，
 // 此处不再重复校验。未注册的 capability 会构造一个最小只读 Tool 描述符传给 runner。
+//
+// 审计身份用系统默认身份（Subject "trusted-read"）；需要可归因到真实配置者时
+// 请用 ExecuteTrustedReadAs 传入身份。
 func (s *ReadOnlyService) ExecuteTrustedRead(ctx context.Context, toolName string, input map[string]any) (map[string]any, error) {
+	return s.ExecuteTrustedReadAs(ctx, identity.CurrentUser{Subject: "trusted-read"}, toolName, input)
+}
+
+// ExecuteTrustedReadAs 与 ExecuteTrustedRead 相同，但以指定身份执行并做 read 级
+// 审计（对齐 ExecuteRead 的审计口径，让可信读也可追溯）。仅供可信内部调用方使用。
+func (s *ReadOnlyService) ExecuteTrustedReadAs(ctx context.Context, user identity.CurrentUser, toolName string, input map[string]any) (map[string]any, error) {
 	if s.runner == nil {
+		_ = s.record(ctx, user, toolName, audit.ActionReadonlyToolFailed, audit.DecisionExecutorMissing, nil)
 		return nil, errors.New("read runner is required")
 	}
 	tool, ok := tools.Lookup(toolName)
 	if !ok {
+		// 未注册 capability：构造最小只读描述符传给 runner（与旧行为一致），
+		// 但审计如实标记 rejected，让"任务显示成功、能力却不存在"可被察觉。
+		_ = s.record(ctx, user, toolName, audit.ActionReadonlyToolRejected, string(policy.ToolNotRegistered), nil)
 		tool = tools.Tool{Name: toolName, Operation: tools.Read, Risk: tools.Low}
 	}
 	readCtx, cancel := s.readCtx(ctx)
 	defer cancel()
-	return s.runner.Read(readCtx, tool, input)
+	result, err := s.runner.Read(readCtx, tool, input)
+	if err != nil {
+		metadata := map[string]any{}
+		if errors.Is(err, context.DeadlineExceeded) {
+			metadata["reason"] = "timeout"
+			metadata["timeout"] = s.timeout.String()
+		}
+		_ = s.record(ctx, user, toolName, audit.ActionReadonlyToolFailed, audit.DecisionExecutionError, metadata)
+		return nil, err
+	}
+	_ = s.record(ctx, user, toolName, audit.ActionReadonlyToolExecuted, audit.DecisionPermitted, map[string]any{"result": "returned_to_caller"})
+	return result, nil
 }
 
 func (s *ReadOnlyService) record(ctx context.Context, user identity.CurrentUser, toolName, action, decision string, metadata map[string]any) error {

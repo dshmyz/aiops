@@ -13,17 +13,14 @@ var builtinSkills = []Skill{
 		Slug:              "middleware-evidence-checklist",
 		Name:              "中间件诊断证据清单",
 		Category:          "中间件排障",
-		Description:       "约束中间件（kafka/minio/glusterfs）诊断时必须输出的证据结构和取证顺序",
+		Description:       "约束中间件诊断时必须输出的证据结构和取证顺序",
 		ApplicableActions: []string{"middleware.diagnose"},
-		ToolDependencies:  []string{"cluster.status.read", "glusterfs.volume.health.read", "minio.bucket.health.read", "kafka.consumer.lag.read"},
+		ToolDependencies:  []string{"cluster.status.read"},
 		Content: `# 中间件诊断证据清单 SOP
 
 ## 取证顺序
 1. 集群整体状态（cluster.status.read）：确认集群是否可达、节点数、健康状态
-2. 域级健康检查（按 domain 选择对应工具）：
-   - glusterfs → volume 健康状态、容量、副本分布
-   - minio → bucket 健康状态、容量、对象数
-   - kafka → consumer_group 延迟、分区状态
+2. 域级健康检查（按已发布能力的 domain 选择对应只读工具）
 3. 交叉验证：如果指标异常，检查是否有近期变更或事件
 
 ## 必须输出
@@ -134,11 +131,11 @@ var builtinSkills = []Skill{
 		Category:          "容量规划",
 		Description:       "约束容量规划时的数据采集、趋势分析和扩容建议输出",
 		ApplicableActions: []string{"capacity.plan"},
-		ToolDependencies:  []string{"cluster.status.read", "glusterfs.volume.health.read", "minio.bucket.health.read"},
+		ToolDependencies:  []string{"cluster.status.read"},
 		Content: `# 容量规划 SOP
 
 ## 数据采集
-1. 当前用量：集群/卷/bucket 的已用容量、对象数、分区数
+1. 当前用量：集群/存储/消息的已用容量、对象数、分区数
 2. 历史趋势：近 7/30 天增长率（如无可估算为近期平均）
 3. 资源上限：物理容量、配额、副本数
 
@@ -237,7 +234,7 @@ var builtinSkills = []Skill{
 		Category:          "自愈",
 		Description:       "约束自愈动作推荐时的证据依据、风险标注和确认流程",
 		ApplicableActions: []string{"self.heal"},
-		ToolDependencies:  []string{"cluster.status.read", "glusterfs.volume.health.read", "minio.bucket.health.read", "kafka.consumer_lag.read"},
+		ToolDependencies:  []string{"cluster.status.read"},
 		Content: `# 自愈推荐指南 SOP
 
 ## 推荐原则
@@ -441,20 +438,20 @@ var builtinSkills = []Skill{
 		Category:          "成本治理",
 		Description:       "约束成本分析时的资源用量采集、闲置识别和优化建议输出",
 		ApplicableActions: []string{"cost.analyze"},
-		ToolDependencies:  []string{"cluster.status.read", "glusterfs.volume.health.read", "minio.bucket.health.read"},
+		ToolDependencies:  []string{"cluster.status.read"},
 		Content: `# 成本分析 SOP
 
 ## 数据采集
-1. 资源清单：集群节点、存储卷、bucket、kafka 集群等资源总量
+1. 资源清单：集群节点、存储卷、bucket、消息队列等资源总量
 2. 用量数据：每个资源的实际使用量（容量、对象数、分区数、CPU/内存）
 3. 利用率：已用/上限比例，识别长期低利用率的资源
 4. 计费口径：如可获取，标注资源对应的成本档位
 
 ## 闲置识别规则
-1. **存储类**（glusterfs volume / minio bucket）：容量利用率 < 20% 且近 30 天无写入
+1. **存储类**（分布式存储 / 对象存储）：容量利用率 < 20% 且近 30 天无写入
 2. **计算类**：节点 CPU/内存平均利用率 < 10%
-3. **消息类**（kafka）：分区长期无消费或消费延迟持续为 0
-4. **空资源**：已创建但无业务使用的 bucket/volume/topic
+3. **消息类**（消息队列）：分区长期无消费或消费延迟持续为 0
+4. **空资源**：已创建但无业务使用的存储卷/对象桶/消息主题
 
 ## 分析步骤
 1. 列出所有资源及其利用率
@@ -560,15 +557,12 @@ var builtinSkills = []Skill{
 		Category:          "巡检",
 		Description:       "约束健康体检时的多维度巡检、健康评分和风险项输出",
 		ApplicableActions: []string{"health.check"},
-		ToolDependencies:  []string{"cluster.status.read", "glusterfs.volume.health.read", "minio.bucket.health.read", "kafka.consumer_lag.read"},
+		ToolDependencies:  []string{"cluster.status.read"},
 		Content: `# 健康体检 SOP
 
 ## 巡检维度
 1. **集群层**：节点数、健康状态、资源水位（CPU/内存/磁盘）
-2. **中间件层**：
-   - glusterfs：volume 健康、容量、副本分布
-   - minio：bucket 健康、容量、对象数
-   - kafka：consumer_group 延迟、分区状态
+2. **中间件层**：按已发布能力的 domain 选择对应健康检查工具
 3. **SLI 层**：核心服务可用性、延迟、错误率（如可采集）
 4. **告警层**：近 24 小时活跃告警数、未恢复告警
 
@@ -584,7 +578,7 @@ var builtinSkills = []Skill{
 1. **容量风险**：剩余 < 20% 或趋势异常
 2. **可用性风险**：SLI 接近 SLO 阈值或 error budget 不足
 3. **延迟风险**：P95/P99 持续走高
-4. **积压风险**：kafka lag 持续增长
+4. **积压风险**：消息队列消费延迟持续增长
 5. **告警积压**：未恢复告警 > 3 或持续 > 1h
 
 ## 必须输出
@@ -609,7 +603,7 @@ var builtinSkills = []Skill{
 		Category:          "性能优化",
 		Description:       "约束性能瓶颈定位时的指标采集、瓶颈判定和优化建议输出（无 trace 时退化为指标维度）",
 		ApplicableActions: []string{"performance.bottleneck"},
-		ToolDependencies:  []string{"cluster.status.read", "glusterfs.volume.health.read", "minio.bucket.health.read", "kafka.consumer_lag.read"},
+		ToolDependencies:  []string{"cluster.status.read"},
 		Content: `# 性能瓶颈定位 SOP
 
 ## 指标采集
@@ -622,9 +616,7 @@ var builtinSkills = []Skill{
    - QPS/吞吐量趋势
    - 延迟：P50/P95/P99 + 趋势
    - 错误率：5xx 占比、超时数
-3. **中间件指标**（按需）：
-   - kafka：消费延迟、生产 TPS
-   - 存储类：容量、IOPS、慢操作
+3. **中间件指标**（按需）：消息消费延迟、存储容量/IOPS、慢操作
 
 ## 瓶颈判定规则
 1. **CPU 瓶颈**：使用率 > 80% 持续 5min，或 throttling > 10%
@@ -632,7 +624,7 @@ var builtinSkills = []Skill{
 3. **磁盘瓶颈**：await > 20ms，或使用率 > 90%
 4. **网络瓶颈**：重传率 > 1%，或带宽打满 > 80%
 5. **接口瓶颈**：P95 同比上涨 > 50%，或错误率 > 1%
-6. **积压瓶颈**：kafka lag 持续增长且消费 TPS 不增
+6. **积压瓶颈**：消息队列消费延迟持续增长且消费吞吐不增
 
 ## 定位流程
 1. **指标对比**：问题时间窗 vs 基线，找出异常维度
@@ -687,6 +679,251 @@ var builtinSkills = []Skill{
 - 不臆测未查询到的告警`,
 		OutputContract: "告警列表（标题+级别+环境+状态+时间）+ 影响面 + 建议",
 		RiskLevel:      "read_only",
+		IsBuiltin:      true,
+		IsEnabled:      true,
+	},
+	{
+		Slug:              "on-call-handover",
+		Name:              "值班交接",
+		Category:          "事件响应",
+		Description:       "值班交接报告模板：当前状态、风险项、未决事项与后续行动",
+		ApplicableActions: []string{"incident.review"},
+		ToolDependencies:  []string{"alert.query", "event.query", "incident.view"},
+		Content: `# 值班交接报告 SOP
+
+## 交接必须覆盖
+1. **当前状态**：集群/服务整体健康、进行中的告警（数量+级别+持续时间）
+2. **风险项**：已知异常、未恢复的告警、近期变更（发布/配置/扩容）
+3. **未决事项**：待跟进的问题、等待确认的动作、卡点与负责人
+4. **后续行动**：下一班次应优先做的事项（按优先级排序）
+
+## 格式
+- 用时间线组织：本班次关键事件（触发/处理/恢复）
+- 每条风险项标注：现象 → 已采取动作 → 残留风险 → 建议
+
+## 安全边界
+- 只读取证，不执行写操作
+- 交接内容只含事实与判断，不含猜测`,
+		OutputContract: "当前状态 + 风险项清单 + 未决事项 + 后续行动",
+		RiskLevel:      "read_only",
+		IsBuiltin:      true,
+		IsEnabled:      true,
+	},
+	{
+		Slug:              "incident-severity-guide",
+		Name:              "故障定级指引",
+		Category:          "事件响应",
+		Description:       "P1-P4 故障定级判定标准与升级路径",
+		ApplicableActions: []string{"alert.root_cause", "incident.review"},
+		ToolDependencies:  []string{"alert.query", "incident.view"},
+		Content: `# 故障定级指引 SOP
+
+## 定级标准（按影响面与影响时长判定）
+- **P1（严重）**：核心服务不可用或数据丢失，影响全部/大部分用户，无规避方案
+- **P2（高）**：主要功能受损，影响部分用户，有临时规避方案
+- **P3（中）**：非核心功能异常或体验受损，影响小范围用户
+- **P4（低）**：轻微问题，无用户可感知影响
+
+## 升级路径
+- P1/P2：立即通知值班负责人，启动应急响应群，10 分钟内拉起处置
+- P3：2 小时内处置，记录复盘
+- P4：进入常规工单队列
+
+## 输出要求
+- 给出定级结论 + 判定依据（影响面/影响时长/规避方案存在性）
+- 给出升级建议（是否升级、升级给谁、升级时限）`,
+		OutputContract: "定级结论 + 判定依据 + 升级路径建议",
+		RiskLevel:      "read_only",
+		IsBuiltin:      true,
+		IsEnabled:      true,
+	},
+	{
+		Slug:              "triage-methodology",
+		Name:              "排障方法论",
+		Category:          "排障方法论",
+		Description:       "结构化排障框架：二分定位、先外围后内核、问题定义优先",
+		ApplicableActions: []string{"middleware.diagnose", "alert.root_cause", "performance.bottleneck"},
+		ToolDependencies:  []string{"cluster.status.read", "alert.query"},
+		Content: `# 结构化排障方法论 SOP
+
+## 第一步：定义问题（不要急于动手）
+- 明确"期望行为 vs 实际行为"的差异
+- 确定影响范围：单机/单域/全局？何时开始？持续多久？
+
+## 第二步：定位（二分 + 先外围后内核）
+1. 先确认基础设施层（网络/存储/主机）正常，再进应用层
+2. 二分：隔离到服务 → 实例 → 进程 → 配置，每次缩小一半范围
+3. 复现优先：能复现的问题解决更快，不能复现的记录触发条件继续观察
+4. 时间线对照：异常开始时间 vs 变更/发布/告警时间，重叠即重点怀疑
+
+## 第三步：假设验证
+- 基于证据列出候选根因，按可能性排序
+- 每个候选根因必须有可验证的下一步取证动作
+- 验证顺序：成本最低的验证先做
+
+## 第四步：处置与复盘
+- 处置动作可回滚优先；记录做了什么、效果如何
+- 复盘记录：根因、误判路径、可改进的监控/告警
+
+## 安全边界
+- 全程只读取证；写操作需单独决策
+- 不下单一结论，根因必须附证据链`,
+		OutputContract: "问题定义 + 定位过程 + 候选根因（附证据）+ 处置建议",
+		RiskLevel:      "read_only",
+		IsBuiltin:      true,
+		IsEnabled:      true,
+	},
+	{
+		Slug:              "rollback-first-mentality",
+		Name:              "回滚优先决策准则",
+		Category:          "变更管理",
+		Description:       "回滚 vs 就地修复的决策准则：可回滚时优先回滚到已知良好状态",
+		ApplicableActions: []string{"release.rollback", "self.heal"},
+		ToolDependencies:  []string{},
+		Content: `# 回滚优先决策准则 SOP
+
+## 核心原则
+- **可回滚时优先回滚**：回到已知良好状态，比就地修复更可控、更快、风险更低
+- 就地修复只适用于：无版本可回、回滚成本高于修复成本、回滚会破坏数据一致性
+
+## 决策流程
+1. 是否可回滚？（有上一版本/快照/配置备份）
+2. 回滚窗口内吗？（发布多久了——发布越久，回滚引起的数据漂移风险越大）
+3. 回滚影响哪些用户？（短暂闪断 vs 持续异常）
+4. 就地修复是否已验证？（修复方案在测试环境跑过吗？）
+5. 数据一致性：回滚后是否需要数据迁移/补偿？
+
+## 输出要求
+- 明确推荐"回滚"或"就地修复" + 三条理由
+- 若回滚：给出回滚目标版本、步骤、验证方式
+- 若就地修复：说明为什么回滚不可行
+
+## 安全边界
+- 涉及写操作时必须等待用户确认
+- 不确定数据一致性时，先取证再决策`,
+		OutputContract: "决策结论（回滚/修复）+ 理由 + 执行步骤 + 验证方式",
+		RiskLevel:      "execute",
+		IsBuiltin:      true,
+		IsEnabled:      true,
+	},
+	{
+		Slug:              "slo-budget-guide",
+		Name:              "SLO 与错误预算",
+		Category:          "SRE 工程",
+		Description:       "SLO/SLI/错误预算计算口径，告警规则应绑定错误预算消耗",
+		ApplicableActions: []string{"sla.analyze", "alert.rule.draft"},
+		ToolDependencies:  []string{},
+		Content: `# SLO 与错误预算 SOP
+
+## 基本概念
+- **SLI**：可度量的服务指标（可用性=成功请求/总请求，延迟=满足阈值的比例，错误率）
+- **SLO**：承诺目标（如"可用性 99.9%"、"P99 延迟 < 200ms"）
+- **错误预算**：1 - SLO，即允许出错的窗口（月内 99.9% → 43.2 分钟）
+
+## 计算口径
+- 错误预算消耗 = 累计错误时间 / 预算总量
+- 告警规则必须绑定错误预算：**消耗快时告警（burn-rate 快烧），而不是等预算耗尽**
+- 推荐分级：2 小时窗口 burn-rate >= 14.4（快烧告警）、6 小时窗口 >= 6、24 小时窗口 >= 2
+
+## 输出要求
+- 给出 SLI 口径、SLO 目标、当前达成率、错误预算剩余
+- 预算消耗趋势：本月已消耗比例 + 按当前速率预计何时耗尽
+- 告警建议：给出绑定 burn-rate 的告警阈值与窗口
+
+## 安全边界
+- 只读计算；不修改已配置的 SLO 与告警规则
+- 假设不透明时注明数据口径（统计窗口、成功判定标准）`,
+		OutputContract: "SLI 口径 + SLO 目标 + 达成率 + 预算剩余 + 告警阈值建议",
+		RiskLevel:      "read_only",
+		IsBuiltin:      true,
+		IsEnabled:      true,
+	},
+	{
+		Slug:              "runbook-authoring-sop",
+		Name:              "Runbook 编写规范",
+		Category:          "SRE 工程",
+		Description:       "编写可执行 runbook 的规范：前置条件、回滚、可测试性",
+		ApplicableActions: []string{"config.diff", "release.rollback"},
+		ToolDependencies:  []string{},
+		Content: `# Runbook 编写规范 SOP
+
+## 结构要求（每个 runbook 必须包含）
+1. **触发条件**：什么现象/告警触发该 runbook（明确、可判断）
+2. **前置检查**：执行前必须验证的条件（环境、版本、资源状态）
+3. **执行步骤**：编号步骤，每步给出命令/工具与预期结果
+4. **验证方式**：如何确认操作生效（只读工具复查）
+5. **回滚步骤**：失败时如何回退到初始状态
+6. **风险与升级**：风险等级、失败时联系谁
+
+## 编写原则
+- 每一步可独立执行、可验证，不依赖上下文中的隐含假设
+- 执行失败要有明确的失败处理路径（回滚 or 升级），不允许"卡住"
+- 工具序列必须引用注册表内真实存在的工具名，不造路由不到的工具
+- 低风险 runbook 可自动执行；中高风险必须人工确认
+
+## 输出要求
+- 按上述 6 段结构输出 runbook 草稿
+- 标注风险等级与建议的执行模式（自动/确认后执行）`,
+		OutputContract: "六段式 runbook 草稿 + 风险等级 + 执行模式建议",
+		RiskLevel:      "read_only",
+		IsBuiltin:      true,
+		IsEnabled:      true,
+	},
+	{
+		Slug:              "change-window-guide",
+		Name:              "变更窗口评估",
+		Category:          "变更管理",
+		Description:       "变更窗口/影响面评估：业务高峰期规避、灰度范围、失败预案",
+		ApplicableActions: []string{"config.diff", "release.rollback"},
+		ToolDependencies:  []string{},
+		Content: `# 变更窗口评估 SOP
+
+## 评估维度
+1. **时机**：是否避开业务高峰期？影响面大的变更优先低峰窗口
+2. **范围**：全量 or 灰度？灰度的批次、间隔、验证点
+3. **影响面**：变更影响的资源/服务/数据；回滚代价
+4. **失败预案**：失败判定标准 + 回滚触发条件 + 升级联系人
+5. **审计**：变更理由、审批人、执行记录必须可追溯
+
+## 判断准则
+- 高风险变更（数据迁移、核心配置、跨域变更）默认走审批+灰度
+- 可回滚性差的变更必须扩大预检范围
+- 与正在进行的故障处置冲突的变更应延期
+
+## 输出要求
+- 变更评估结论：可执行 / 需延期 / 需调整窗口
+- 建议窗口与理由、灰度方案、失败预案`,
+		OutputContract: "窗口结论 + 建议时机 + 灰度方案 + 失败预案",
+		RiskLevel:      "read_only",
+		IsBuiltin:      true,
+		IsEnabled:      true,
+	},
+	{
+		Slug:              "audit-trail-guide",
+		Name:              "审计留痕规范",
+		Category:          "风险与合规",
+		Description:       "写操作的审计留痕要求：决策理由、执行记录、结果验证均可追溯",
+		ApplicableActions: []string{"config.diff", "release.rollback", "self.heal"},
+		ToolDependencies:  []string{},
+		Content: `# 审计留痕规范 SOP
+
+## 留痕要求（所有写操作必须满足）
+1. **决策理由**：为什么做这个变更（告警/需求/故障依据），谁批准
+2. **变更内容**：执行了什么工具、改了哪些参数（before → after）
+3. **执行记录**：操作人、时间、环境、执行结果（成功/失败/部分成功）
+4. **结果验证**：变更后的验证证据（只读工具复查结果）
+5. **失败记录**：失败详情、已做的补偿动作、遗留风险
+
+## 原则
+- 写操作一律走既有准入链路（预检 → 确认 → 执行 → 审计），不得绕过
+- 高风险变更的决策理由必须包含风险与收益的权衡说明
+- 审计记录应足以支持事后复盘与合规检查，禁止事后补写关键事实
+
+## 输出要求
+- 给出本次写操作的审计记录（上述 5 项）
+- 标注是否需要人工复核（高风险/部分失败必标）`,
+		OutputContract: "五段式审计记录 + 复核标注",
+		RiskLevel:      "write",
 		IsBuiltin:      true,
 		IsEnabled:      true,
 	},

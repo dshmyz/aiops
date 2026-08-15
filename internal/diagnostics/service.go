@@ -25,7 +25,15 @@ const (
 	maxDiagnosticStatusBytes                              = 128
 )
 
+// ErrUnsupportedDomain 标识"领域没有可用的诊断工具"。保留导出以兼容旧引用；
+// 当前实现下未注册域不再返回此错误，而是降级为通用诊断框架包（见
+// genericDiagnostic），只有真正无法处理时其他路径才可能产生它。
 var ErrUnsupportedDomain = errors.New("不支持的诊断领域")
+
+// errDomainNotRegistered 是未注册域的哨兵错误：该域未发布任何能力，无注册的
+// 只读诊断工具。validateRequest 捕获它并标记 registered=false，Run 降级为
+// 通用诊断框架，而不是把"域未接入"当作请求错误返回。
+var errDomainNotRegistered = errors.New("领域未注册诊断工具")
 
 type ReadService interface {
 	ExecuteRead(context.Context, identity.CurrentUser, string, map[string]any) (map[string]any, error)
@@ -99,6 +107,12 @@ func (s *Service) Run(ctx context.Context, user identity.CurrentUser, request Re
 	toolName := validated.toolName
 	resourceType := validated.resourceType
 	name := validated.resourceName
+
+	// 优雅降级：域未接入任何诊断能力时，返回通用诊断框架包（SOP 检查维度
+	// + 接入引导），而不是报错。框架包不调用 reads，也无需真实工具。
+	if !validated.registered {
+		return s.genericDiagnostic(validated, request)
+	}
 	if name == "" {
 		name = defaultResourceName(domain, resourceType)
 	}
@@ -155,12 +169,21 @@ type validatedRequest struct {
 	resourceName string
 	toolName     string
 	inputSchema  map[string]any
+	// registered 表示该域有已注册的诊断读工具。false 时 Run 降级为通用
+	// 诊断框架包（优雅降级），不调用 reads。
+	registered bool
 }
 
 func (s *Service) validateRequest(request Request) (validatedRequest, error) {
 	domain := strings.TrimSpace(request.Domain)
 	requestedResourceType := strings.TrimSpace(request.ResourceType)
 	toolName, resourceType, inputSchema, err := s.resolveRunbookCapability(domain, requestedResourceType)
+	registered := true
+	if errors.Is(err, errDomainNotRegistered) {
+		// 域未接入能力：不是请求错误，降级为通用诊断框架。
+		registered = false
+		err = nil
+	}
 	if err != nil {
 		return validatedRequest{}, err
 	}
@@ -190,6 +213,7 @@ func (s *Service) validateRequest(request Request) (validatedRequest, error) {
 		resourceName: resourceName,
 		toolName:     toolName,
 		inputSchema:  inputSchema,
+		registered:   registered,
 	}, nil
 }
 
@@ -215,6 +239,10 @@ func (s *Service) ResolveReadTool(request Request) (string, error) {
 		}
 	}
 	toolName, _, err := resolveRunbook(strings.TrimSpace(request.Domain))
+	if errors.Is(err, errDomainNotRegistered) {
+		// 域未接入能力：返回空工具名而非错误，调用方（progress 展示）回退到域名。
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
@@ -271,24 +299,25 @@ func sanitizeObservationData(result map[string]any) map[string]any {
 	return data
 }
 
+// resolveRunbook 将域解析为诊断读工具。工具来自注册表（已发布能力动态注册
+// 的读工具），不再硬编码测试域。
+//
+// 未注册域返回 errDomainNotRegistered（非 ErrUnsupportedDomain）——调用方应
+// 降级为通用诊断框架，而不是当作请求错误：域未接入能力是"待接入"而非"非法"。
 func resolveRunbook(domain string) (string, string, error) {
-	switch domain {
-	case "glusterfs":
-		return tools.GlusterVolumeHealthRead, "volume", nil
-	case "minio":
-		return tools.MinIOBucketHealthRead, "bucket", nil
-	case "kafka":
-		return tools.KafkaConsumerLagRead, "consumer_group", nil
-	default:
-		return "", "", fmt.Errorf("%w: %q 不支持的领域", ErrUnsupportedDomain, domain)
+	if tool, ok := tools.FindDomainReadTool(domain); ok {
+		return tool.Name, tool.ResourceType, nil
 	}
+	return "", "", errDomainNotRegistered
 }
 
 // validRunbook reports whether the diagnostic runbook is one of the values the
 // Eino planner schema may emit (see eino_planner.go prompt:
 // "runbook": "health" | "capacity" | "consumer_lag"). Empty is allowed for
-// backward compatibility. Each runbook still resolves to the domain's read tool
-// via resolveRunbookCapability/resolveRunbook.
+// backward compatibility. runbook 是诊断流程模板（health/capacity/consumer_lag），
+// 与域解耦：consumer_lag 适用于有消费/复制滞后的域（消息队列、DB 复制），
+// 其他域按需选择 health/capacity。Each runbook still resolves to the domain's
+// read tool via resolveRunbookCapability/resolveRunbook.
 func validRunbook(runbook string) bool {
 	switch runbook {
 	case "", "health", "capacity", "consumer_lag":
@@ -400,61 +429,7 @@ func findingSummary(domain string, severity Severity, name string) string {
 }
 
 func recommendationSummary(domain string, severity Severity, name string) string {
-	switch domain {
-	case "glusterfs":
-		return glusterfsRecommendation(severity, name)
-	case "minio":
-		return minioRecommendation(severity, name)
-	case "kafka":
-		return kafkaRecommendation(severity, name)
-	default:
-		return defaultRecommendation(domain, severity, name)
-	}
-}
-
-func glusterfsRecommendation(severity Severity, name string) string {
-	switch severity {
-	case SeverityOK:
-		return fmt.Sprintf("继续监控 GlusterFS 卷 %s", name)
-	case SeverityInfo:
-		return fmt.Sprintf("关注 GlusterFS 卷 %s 的指标", name)
-	case SeverityWarning:
-		return fmt.Sprintf("检查 GlusterFS 卷 %s 的性能和容量", name)
-	case SeverityCritical:
-		return fmt.Sprintf("立即处理 GlusterFS 卷 %s 的异常", name)
-	default:
-		return fmt.Sprintf("检查 GlusterFS 卷 %s 的状态", name)
-	}
-}
-
-func minioRecommendation(severity Severity, name string) string {
-	switch severity {
-	case SeverityOK:
-		return fmt.Sprintf("继续监控 MinIO 桶 %s", name)
-	case SeverityInfo:
-		return fmt.Sprintf("关注 MinIO 桶 %s 的指标", name)
-	case SeverityWarning:
-		return fmt.Sprintf("检查 MinIO 桶 %s 的存储使用率", name)
-	case SeverityCritical:
-		return fmt.Sprintf("立即处理 MinIO 桶 %s 的异常", name)
-	default:
-		return fmt.Sprintf("检查 MinIO 桶 %s 的状态", name)
-	}
-}
-
-func kafkaRecommendation(severity Severity, name string) string {
-	switch severity {
-	case SeverityOK:
-		return fmt.Sprintf("继续监控 Kafka 消费组 %s", name)
-	case SeverityInfo:
-		return fmt.Sprintf("关注 Kafka 消费组 %s 的延迟", name)
-	case SeverityWarning:
-		return fmt.Sprintf("检查 Kafka 消费组 %s 的消费能力", name)
-	case SeverityCritical:
-		return fmt.Sprintf("立即处理 Kafka 消费组 %s 的高延迟", name)
-	default:
-		return fmt.Sprintf("检查 Kafka 消费组 %s 的状态", name)
-	}
+	return defaultRecommendation(domain, severity, name)
 }
 
 func defaultRecommendation(domain string, severity Severity, name string) string {

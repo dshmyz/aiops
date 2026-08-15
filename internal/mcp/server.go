@@ -7,11 +7,17 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -24,15 +30,25 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
+// mcpAuditID 生成审计事件 ID（16 字节随机十六进制，与 execution.newAuditID 对齐）。
+func mcpAuditID() string {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		panic("secure random source unavailable: " + err.Error())
+	}
+	return hex.EncodeToString(value)
+}
+
 // MCPServer 是封装后的 MCP HTTP Server，基于 mcp-go SDK。
 type MCPServer struct {
-	store    capabilities.CapabilityStore
-	runner   execution.ReadRunner
-	audit    *audit.Service
-	httpSrv  *server.StreamableHTTPServer
-	mcpSrv   *server.MCPServer
-	mu       sync.RWMutex
-	toolsReg bool
+	store     capabilities.CapabilityStore
+	runner    execution.ReadRunner
+	audit     *audit.Service
+	authToken string // 非空时要求 Authorization: Bearer <token>
+	httpSrv   *server.StreamableHTTPServer
+	mcpSrv    *server.MCPServer
+	mu        sync.RWMutex
+	toolsReg  bool
 }
 
 // NewMCPServer 创建 MCP HTTP Server。Handler() 返回 HTTP handler。
@@ -51,10 +67,37 @@ func NewMCPServerFrom(mcpSrv *server.MCPServer, store capabilities.CapabilitySto
 	return s
 }
 
+// WithAuthToken 启用 Bearer token 鉴权：配置后所有 /mcp 请求必须携带
+// Authorization: Bearer <token>，否则 401。不配置时不做鉴权（外部客户端可
+// 以调用已发布读能力，但写能力仍被拒绝）。生产环境强烈建议配置。
+func (s *MCPServer) WithAuthToken(token string) *MCPServer {
+	s.authToken = strings.TrimSpace(token)
+	return s
+}
+
 // Handler 返回可挂在 http.ServeMux 上的 HTTP handler。
-// 调用前必须先调用 Init() 注册工具。
+// 调用前必须先调用 Init() 注册工具。配置了 auth token 时自动包一层鉴权。
 func (s *MCPServer) Handler() http.Handler {
-	return s.httpSrv
+	h := http.Handler(s.httpSrv)
+	if s.authToken == "" {
+		return h
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Fields(r.Header.Get("Authorization"))
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || !constantTimeEqual(parts[1], s.authToken) {
+			http.Error(w, `{"error":"unauthorized: missing or invalid bearer token"}`, http.StatusUnauthorized)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// constantTimeEqual 用恒定时间比较两个 token，避免时序侧信道泄露。
+func constantTimeEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 // MCPServerGo 返回底层的 mcp-go server（调试/测试用）。
@@ -152,19 +195,24 @@ func (s *MCPServer) makeToolHandler(item capabilities.ManagedCapability) server.
 			return mcp.NewToolResultError(fmt.Sprintf("执行失败：%v", err)), nil
 		}
 
-		// 审计记录
+		// 审计记录。修复前事件未设 ID 且错误被吞掉，导致审计 100% 静默丢失
+		//（"假装已审计"）；现在补 ID、失败至少 Warn 日志。
 		if s.audit != nil {
 			inputMap := args
 			if inputMap == nil {
 				inputMap = map[string]any{}
 			}
-			_ = s.audit.Record(ctx, audit.Event{
-				ToolName: item.Name,
-				Action:   "mcp_call",
-				Decision: audit.DecisionPermitted,
-				Subject:  "mcp-client",
-				Metadata: map[string]any{"input": inputMap, "output": result},
-			})
+			if err := s.audit.Record(ctx, audit.Event{
+				ID:        mcpAuditID(),
+				ToolName:  item.Name,
+				Action:    "mcp_call",
+				Decision:  audit.DecisionPermitted,
+				Subject:   "mcp-client",
+				Metadata:  map[string]any{"input": inputMap, "output": result},
+				CreatedAt: time.Now().UTC(),
+			}); err != nil {
+				log.Printf("[mcp] audit record for %s failed: %v", item.Name, err)
+			}
 		}
 
 		// 格式化结果
@@ -192,11 +240,15 @@ func formatMCPResult(toolName string, result map[string]any) string {
 // 端口与主 API 共享（/mcp 路径），无需单独配置端口。
 type MCPServerEnvConfig struct {
 	Enabled bool
+	// Token 是 Bearer 鉴权 token。非空时 /mcp 请求必须携带
+	// Authorization: Bearer <token>，否则 401。
+	Token string
 }
 
 // MCPServerEnvConfigFromEnv 从环境变量构造配置。
 func MCPServerEnvConfigFromEnv() MCPServerEnvConfig {
 	return MCPServerEnvConfig{
 		Enabled: os.Getenv("COPILOT_MCP_SERVER_ENABLED") == "1",
+		Token:   strings.TrimSpace(os.Getenv("COPILOT_MCP_SERVER_TOKEN")),
 	}
 }

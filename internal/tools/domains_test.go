@@ -1,38 +1,105 @@
 package tools_test
 
 import (
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
-func TestKnownDomainsReturnsAlphabeticallySortedList(t *testing.T) {
+func TestKnownDomainsDerivedFromRegistry(t *testing.T) {
 	domains := tools.KnownDomains()
-	if len(domains) != 5 {
-		t.Fatalf("KnownDomains count = %d, want 5", len(domains))
+	if len(domains) == 0 {
+		t.Fatal("KnownDomains empty, want domains derived from the tool registry")
 	}
-	if domains[0] != "glusterfs" || domains[1] != "http" || domains[2] != "kafka" || domains[3] != "minio" || domains[4] != "moonlightbox" {
-		t.Fatalf("KnownDomains = %v, want [glusterfs http kafka minio moonlightbox] in alpha order", domains)
+	if !sort.StringsAreSorted(domains) {
+		t.Fatalf("KnownDomains not sorted: %v", domains)
+	}
+	for i, d := range domains {
+		if strings.TrimSpace(d) == "" {
+			t.Fatalf("KnownDomains[%d] is empty", i)
+		}
+		if d != strings.ToLower(d) {
+			t.Fatalf("KnownDomains[%d] = %q, want lowercase", i, d)
+		}
 	}
 }
 
-func TestDomainAliasesReturnsGlusterMapping(t *testing.T) {
-	aliases := tools.DomainAliases()
-	if len(aliases) != 4 {
-		t.Fatalf("DomainAliases count = %d, want 4", len(aliases))
+func TestKnownDomainsReflectsDynamicRegistration(t *testing.T) {
+	tools.ResetDynamicToolsForTest()
+	t.Cleanup(tools.ResetDynamicToolsForTest)
+
+	before := tools.KnownDomains()
+	if containsString(before, "registrytest") {
+		t.Fatalf("registrytest domain present before registration: %v", before)
 	}
-	if aliases["gluster"] != "glusterfs" {
-		t.Fatalf("aliases[gluster] = %q, want glusterfs", aliases["gluster"])
+
+	err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
+		Tool: tools.Tool{Name: "registrytest.ping.read", Operation: tools.Read, Risk: tools.Low, Domain: "registrytest", ResourceType: "endpoint"},
+		InputSchema: map[string]tools.DynamicInputField{
+			"environment": {Type: "string", Required: true},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("RegisterDynamicTools returned %v", err)
 	}
-	if aliases["moonlight"] != "moonlightbox" {
-		t.Fatalf("aliases[moonlight] = %q, want moonlightbox", aliases["moonlight"])
+
+	after := tools.KnownDomains()
+	if !containsString(after, "registrytest") {
+		t.Fatalf("KnownDomains = %v, want it to include dynamically registered domain registrytest", after)
 	}
+}
+
+func TestKnownDomainsDerivedFromStaticTools(t *testing.T) {
+	domains := tools.KnownDomains()
+	// http.probe 是静态注册工具，域 http 必须始终出现在派生清单中。
+	if !containsString(domains, "http") {
+		t.Fatalf("KnownDomains = %v, want static tool domain http present", domains)
+	}
+}
+
+// registerTestDomains 把 MatchDomainBounded 用例依赖的测试域注册为动态工具，
+// 使 KnownDomains 派生后这些域仍可被识别。包级注册对后续测试可见。
+func registerTestDomains(t *testing.T) {
+	t.Helper()
+	tools.ResetDynamicToolsForTest()
+	t.Cleanup(tools.ResetDynamicToolsForTest)
+
+	var defs []tools.DynamicToolDefinition
+	for _, d := range []struct {
+		domain string
+		kind   string
+	}{
+		{"kafka", "consumer_group"},
+		{"minio", "bucket"},
+		{"glusterfs", "volume"},
+	} {
+		defs = append(defs, tools.DynamicToolDefinition{
+			Tool: tools.Tool{Name: d.domain + ".test.read", Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
+			InputSchema: map[string]tools.DynamicInputField{
+				"environment": {Type: "string", Required: true},
+			},
+		})
+	}
+	if err := tools.RegisterDynamicTools(defs); err != nil {
+		t.Fatalf("register test domains: %v", err)
+	}
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 // TestMatchDomainBoundedFindsCanonicalDomain 覆盖基础的边界完整匹配：
 // 中英文空格、中英文标点、字符串起止，以及 gluster 别名展开。
 func TestMatchDomainBoundedFindsCanonicalDomain(t *testing.T) {
-	t.Parallel()
+	registerTestDomains(t)
 
 	for _, test := range []struct {
 		text string
@@ -42,14 +109,13 @@ func TestMatchDomainBoundedFindsCanonicalDomain(t *testing.T) {
 		{"检查（minio）容量", "minio"},                      // 中文全角括号
 		{"glusterfs 卷健康", "glusterfs"},                 // 字符串起始
 		{"状态：kafka。", "kafka"},                         // 中文冒号、句号
-		{"查看 gluster 卷", "glusterfs"},                  // 别名展开
 		{"kafka", "kafka"},                              // 单词即全文
 		{"kafka、minio、glusterfs", "kafka"},             // 顿号分隔，返回首个
 		{"prod/kafka/health", "kafka"},                  // 斜线分隔
 		{"检查 minio，kafka 延迟", "minio"},                // 中文逗号，返回首个
 		{"KAFKA", "kafka"},                              // 大写转小写
 		{"Kafka Status", "kafka"},                       // 首字母大写
-		{"check gluster volume", "glusterfs"},           // 英文空格 + 别名
+		{"check glusterfs volume", "glusterfs"},         // 英文空格
 		{"(kafka)", "kafka"},                            // 英文括号
 		{"kafka/minio", "kafka"},                        // 返回第一个
 	} {
@@ -69,7 +135,7 @@ func TestMatchDomainBoundedFindsCanonicalDomain(t *testing.T) {
 // orchestrator.go:101 和 importer.go:285 用裸 strings.Contains，
 // "kafkax" 误命中 "kafka"。现要求边界完整。
 func TestMatchDomainBoundedRejectsBareSubstring(t *testing.T) {
-	t.Parallel()
+	registerTestDomains(t)
 
 	for _, text := range []string{
 		"kafkax",              // 域名内嵌于其他单词
@@ -94,7 +160,7 @@ func TestMatchDomainBoundedRejectsBareSubstring(t *testing.T) {
 // TestMatchDomainBoundedHandlesMultibyteCorrectly 验证 UTF-8 rune 解码：
 // 中文全角标点、emoji 等多字节字符作为分隔符时能正确识别边界。
 func TestMatchDomainBoundedHandlesMultibyteCorrectly(t *testing.T) {
-	t.Parallel()
+	registerTestDomains(t)
 
 	for _, test := range []struct {
 		text string
@@ -103,7 +169,7 @@ func TestMatchDomainBoundedHandlesMultibyteCorrectly(t *testing.T) {
 		{"查看（kafka）状态", "kafka"},      // 中文全角括号
 		{"检查、minio、容量", "minio"},      // 中文顿号
 		{"kafka。健康", "kafka"},          // 中文句号
-		{"状态：gluster：卷", "glusterfs"}, // 中文冒号 + 别名
+		{"状态：kafka：集群", "kafka"},     // 中文冒号
 	} {
 		t.Run(test.text, func(t *testing.T) {
 			domain, ok := tools.MatchDomainBounded(test.text)

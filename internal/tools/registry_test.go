@@ -16,28 +16,28 @@ func registerMiddlewareTools(t *testing.T) {
 	t.Cleanup(ResetDynamicToolsForTest)
 	err := RegisterDynamicTools([]DynamicToolDefinition{
 		{
-			Tool: Tool{Name: GlusterVolumeHealthRead, Operation: Read, Risk: Low, Domain: "glusterfs", ResourceType: "volume"},
+			Tool: Tool{Name: "glusterfs.volume.health.read", Operation: Read, Risk: Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]DynamicInputField{
 				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
-			Tool: Tool{Name: MinIOBucketHealthRead, Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
+			Tool: Tool{Name: "minio.bucket.health.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]DynamicInputField{
 				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
-			Tool: Tool{Name: KafkaConsumerLagRead, Operation: Read, Risk: Low, Domain: "kafka", ResourceType: "consumer_group"},
+			Tool: Tool{Name: "kafka.consumer_lag.read", Operation: Read, Risk: Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]DynamicInputField{
 				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
-			Tool: Tool{Name: TopicRetentionSet, Operation: Write, Risk: Medium, RollbackDescription: "reset_to_previous", Domain: "kafka", ResourceType: "topic", SupportsDryRun: true},
+			Tool: Tool{Name: "topic.retention.set", Operation: Write, Risk: Medium, RollbackDescription: "reset_to_previous", Domain: "kafka", ResourceType: "topic", SupportsDryRun: true},
 			InputSchema: map[string]DynamicInputField{
 				"environment":     {Type: "string", Required: true},
 				"topic":           {Type: "string", Required: true},
@@ -52,9 +52,9 @@ func registerMiddlewareTools(t *testing.T) {
 
 func TestLookupReturnsOnlyStaticallyRegisteredTools(t *testing.T) {
 	registerMiddlewareTools(t)
-	tool, ok := Lookup(TopicRetentionSet)
+	tool, ok := Lookup("topic.retention.set")
 	if !ok {
-		t.Fatalf("registered tool %q was not found", TopicRetentionSet)
+		t.Fatalf("registered tool %q was not found", "topic.retention.set")
 	}
 	if tool.Operation != Write {
 		t.Fatalf("operation = %q, want %q", tool.Operation, Write)
@@ -127,9 +127,9 @@ func TestDynamicInputSchemaReturnsCopy(t *testing.T) {
 
 func TestValidateInputRejectsUnknownWriteParameters(t *testing.T) {
 	registerMiddlewareTools(t)
-	tool, ok := Lookup(TopicRetentionSet)
+	tool, ok := Lookup("topic.retention.set")
 	if !ok {
-		t.Fatalf("registered tool %q was not found", TopicRetentionSet)
+		t.Fatalf("registered tool %q was not found", "topic.retention.set")
 	}
 
 	err := ValidateInput(tool, map[string]any{
@@ -145,11 +145,11 @@ func TestValidateInputRejectsUnknownWriteParameters(t *testing.T) {
 
 func TestValidateInputUsesCanonicalRegisteredTool(t *testing.T) {
 	registerMiddlewareTools(t)
-	tool, ok := Lookup(TopicRetentionSet)
+	tool, ok := Lookup("topic.retention.set")
 	if !ok {
-		t.Fatalf("registered tool %q was not found", TopicRetentionSet)
+		t.Fatalf("registered tool %q was not found", "topic.retention.set")
 	}
-	forged := Tool{Name: TopicRetentionSet, Operation: Read, Risk: Low}
+	forged := Tool{Name: "topic.retention.set", Operation: Read, Risk: Low}
 	err := ValidateInput(forged, map[string]any{
 		"environment": "prod",
 		"topic":       "orders",
@@ -165,7 +165,7 @@ func TestValidateInputUsesCanonicalRegisteredTool(t *testing.T) {
 
 func TestDomainReadToolsAreRegisteredReadOnlyTools(t *testing.T) {
 	registerMiddlewareTools(t)
-	for _, name := range []string{GlusterVolumeHealthRead, MinIOBucketHealthRead, KafkaConsumerLagRead} {
+	for _, name := range []string{"glusterfs.volume.health.read", "minio.bucket.health.read", "kafka.consumer_lag.read"} {
 		tool, ok := Lookup(name)
 		if !ok {
 			t.Fatalf("tool %q was not registered", name)
@@ -184,9 +184,9 @@ func TestDomainReadToolsAreRegisteredReadOnlyTools(t *testing.T) {
 
 func TestDomainReadToolsRejectUnknownParameters(t *testing.T) {
 	registerMiddlewareTools(t)
-	tool, ok := Lookup(GlusterVolumeHealthRead)
+	tool, ok := Lookup("glusterfs.volume.health.read")
 	if !ok {
-		t.Fatalf("tool %q was not registered", GlusterVolumeHealthRead)
+		t.Fatalf("tool %q was not registered", "glusterfs.volume.health.read")
 	}
 	err := ValidateInput(tool, map[string]any{"environment": "prod", "name": "data", "shell": "rm -rf /"})
 	if err == nil {

@@ -6,17 +6,10 @@ import (
 )
 
 // builtinRunbooks 是内置 Runbook 模板（借鉴-5）。Idempotent 播种，按 slug 跳过。
+// 仅播种使用平台静态工具（cluster.status.read / alert.query / event.query）的模板，
+// 不引用任何示例域（kafka/minio/glusterfs 等）的动态能力——那些仅在发布相应
+// capabilities 后存在，不作为内置默认。
 var builtinRunbooks = []Runbook{
-	{
-		Slug:            "kafka-retention-low-risk",
-		Name:            "Kafka 保留时间调整（低风险）",
-		IntentPattern:   []string{"保留", "retention", "留存", "调保留"},
-		ToolSequence:    []string{"topic.retention.set"},
-		DefaultStrategy: &RunbookStrategy{TimeoutMS: 60000, Retry: 0, Concurrency: 1, RiskLevel: "low"},
-		RiskLevel:       "low",
-		IsBuiltin:       true,
-		IsEnabled:       true,
-	},
 	{
 		Slug:          "cluster-health-check",
 		Name:          "集群健康巡检",
