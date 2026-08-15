@@ -4,6 +4,9 @@ Go backend foundation for an AI-assisted middleware operations console.
 
 > **上手/上线请看：[docs/OPERATIONS.md](docs/OPERATIONS.md)（使用手册）** — 覆盖本地与生产启动、
 > 配置与安全、HTTP API 与 RBAC、Web 控制台、核心工作流、测试与构建、部署上线与上线前检查清单。
+>
+> **架构设计决策请看：[docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md)** — 域抽象（注册表派生 +
+> 优雅降级）、诚实降级原则、多智能体角色层、诊断→推荐→处置闭环、可信通道安全。
 
 ## What Exists
 
