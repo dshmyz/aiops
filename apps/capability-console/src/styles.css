@@ -3359,6 +3359,22 @@ nav button:focus-visible {
   padding: var(--space-4);
 }
 
+/* 待确认计划卡片内联在消息流末尾：靠左、与助手气泡同宽，随消息滚动 */
+.assistant-confirm-inline {
+  max-width: min(82%, 680px);
+  margin: var(--space-3) var(--space-1) var(--space-2);
+  animation: confirm-inline-enter 0.3s var(--ease-out) both;
+}
+
+@keyframes confirm-inline-enter {
+  0% { transform: translateY(6px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.assistant-confirm-inline .error-text {
+  margin-top: var(--space-2);
+}
+
 .assistant-error {
   margin: 0 var(--space-4);
   display: flex;
@@ -3602,11 +3618,51 @@ nav button:focus-visible {
   color: var(--color-text-primary);
   font-size: var(--font-base);
   outline: none;
-  resize: vertical;
+  resize: none;
   min-height: 80px;
   transition: border-color 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out);
   font-family: var(--font-ui);
   line-height: 1.5;
+}
+
+/* 澄清引导条：clarification_needed 时提示换问法，复用已发布能力生成的快捷问法 */
+.assistant-clarification-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 var(--space-4) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-warning-soft);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-sm);
+  animation: confirmation-hint-enter 0.3s var(--ease-out) both;
+}
+
+@keyframes confirmation-hint-enter {
+  0% { transform: translateY(4px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.assistant-clarification-hint .clarification-copy {
+  color: var(--color-text-secondary);
+}
+
+.clarification-chip {
+  padding: 4px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill, 9999px);
+  color: var(--color-accent);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out);
+}
+
+.clarification-chip:hover {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
 }
 
 .assistant-input:hover {
@@ -5176,4 +5232,71 @@ button.stat-card:focus-visible {
 .notice-text {
   color: var(--color-success);
   margin: 0 0 var(--space-3);
+}
+
+/* ---- AI Agent 状态面板 ---- */
+.dashboard-entry {
+  /* 与 .plans-entry 一致的入口容器：垂直 flex，让顶栏与面板自然堆叠 */
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+}
+.agent-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.agent-status-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+.agent-status-label {
+  font-size: var(--font-xs);
+  color: var(--color-text-tertiary);
+}
+.agent-status-value {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+/* 运行状态着色：只作用在 agent-status-value 上的 .ok/.bad，避免与诊断项的
+   .diagnostic-item.ok（border 颜色）互相干扰 */
+.agent-status-value.ok { color: var(--color-success); }
+.agent-status-value.bad { color: var(--color-danger); }
+.agent-status-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+.trust-level-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.trust-level-group .agent-status-label {
+  margin-right: var(--space-1);
+}
+.trust-button.active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+/* 停止 Agent 的危险按钮：与 .mini-button--danger 同视觉，模板用 .danger 而非 --danger */
+.mini-button.danger {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+.mini-button.danger:hover:not(:disabled) {
+  background: var(--color-danger-soft);
 }

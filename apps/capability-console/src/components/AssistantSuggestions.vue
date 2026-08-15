@@ -1,17 +1,19 @@
 <script setup lang="ts">
+// 建议提问完全由父级从已发布能力的数据生成（ai.examples / domain 退回），
+// 本组件只负责展示，不写死任何具体中间件。
+const props = withDefaults(defineProps<{
+  suggestions?: string[];
+}>(), {
+  suggestions: () => [],
+});
+
 defineEmits<{
   'pick': [prompt: string];
 }>();
-
-const suggestions = [
-  'prod 环境的 minio bucket archive 容量还剩多少？',
-  'kafka cluster k1 的 topic orders 消费组 lag 情况',
-  'glusterfs data volume 健康状态如何？',
-];
 </script>
 
 <template>
-  <div data-test="assistant-suggestions" class="assistant-suggestions">
+  <div v-if="suggestions.length > 0" data-test="assistant-suggestions" class="assistant-suggestions">
     <p class="suggestions-title">试试这些问题</p>
     <div class="suggestions-grid">
       <button

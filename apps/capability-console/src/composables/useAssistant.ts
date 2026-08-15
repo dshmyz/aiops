@@ -67,6 +67,7 @@ export interface UseAssistant {
   loadInlinePlan: (planID: string) => Promise<void>;
   handleInlineConfirmed: (result: ExecutionResult) => void;
   handleInlineError: (message: string) => void;
+  clearInlinePlan: () => void;
   resetForNewConversation: () => void;
   resetForSwitchConversation: () => void;
 }
@@ -227,6 +228,9 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     lastFailedAssistantMessage.value = '';
     assistantLatestStatus.value = '正在请求';
     assistantLatestResponse.value = undefined;
+    // 发送新消息时清除未决审批（旧计划卡片不应横在新请求之上）
+    assistantInlinePlan.value = null;
+    assistantInlineError.value = '';
     // 清理历史错误 turn，保持对话干净（用户可去审计记录回看历史错误）
     conversationTurns.value = conversationTurns.value.filter((t) => !t.error);
     assistantMessages.value.push({ role: 'user', text: message });
@@ -530,6 +534,12 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     assistantInlineError.value = message;
   }
 
+  // 编辑上一条消息回炉重发前调用：清掉与该回复绑定的未决审批
+  function clearInlinePlan() {
+    assistantInlinePlan.value = null;
+    assistantInlineError.value = '';
+  }
+
   function resetForNewConversation() {
     assistantMessages.value = [];
     assistantLatestResponse.value = undefined;
@@ -576,6 +586,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     loadInlinePlan,
     handleInlineConfirmed,
     handleInlineError,
+    clearInlinePlan,
     resetForNewConversation,
     resetForSwitchConversation,
   };

@@ -95,9 +95,10 @@ async function handleConfirm() {
   flex-direction: column;
   gap: 0.75rem;
   padding: 1rem;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-strong);
   border-radius: 12px;
-  background: var(--color-surface);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-sm);
 }
 
 .inline-header .eyebrow {
@@ -111,7 +112,7 @@ async function handleConfirm() {
 .inline-header h4 {
   margin: 0.25rem 0 0;
   font-size: 1rem;
-  color: var(--color-text);
+  color: var(--color-text-primary);
 }
 
 .inline-meta,
@@ -139,7 +140,7 @@ dt {
 dd {
   margin: 0;
   font-size: 0.875rem;
-  color: var(--color-text);
+  color: var(--color-text-secondary);
   font-family: var(--font-mono, monospace);
   word-break: break-all;
 }

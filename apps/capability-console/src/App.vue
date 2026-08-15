@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTheme } from './composables/useTheme';
 import { useAuditEvents } from './composables/useAuditEvents';
 import { usePendingPlans } from './composables/usePendingPlans';
@@ -43,6 +43,7 @@ import SlashCommandPanel from './components/SlashCommandPanel.vue';
 import type { SlashCommand } from './components/SlashCommandPanel.vue';
 import type {
   AssistantTrace,
+  ConversationTurn,
   ExecutionResult,
 } from './types';
 
@@ -192,6 +193,7 @@ const {
   loadInlinePlan: loadAssistantInlinePlan,
   handleInlineConfirmed: handleAssistantInlineConfirmed,
   handleInlineError: handleAssistantInlineError,
+  clearInlinePlan: clearAssistantInlinePlan,
   resetForNewConversation: resetAssistantForNewConversation,
   resetForSwitchConversation: resetAssistantForSwitchConversation,
 } = assistantComposable;
@@ -351,6 +353,51 @@ const allSlashCommands = computed<SlashCommand[]>(() => {
   }));
 });
 
+// 已发布能力（hero 文案与建议提问的唯一数据源）
+const publishedCapabilities = computed(() =>
+  capabilitiesComposable.capabilities.value.filter((cap) => cap.source === 'published'),
+);
+
+// 已发布能力的域列表（去重保序），用于 hero 副标题
+const publishedDomains = computed<string[]>(() => {
+  const seen = new Set<string>();
+  const domains: string[] = [];
+  for (const cap of publishedCapabilities.value) {
+    if (cap.domain && !seen.has(cap.domain)) {
+      seen.add(cap.domain);
+      domains.push(cap.domain);
+    }
+  }
+  return domains;
+});
+
+// hero 副标题：从已发布能力动态生成，不写死具体中间件
+const assistantHeroCopy = computed(() => {
+  const domains = publishedDomains.value;
+  if (domains.length === 0) {
+    return '用自然语言描述中间件问题，AI 会通过已发布能力调用现有后台 API 帮你排查。';
+  }
+  const names = domains.slice(0, 3).join('、');
+  const more = domains.length > 3 ? ` 等 ${domains.length} 类` : '';
+  return `用自然语言查询 ${names}${more}，AI 会通过已发布能力调用现有后台 API。`;
+});
+
+// 空状态建议提问：优先取能力自带 ai.examples（完整自然语言问法），
+// 缺失时退回「检查 {domain} 状态」——与 slash 指令同一数据源，不写死组件。
+const assistantSuggestions = computed<string[]>(() => {
+  const seen = new Set<string>();
+  const picks: string[] = [];
+  for (const cap of publishedCapabilities.value) {
+    const text = cap.ai?.examples?.[0]?.trim() || (cap.domain ? `检查 ${cap.domain} 状态` : '');
+    if (text && !seen.has(text)) {
+      seen.add(text);
+      picks.push(text);
+    }
+    if (picks.length >= 4) break;
+  }
+  return picks;
+});
+
 // 当前输入的 `/xxx` 前缀（不含 /）
 const slashQuery = computed(() => {
   const m = assistantInput.value.match(/\/([a-z]*)$/);
@@ -462,6 +509,54 @@ function handleAssistantKeydown(event: KeyboardEvent) {
       void sendAssistantEntryMessage();
     }
   }
+}
+
+// —— 输入区打磨 ——
+
+// 澄清引导：后端返回 clarification_needed 时在输入框上方提示换问法
+const showClarificationHint = computed(() => assistantLatestStatus.value === '需要补充参数');
+
+// 澄清提示里的快捷问法：取已发布能力域的前三条（数据驱动，不写死组件）
+const clarificationQuickPicks = computed(() => allSlashCommands.value.slice(0, 3));
+
+// textarea 自动增高：内容增长时撑到上限，超限出现内部滚动
+const ASSISTANT_INPUT_MAX_HEIGHT = 168;
+function autoGrowTextarea() {
+  const ta = assistantTextareaRef.value;
+  if (!ta) return;
+  ta.style.height = 'auto';
+  const next = Math.min(ta.scrollHeight, ASSISTANT_INPUT_MAX_HEIGHT);
+  ta.style.height = `${next}px`;
+  ta.style.overflowY = ta.scrollHeight > ASSISTANT_INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
+}
+watch(assistantInput, () => void nextTick(autoGrowTextarea));
+
+// 发送后回焦输入框：点击按钮时焦点已离开 textarea，回焦让连续追问不断手
+async function handleAssistantSend() {
+  await sendAssistantEntryMessage();
+  focusTextareaEnd();
+}
+
+// 编辑最后一条用户消息：回填输入框并截断该轮之后的对话
+function handleEditAssistantTurn(turn: ConversationTurn) {
+  const idx = conversationTurns.value.findIndex((t) => t.id === turn.id);
+  if (idx === -1) return;
+  conversationTurns.value = conversationTurns.value.slice(0, idx);
+  assistantInput.value = turn.content;
+  clearAssistantInlinePlan();
+  void nextTick(() => {
+    autoGrowTextarea();
+    focusTextareaEnd();
+  });
+}
+
+// 点击空状态建议提问：回填输入框 + 回焦，让用户可直接回车发送
+function handleSuggestionPick(prompt: string) {
+  fillAssistantPrompt(prompt);
+  void nextTick(() => {
+    autoGrowTextarea();
+    focusTextareaEnd();
+  });
 }
 
 // textarea 失焦时关闭面板（点击外部即关闭）
@@ -728,7 +823,7 @@ onUnmounted(() => {
           </div>
           <p class="eyebrow">AI 运维助手</p>
           <h1>问 AI 排查中间件状态</h1>
-          <p>用自然语言查询 MinIO、Kafka、GlusterFS，AI 会通过已发布能力调用现有后台 API。</p>
+          <p data-test="assistant-hero-copy">{{ assistantHeroCopy }}</p>
         </header>
 
         <CapabilityStatusBadge
@@ -760,7 +855,26 @@ onUnmounted(() => {
               @copy="handleCopyTurn"
               @regenerate="regenerateAssistantMessage"
               @retry="retryLastAssistantMessage"
-            />
+              @edit="handleEditAssistantTurn"
+            >
+              <!-- 待确认计划内联进对话流：紧跟最后一条消息，随消息一起滚动 -->
+              <template #footer>
+                <div
+                  v-if="assistantInlinePlan"
+                  data-test="assistant-inline-confirm"
+                  class="assistant-confirm-inline"
+                >
+                  <AssistantInlineConfirm
+                    :plan="assistantInlinePlan"
+                    :confirmationToken="assistantInlineConfirmationToken"
+                    :loading="assistantInlinePlanLoading"
+                    @confirmed="handleAssistantInlineConfirmed"
+                    @error="handleAssistantInlineError"
+                  />
+                  <p v-if="assistantInlineError" class="error-text" data-test="assistant-inline-confirm-error">{{ assistantInlineError }}</p>
+                </div>
+              </template>
+            </AssistantTranscript>
             <div
               v-if="copyNotice"
               class="copy-notice"
@@ -789,7 +903,8 @@ onUnmounted(() => {
             </div>
             <AssistantSuggestions
               v-else-if="conversationTurns.length === 0 && !assistantEntryLoading"
-              @pick="fillAssistantPrompt"
+              :suggestions="assistantSuggestions"
+              @pick="handleSuggestionPick"
             />
             <div v-if="assistantEntryError" class="assistant-error" data-test="assistant-error" role="alert">
             <svg class="assistant-error-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
@@ -805,6 +920,19 @@ onUnmounted(() => {
                 @click="retryLastAssistantMessage"
               >
                 重试
+              </button>
+            </div>
+            <div v-if="showClarificationHint && !assistantEntryLoading" data-test="assistant-clarification-hint" class="assistant-clarification-hint" role="note">
+              <span class="clarification-copy">没听懂这次提问，换个问法试试：</span>
+              <button
+                v-for="cmd in clarificationQuickPicks"
+                :key="cmd.name"
+                type="button"
+                data-test="assistant-clarification-chip"
+                class="clarification-chip"
+                @click="selectSlashCommand(cmd)"
+              >
+                {{ cmd.description || cmd.name }}
               </button>
             </div>
             <label class="assistant-input-label">
@@ -823,7 +951,7 @@ onUnmounted(() => {
                   data-test="assistant-input"
                   v-model="assistantInput"
                   class="assistant-input"
-                  rows="4"
+                  rows="1"
                   placeholder="输入中间件问题，如「检查集群健康」。输入 / 快速选择已发布能力"
                   @keydown="handleAssistantKeydown"
                   @blur="handleTextareaBlur"
@@ -871,7 +999,7 @@ onUnmounted(() => {
                   data-test="assistant-send"
                   class="primary-inline"
                   :disabled="assistantInput.trim() === ''"
-                  @click="sendAssistantEntryMessage"
+                  @click="handleAssistantSend"
                 >
                   发送
                 </button>
@@ -892,15 +1020,6 @@ onUnmounted(() => {
               <h2>本次调用</h2>
               <span data-test="assistant-detail-status">{{ assistantLatestStatus }}</span>
             </div>
-            <AssistantInlineConfirm
-              v-if="assistantInlinePlan"
-              :plan="assistantInlinePlan"
-              :confirmationToken="assistantInlineConfirmationToken"
-              :loading="assistantInlinePlanLoading"
-              @confirmed="handleAssistantInlineConfirmed"
-              @error="handleAssistantInlineError"
-            />
-            <p v-if="assistantInlineError" class="error-text">{{ assistantInlineError }}</p>
             <ExecutionResultView v-if="latestExecutionResult" :result="latestExecutionResult" />
             <DiagnosticView v-if="assistantDiagnostic" :diagnostic="assistantDiagnostic" />
             <BlockRenderer v-if="assistantBlocks.length > 0" :blocks="assistantBlocks" />

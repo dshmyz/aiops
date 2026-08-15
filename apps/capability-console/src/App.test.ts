@@ -391,6 +391,87 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="assistant-suggestions"]').exists()).toBe(false);
   });
 
+  // 数据驱动空状态：hero 副标题与建议提问均从已发布能力生成，不写死中间件
+  test('hero copy derives from published capability domains', async () => {
+    const wrapper = mountApp();
+    await flushPromises();
+
+    const hero = wrapper.find('[data-test="assistant-hero-copy"]');
+    // 默认 mock 只有 glusterfs 已发布，hero 应动态列出该域
+    expect(hero.text()).toContain('glusterfs');
+    expect(hero.text()).toContain('已发布能力');
+  });
+
+  test('quick-start suggestions derive from published capabilities', async () => {
+    const wrapper = mountApp();
+    await flushPromises();
+
+    const items = wrapper.findAll('[data-test="assistant-suggestion-item"]');
+    expect(items.length).toBeGreaterThan(0);
+    // 建议来自已发布能力的域（mock 中无 ai.examples 时退回「检查 {domain} 状态」）
+    expect(items[0].text()).toContain('glusterfs');
+  });
+
+  // 输入区打磨：编辑最后一条用户消息 → 回填输入框 + 截断该轮之后
+  test('editing last user message refills input and truncates the conversation', async () => {
+    let msgCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/v1/capabilities') return ok({ capabilities: [] });
+      // 不返回 conversation_id，避免触发会话 turns 回捞
+      if (url === '/v1/assistant/messages') {
+        msgCalls += 1;
+        return ok({ type: 'answer', message: msgCalls === 1 ? '第一个答案' : '第二个答案', blocks: [] });
+      }
+      return ok({});
+    }));
+
+    const wrapper = mountApp();
+    await flushPromises();
+
+    await wrapper.find('[data-test="assistant-input"]').setValue('第一次提问');
+    await wrapper.find('[data-test="assistant-send"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-test="assistant-input"]').setValue('第二次提问');
+    await wrapper.find('[data-test="assistant-send"]').trigger('click');
+    await flushPromises();
+
+    // 仅最后一条用户消息可编辑（其余轮次不显示编辑按钮）
+    expect(wrapper.findAll('[data-test="conversation-turn-edit"]').length).toBe(1);
+
+    await wrapper.find('[data-test="conversation-turn-edit"]').trigger('click');
+    await flushPromises();
+
+    expect((wrapper.find('[data-test="assistant-input"]').element as HTMLTextAreaElement).value).toBe('第二次提问');
+    // 被编辑轮及其后的对话被截断，但更早的历史保留
+    const transcript = wrapper.find('[data-test="assistant-transcript"]').text();
+    expect(transcript).toContain('第一次提问');
+    expect(transcript).toContain('第一个答案');
+    expect(transcript).not.toContain('第二个答案');
+  });
+
+  // 输入区打磨：clarification_needed 时出现换问法引导条
+  test('shows clarification hint with quick picks after clarification_needed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/v1/capabilities') return ok({ capabilities: [] });
+      if (url === '/v1/assistant/messages') {
+        return ok({ type: 'clarification_needed', message: '请指明目标环境与资源' });
+      }
+      return ok({});
+    }));
+
+    const wrapper = mountApp();
+    await flushPromises();
+
+    await wrapper.find('[data-test="assistant-input"]').setValue('这个健康吗');
+    await wrapper.find('[data-test="assistant-send"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="assistant-detail-status"]').text()).toBe('需要补充参数');
+    expect(wrapper.find('[data-test="assistant-clarification-hint"]').exists()).toBe(true);
+  });
+
   test('shows published capability count on the assistant entry', async () => {
     const wrapper = mountApp();
     await flushPromises();
@@ -876,6 +957,9 @@ describe('Capability Console', () => {
     expect(inline.text()).toContain('retention_hours');
     expect(inline.find('[data-test="confirm-plan"]').exists()).toBe(true);
     expect(inline.find('[data-test="confirm-plan"]').attributes('disabled')).toBeUndefined();
+    // 批准确认卡片内联进对话流（transcript footer，随消息滚动），不再挂在右侧详情面板
+    expect(wrapper.find('[data-test="assistant-transcript"] [data-test="assistant-inline-confirm"]').exists()).toBe(true);
+    expect(wrapper.find('.assistant-detail [data-test="assistant-inline-confirm"]').exists()).toBe(false);
   });
 
   // 借鉴-5：Runbook 自动执行 → execution_result 渲染 ExecutionResultView + risk_notice block

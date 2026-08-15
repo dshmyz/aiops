@@ -19,21 +19,55 @@ const emit = defineEmits<{
   (event: 'copy', content: string): void;
   (event: 'regenerate', turn: ConversationTurn): void;
   (event: 'retry'): void;
+  (event: 'edit', turn: ConversationTurn): void;
 }>();
 
 const transcriptRef = ref<HTMLElement | null>(null);
+
+/** 用户是否贴近底部：贴近时流式内容自动跟随，上翻看历史时不拽底 */
+const nearBottom = ref(true);
+
+// 距底多少像素内视为"贴近底部"，避免滚动条差几个像素就疯狂追底
+const NEAR_BOTTOM_THRESHOLD = 64;
+
+function onScroll() {
+  const el = transcriptRef.value;
+  if (!el) return;
+  nearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD;
+}
 
 function scrollToBottom() {
   const el = transcriptRef.value;
   if (!el) return;
   el.scrollTop = el.scrollHeight;
+  nearBottom.value = true;
 }
 
-// turns 数量变化（新消息）或 loading 状态变化（开始/结束请求）时滚动到底部
+// 新消息到达（turns 数量变化）时，仅在用户贴近底部时跟随。
+// 用户上翻看历史、流式生成中浏览旧内容时绝不强制拽底。
 watch(
-  () => [props.turns.length, props.loading] as const,
+  () => props.turns.length,
   () => {
-    void nextTick(scrollToBottom);
+    if (nearBottom.value) void nextTick(scrollToBottom);
+  },
+);
+
+// 请求结束（loading 由 true → false）：若用户仍在底部则回正到最终结果
+watch(
+  () => props.loading,
+  (loading, prev) => {
+    if (!loading && prev && nearBottom.value) void nextTick(scrollToBottom);
+  },
+);
+
+// 流式生成中内容持续增长：只要用户仍贴近底部就跟随光标逐字滚动
+watch(
+  () => {
+    if (!props.loading) return 0;
+    return props.turns[props.turns.length - 1]?.content?.length ?? 0;
+  },
+  () => {
+    if (nearBottom.value) void nextTick(scrollToBottom);
   },
 );
 
@@ -44,6 +78,19 @@ const lastTurnIsStreaming = computed(() => {
   const last = props.turns[props.turns.length - 1];
   return last.role === 'assistant' && last.id.startsWith('local-assistant-');
 });
+
+// 最后一条用户消息的索引：编辑回炉重发的目标。无论其后是否已有助手回复都可编辑，
+// 但流式生成中（loading）不允许截断对话。
+const lastUserTurnIndex = computed(() => {
+  for (let i = props.turns.length - 1; i >= 0; i--) {
+    if (props.turns[i].role === 'user') return i;
+  }
+  return -1;
+});
+
+function canEditTurn(index: number): boolean {
+  return !props.loading && index === lastUserTurnIndex.value && !props.turns[index].error;
+}
 
 // 判断某个 turn 是否需要在其前面插入日期分隔线（首条或跨天时插入）
 function shouldShowDivider(index: number): boolean {
@@ -59,7 +106,26 @@ function dividerLabel(index: number): string {
 </script>
 
 <template>
-  <div ref="transcriptRef" data-test="assistant-transcript" class="assistant-transcript" :class="{ 'assistant-transcript--collapsed': turns.length === 0 && !loading && hideEmpty }">
+  <div
+    ref="transcriptRef"
+    data-test="assistant-transcript"
+    class="assistant-transcript"
+    :class="{ 'assistant-transcript--collapsed': turns.length === 0 && !loading && hideEmpty }"
+    @scroll="onScroll"
+  >
+    <button
+      v-if="!nearBottom && turns.length > 0"
+      data-test="assistant-scroll-bottom"
+      type="button"
+      class="assistant-scroll-bottom"
+      @click="scrollToBottom"
+    >
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+        <path d="M12 5v14m0 0-6-6m6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      最新回复
+    </button>
+
     <div
       v-if="turns.length === 0 && !loading && !hideEmpty"
       data-test="assistant-transcript-empty"
@@ -98,9 +164,11 @@ function dividerLabel(index: number): string {
         :turn="turn"
         :is-last="index === turns.length - 1"
         :streaming="lastTurnIsStreaming && index === turns.length - 1"
+        :can-edit="canEditTurn(index)"
         @copy="emit('copy', $event)"
         @regenerate="emit('regenerate', $event)"
         @retry="emit('retry')"
+        @edit="emit('edit', $event)"
       />
     </template>
 
@@ -121,16 +189,56 @@ function dividerLabel(index: number): string {
         <span class="typing-text">正在思考</span>
       </div>
     </div>
+
+    <!-- 追加在消息流末尾的内容（如内联批准确认卡片），随消息流一起滚动 -->
+    <slot name="footer" />
   </div>
 </template>
 
 <style scoped>
 .assistant-transcript {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
   overflow-y: auto;
   padding: var(--space-5) var(--space-4);
+}
+
+/* 用户上翻后出现的"回到底部"悬浮胶囊，跟随滚动容器底部吸底 */
+.assistant-scroll-bottom {
+  position: sticky;
+  bottom: var(--space-4);
+  z-index: 2;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: calc(-1 * var(--space-4)) auto var(--space-2);
+  padding: 6px 14px;
+  background: var(--material-regular);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill, 9999px);
+  box-shadow: var(--shadow-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out);
+  animation: scroll-bottom-enter 0.25s var(--ease-out) both;
+}
+
+.assistant-scroll-bottom:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+@keyframes scroll-bottom-enter {
+  0% { transform: translateY(6px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
 }
 
 /* 当外部提供空状态引导（suggestions）时，transcript 塌缩不占空间 */

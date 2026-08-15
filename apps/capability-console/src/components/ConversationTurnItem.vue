@@ -16,12 +16,15 @@ const props = defineProps<{
   isLast?: boolean;
   /** 当该 turn 正在流式生成时为 true，用于显示 typing 动画或闪烁光标 */
   streaming?: boolean;
+  /** 该 turn 是否为最后一条用户消息（可编辑回炉重发）；由父级计算，流式期间禁用 */
+  canEdit?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: 'copy', content: string): void;
   (event: 'regenerate', turn: ConversationTurn): void;
   (event: 'retry'): void;
+  (event: 'edit', turn: ConversationTurn): void;
 }>();
 
 const isAssistant = computed(() => props.turn.role === 'assistant');
@@ -367,6 +370,23 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
             />
           </svg>
           <span>重新生成</span>
+        </button>
+
+        <button
+          v-if="canEdit"
+          type="button"
+          data-test="conversation-turn-edit"
+          class="action-button"
+          :title="'编辑本条'"
+          @click="emit('edit', turn)"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
+            />
+          </svg>
+          <span>编辑</span>
         </button>
 
         <MessageFeedbackButtons
