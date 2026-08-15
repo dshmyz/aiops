@@ -22,8 +22,8 @@ import (
 // 替代原有的 EinoPlanner JSON 解析 + 手动 agent loop。
 // LLM 通过原生 tool calling 选工具，框架自动执行，结果自动回传。
 type AgentExecutor struct {
-	chat          model.BaseChatModel  // 执行层：选工具、调参数
-	reasoningChat model.BaseChatModel  // 分析层：深度推理、生成报告（可为 nil）
+	chat          model.BaseChatModel // 执行层：选工具、调参数
+	reasoningChat model.BaseChatModel // 分析层：深度推理、生成报告（可为 nil）
 	tools         []tool.BaseTool
 	toolMap       map[string]tool.BaseTool // name → tool 快速查找
 	audit         *audit.Service
@@ -104,19 +104,19 @@ func NewAgentExecutorWithCache(cfg AgentExecutorConfig) (*AgentExecutor, error) 
 
 // AgentRunResult 是执行结果。
 type AgentRunResult struct {
-	Answer      string         // LLM 最终回复
-	ToolCalls   []ToolCallLog  // 每步工具调用记录
-	Reasoning   []string       // 每轮 LLM 的中间推理（决策链）
-	TurnCount   int            // LLM 调用次数
-	Error       error
+	Answer    string        // LLM 最终回复
+	ToolCalls []ToolCallLog // 每步工具调用记录
+	Reasoning []string      // 每轮 LLM 的中间推理（决策链）
+	TurnCount int           // LLM 调用次数
+	Error     error
 }
 
 // ToolCallLog 记录一次工具调用。
 type ToolCallLog struct {
-	Tool    string         `json:"tool"`
-	Input   string         `json:"input"`
-	Output  map[string]any `json:"output,omitempty"`
-	Error   string         `json:"error,omitempty"`
+	Tool   string         `json:"tool"`
+	Input  string         `json:"input"`
+	Output map[string]any `json:"output,omitempty"`
+	Error  string         `json:"error,omitempty"`
 }
 
 // acquireLLM 限流：获取 LLM 调用许可。
@@ -635,7 +635,6 @@ func (e *AgentExecutor) analyze(ctx context.Context, userMessage string, toolCal
 - 给出具体数字和状态，不要泛泛而谈
 - 如果数据全部正常且完整，简洁总结即可，不需要长篇大论`)
 
-
 	messages := []*schema.Message{
 		schema.SystemMessage("你是资深运维专家，擅长从监控数据中分析问题根因。"),
 		schema.UserMessage(sb.String()),
@@ -766,7 +765,7 @@ func (e *AgentExecutor) planIntent(ctx context.Context, message string) intentPl
 
 判断标准：
 - tool_call：用户想查询/诊断某个系统的实时状态或数据，需要调用监控工具获取数据。domain 填涉及的中间件域（如 kafka、minio、glusterfs、redis）。
-- knowledge：用户想要命令清单、操作步骤、查询方法、排障思路等知识型回答，不需要调用工具。domain 填 null。
+- knowledge：用户想要命令清单、操作步骤、查询方法、排障思路，或询问某组件/域"能做什么、是什么、有什么用、有哪些功能"这类介绍类回答，不需要调用工具。domain 填 null。
 - 判断不出来时优先 tool_call。
 
 用户消息：%s`
@@ -865,5 +864,6 @@ func loadPlanningPrompt() string {
 
 工具使用边界：
 - 只调用与用户请求相关的已注册工具（系统已按请求涉及的域裁剪好工具集，不在其中的工具不可用）。
-- 当用户请求的是"命令清单 / 操作步骤 / 查询方法 / 排障思路"这类**知识型问题**，且没有匹配的监控工具时：**直接以中文 Markdown 给出完整的命令清单或操作指南**（如集群工具、查询命令、配置项），不要编造探测结果，也不要只说"已整理"却省略内容。`
+- 当用户请求的是"命令清单 / 操作步骤 / 查询方法 / 排障思路"这类**知识型问题**，且没有匹配的监控工具时：**直接以中文 Markdown 给出完整的命令清单或操作指南**（如集群工具、查询命令、配置项），不要编造探测结果，也不要只说"已整理"却省略内容。
+- 当用户问的是某组件/域"能做什么、是什么、有什么用、有哪些功能"这类**能力介绍问题**时：**不要调用工具**，基于当前可用工具的**名称、域、描述**如实整理介绍（描述优先用工具自带的说明），直接给出中文介绍；不要编造该域不存在的能力，也不要把"功能概述"说成实时故障数据。`
 }

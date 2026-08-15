@@ -691,8 +691,9 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 		Message: result.Answer,
 		Answer:  map[string]any{"message": result.Answer},
 	}
-	// 二阶段格式化
-	if s.formatter != nil {
+	// 二阶段格式化：仅当实际执行了工具时再整形。无工具调用（知识型直接回答）
+	// 的答案已是面向用户的完整文本，跳过二次整形可避免改写与泄露内部术语。
+	if s.formatter != nil && len(result.ToolCalls) > 0 {
 		factSet := make([]ToolFact, 0, len(result.ToolCalls))
 		for _, tc := range result.ToolCalls {
 			factSet = append(factSet, ToolFact{Tool: tc.Tool, Result: tc.Output})
@@ -766,8 +767,10 @@ func (s *Service) handleWithAgentExecutor(ctx context.Context, user identity.Cur
 		Message: result.Answer,
 		Answer:  map[string]any{"message": result.Answer},
 	}
-	// 二阶段格式化：把 LLM 回复转为结构化 Summary + Blocks
-	if s.formatter != nil {
+	// 二阶段格式化：把 LLM 回复转为结构化 Summary + Blocks。
+	// 无工具调用（知识型直接回答）时跳过——答案已是面向用户的完整文本，
+	// 二次整形反而会改写或泄露内部术语。
+	if s.formatter != nil && len(result.ToolCalls) > 0 {
 		factSet := make([]ToolFact, 0, len(result.ToolCalls))
 		for _, tc := range result.ToolCalls {
 			factSet = append(factSet, ToolFact{

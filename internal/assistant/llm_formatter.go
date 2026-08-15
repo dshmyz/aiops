@@ -79,7 +79,9 @@ const llmFormatSystemPrompt = `你是中间件运维副驾驶的二阶段整形�
 3. 优先产出能帮助操作员快速定位问题的 block（如 incident_card、evidence_timeline）
 4. 始终附带一个 tool_trace block 记录一阶段调用的工具
 5. 涉及风险操作时附带 risk_notice block
-6. 不要在 payload 中放入敏感凭证`
+6. 不要在 payload 中放入敏感凭证
+7. summary 是给操作员看的最终答复，必须直接回答用户原始问题；禁止复述内部流程或使用内部术语（如"一阶段/二阶段/整形/取证/工具返回了"），禁止以"无法进行问题定位/无法给出操作建议"这类系统口吻收尾
+8. 当用户问的是组件/能力介绍（能做什么、是什么、有哪些功能）且 Answer 已是完整介绍时，直接把它整理成答案，不要当作"缺少故障数据"处理`
 
 // llmFormatResponse 是 LLM 返回 JSON 的解析结构。
 type llmFormatResponse struct {
