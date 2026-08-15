@@ -218,6 +218,35 @@ export interface PendingPlanSummary {
   created_at: string;
 }
 
+/**
+ * PlanSummary 是诊断推荐建出的 action plan 的操作员侧摘要（后端
+ * Response.RecommendationPlan，兼容字段，指向首个成功建 plan 的推荐）。
+ */
+export interface PlanSummary {
+  plan_id: string;
+  tool: string;
+  risk: string;
+  requires_confirmation: boolean;
+  expires_at?: string;
+}
+
+/**
+ * RecommendationStatus 记录诊断包中一条可执行推荐的处理结果（后端
+ * Response.Recommendations）：
+ *  - plan_created：写工具已建 plan 等待确认（plan_id 非空）
+ *  - read_executed：读工具已直接执行
+ *  - skipped：未能落地，reason 说明原因（工具未注册/策略拒绝/建 plan 失败）
+ */
+export interface RecommendationStatus {
+  tool: string;
+  summary?: string;
+  status: 'plan_created' | 'read_executed' | 'skipped';
+  reason?: string;
+  plan_id?: string;
+  risk?: string;
+  expires_at?: string;
+}
+
 export interface PendingPlanDetail extends PendingPlanSummary {
   input: Record<string, unknown>;
 }
@@ -282,7 +311,7 @@ export interface ExecutionResult {
 }
 
 export type AssistantConsoleResponse =
-  | { type: 'answer'; tool: string; answer: Record<string, unknown>; diagnostic?: DiagnosticPackage; trace?: AssistantTrace; blocks?: Block[]; conversation_id?: string; turn_id?: string }
+  | { type: 'answer'; tool: string; answer: Record<string, unknown>; diagnostic?: DiagnosticPackage; recommendation_plan?: PlanSummary; recommendations?: RecommendationStatus[]; trace?: AssistantTrace; blocks?: Block[]; conversation_id?: string; turn_id?: string }
   | {
       /** 兜底/收敛结论：agent 循环未得到模型 final_answer，由系统根据已执行步骤合成。
        *  message 为面向操作员的中文兜底总结；后端持久化为 answer_converged，前端据此打标。 */

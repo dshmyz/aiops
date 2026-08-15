@@ -50,6 +50,17 @@ function askAi() {
 
     <el-alert v-if="capabilities.error.value" class="alert" type="error" :title="capabilities.error.value" show-icon />
 
+    <el-alert
+      v-if="capabilities.configured.value === false"
+      class="alert"
+      type="warning"
+      show-icon
+      data-test="capabilities-not-configured"
+      title="能力存储未配置（未设置 COPILOT_CAPABILITIES_DIR，且无数据库）"
+      description="当前能力列表为空表示能力存储未启用（配置后列表会自动加载已发现或已发布的能力）。"
+      :closable="false"
+    />
+
     <section data-test="workflow-console" class="workflow-console" aria-label="Capability 接入向导">
       <WorkflowRail :capabilities="capabilities" />
       <SourceStage v-if="capabilities.managementPhase.value === 'source'" :capabilities="capabilities" />

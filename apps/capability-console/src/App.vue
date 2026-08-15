@@ -337,20 +337,17 @@ const assistantTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 // 所有可用指令（全量）
 const allSlashCommands = computed<SlashCommand[]>(() => {
-  const domains = new Map<string, number>();
+  // 从已发布能力提取 domain，描述优先用能力自带的 ai.description——
+  // 不硬编码具体中间件（minio/kafka/glusterfs 等已从内置假设移除）。
+  const descByDomain = new Map<string, string>();
   for (const cap of capabilitiesComposable.capabilities.value) {
-    if (cap.source === 'published' && cap.domain) {
-      domains.set(cap.domain, (domains.get(cap.domain) ?? 0) + 1);
+    if (cap.source === 'published' && cap.domain && !descByDomain.has(cap.domain)) {
+      descByDomain.set(cap.domain, cap.ai?.description ?? '');
     }
   }
-  const labels: Record<string, string> = {
-    minio: '查询 MinIO 存储状态',
-    kafka: '查询 Kafka 消费延迟',
-    glusterfs: '查询 GlusterFS 卷健康',
-  };
-  return Array.from(domains.keys()).map((domain) => ({
+  return Array.from(descByDomain.entries()).map(([domain, desc]) => ({
     name: `/${domain}`,
-    description: labels[domain] ?? `查询 ${domain} 状态`,
+    description: desc || `检查 ${domain} 状态`,
   }));
 });
 
@@ -827,7 +824,7 @@ onUnmounted(() => {
                   v-model="assistantInput"
                   class="assistant-input"
                   rows="4"
-                  placeholder="输入中间件问题，如「检查 minio prod 容量」。输入 / 快速选择能力"
+                  placeholder="输入中间件问题，如「检查集群健康」。输入 / 快速选择已发布能力"
                   @keydown="handleAssistantKeydown"
                   @blur="handleTextareaBlur"
                 />

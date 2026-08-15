@@ -46,6 +46,7 @@ export function makeCapabilities(overrides: Partial<UseCapabilities> = {}): UseC
     preview: ref<NormalizedResult | null>(null),
     error: ref(''),
     loading: ref(false),
+    configured: ref(true),
     testInputText: ref('{"environment":"prod"}'),
     searchText: ref(''),
     statusFilter: ref('all'),

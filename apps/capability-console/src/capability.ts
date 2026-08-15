@@ -4,13 +4,18 @@ import type { Capability, ManagedCapability } from './types';
  * BUILTIN_TOOL_NAMES 与后端 internal/tools/registry.go 中的静态工具常量保持一致。
  * 这些工具名在发布时会被 tools.Lookup 命中并返回 409 冲突，前端在发布前先做预检，
  * 给出友好的提示，避免请求到后端才失败。
+ *
+ * 注意：中间件工具（topic.retention.set / glusterfs.volume.health.read /
+ * minio.bucket.health.read / kafka.consumer_lag.read）已从后端硬编码中移除，
+ * 现在是动态能力（发布后注册），不再占用静态工具名，因此不在此预检清单内。
  */
 export const BUILTIN_TOOL_NAMES: readonly string[] = Object.freeze([
   'cluster.status.read',
-  'topic.retention.set',
-  'glusterfs.volume.health.read',
-  'minio.bucket.health.read',
-  'kafka.consumer_lag.read',
+  'system.posture.read',
+  'alert.query',
+  'event.query',
+  'task.query',
+  'incident.view',
 ]);
 
 /**

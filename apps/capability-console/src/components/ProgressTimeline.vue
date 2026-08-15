@@ -74,12 +74,13 @@ function iconFor(stage: ProgressStage['stage']): 'sparkles' | 'waveform' | 'bubb
   return stageIcon[stage] ?? 'sparkles';
 }
 
-/** 格式化相对时间显示（HH:MM:SS.mmm），用于时间线节点 */
+/** 格式化相对时间显示（HH:MM:SS）。不显示毫秒：同一阶段的前后端事件几乎
+ *  同毫秒到达，毫秒时间戳会让时间线看起来机械/像编造。 */
 function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  const pad = (n: number, len = 2) => String(n).padStart(len, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 </script>
 

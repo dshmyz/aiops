@@ -64,6 +64,8 @@ export interface UseCapabilities {
   preview: Ref<NormalizedResult | null>;
   error: Ref<string>;
   loading: Ref<boolean>;
+  /** 能力存储是否已配置。false 时列表为空是"未启用"而非"零能力"。 */
+  configured: Ref<boolean>;
   testInputText: Ref<string>;
   searchText: Ref<string>;
   statusFilter: Ref<string>;
@@ -180,6 +182,9 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
   const preview = ref<NormalizedResult | null>(null);
   const error = ref('');
   const loading = ref(false);
+  // 能力存储是否已配置（后端 /v1/capabilities 的 configured 字段）。未配置时
+  // 列表为空是"未启用"，前端据此展示配置提示而非"零能力"。
+  const configured = ref(true);
   const testInputText = ref('{"environment":"prod"}');
   const searchText = ref('');
   const statusFilter = ref('all');
@@ -492,7 +497,10 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     loading.value = true;
     error.value = '';
     try {
-      capabilities.value = await listCapabilities();
+      const result = await listCapabilities();
+      capabilities.value = result.capabilities;
+      // configured=false 表示能力存储未配置，列表为空是"未启用"而非"零能力"。
+      configured.value = result.configured;
       if (capabilities.value.length > 0) {
         selectCapability(capabilities.value[0]);
       }
@@ -1015,6 +1023,7 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     preview,
     error,
     loading,
+    configured,
     testInputText,
     searchText,
     statusFilter,

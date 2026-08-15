@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
+  APIError,
   marketplaceDownload,
   marketplaceListRatings,
   marketplaceListVersions,
@@ -28,6 +29,8 @@ const total = ref(0);
 const loading = ref(false);
 const error = ref('');
 const semantic = ref(false);
+// 语义搜索未配置（后端 503）时的友好提示；区别于普通搜索失败。
+const semanticUnavailable = ref(false);
 
 const searchForm = reactive({
   naturalLanguage: '',
@@ -48,6 +51,7 @@ const nextOffsetShown = computed(() => capabilities.value.length < total.value);
 async function runSearch(semanticSearch: boolean, reset: boolean) {
   loading.value = true;
   error.value = '';
+  semanticUnavailable.value = false;
   try {
     const page = semanticSearch
       ? await marketplaceSemanticSearch(searchForm.naturalLanguage)
@@ -66,7 +70,13 @@ async function runSearch(semanticSearch: boolean, reset: boolean) {
     total.value = page.total ?? capabilities.value.length;
     semantic.value = page.semantic ?? false;
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '搜索失败';
+    // 语义搜索未配置（后端 503）时给可操作的引导，而不是笼统的"搜索失败"。
+    if (semanticSearch && err instanceof APIError && err.status === 503) {
+      semanticUnavailable.value = true;
+      error.value = '';
+    } else {
+      error.value = err instanceof Error ? err.message : '搜索失败';
+    }
   } finally {
     loading.value = false;
   }
@@ -266,6 +276,14 @@ async function submitPublish() {
       </div>
 
       <p v-if="error" class="error-text">{{ error }}</p>
+      <div
+        v-else-if="semanticUnavailable"
+        class="config-banner"
+        data-test="semantic-unavailable"
+      >
+        语义搜索未配置：未启用向量库（embedder）。当前可用关键字搜索；要启用语义召回，
+        请配置向量库后端后重试。
+      </div>
       <p v-if="semantic" class="hint-text">语义搜索模式：已按查询与能力的相关度召回 {{ total }} 个能力。</p>
 
       <div v-if="!loading && capabilities.length === 0" class="empty">没有匹配的能力。试试语义搜索或调整筛选条件。</div>
@@ -769,6 +787,16 @@ async function submitPublish() {
   margin: 0;
   font-size: 0.75rem;
   color: var(--color-danger, #d33);
+}
+
+.config-banner {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-bg-elevated, #f6f8fa);
+  border: 1px solid var(--color-warning-border, #d4a72c);
+  border-radius: var(--radius-lg, 8px);
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
 }
 
 .hint-text {

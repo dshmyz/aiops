@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { DiagnosticPackage } from '../types';
 import MarkdownContent from './MarkdownContent.vue';
 import {
@@ -8,9 +9,16 @@ import {
   labelForConfidence,
 } from '../labels';
 
-defineProps<{
+const props = defineProps<{
   diagnostic: DiagnosticPackage | null;
 }>();
+
+// 通用检查框架包（后端 diagnostics 对未接入能力的域返回，Data.framework=true）：
+// 不是实测数据，前端要如实标注，避免用户把"未接入"当成正常诊断结果。
+const isFramework = computed(() => {
+  const obs = props.diagnostic?.observations?.[0];
+  return !!(obs && (obs.data as Record<string, unknown> | undefined)?.framework === true);
+});
 </script>
 
 <template>
@@ -18,6 +26,7 @@ defineProps<{
     <div class="diagnostic-header">
       <div>
         <span class="badge tag-info">诊断包</span>
+        <span v-if="isFramework" class="badge tag-warning" data-test="framework-badge">通用检查框架（非实测数据）</span>
         <h3>{{ diagnostic.id }}</h3>
       </div>
       <small>{{ labelForEnvironment(diagnostic.environment) }}</small>

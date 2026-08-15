@@ -290,3 +290,49 @@ async function handlePublishAll() {
     </section>
   </section>
 </template>
+
+<style scoped>
+/* 状态筛选 tab（全部/草稿/待评审/已发布）：底部指示条 + active 高亮。
+ * 此前这些按钮是浏览器默认样式，看起来"没样式"。 */
+.status-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--color-border, #d0d7de);
+  margin-bottom: var(--space-3, 12px);
+}
+
+.status-tabs button {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 14px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary, #57606a);
+  border-radius: 0;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.status-tabs button:hover {
+  color: var(--color-text, #1f2328);
+}
+
+.status-tabs button.active {
+  color: var(--color-primary, #0969da);
+  border-bottom-color: var(--color-primary, #0969da);
+  font-weight: 600;
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  margin-bottom: var(--space-3, 12px);
+  font-size: 0.85rem;
+  color: var(--color-text-secondary, #57606a);
+}
+</style>

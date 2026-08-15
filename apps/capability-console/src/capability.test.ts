@@ -57,22 +57,23 @@ describe('canPublish', () => {
 });
 
 describe('BUILTIN_TOOL_NAMES', () => {
-  test('covers all five static tools registered in the backend', () => {
-    // 与 internal/tools/registry.go 中的常量保持一致：
-    //   ClusterStatusRead, TopicRetentionSet, GlusterVolumeHealthRead,
-    //   MinIOBucketHealthRead, KafkaConsumerLagRead
+  test('covers all six static tools registered in the backend', () => {
+    // 与 internal/tools/registry.go 中的常量保持一致。中间件工具
+    //（topic.retention.set / glusterfs.volume.health.read / minio.bucket.health.read /
+    // kafka.consumer_lag.read）已从后端硬编码中移除，是动态能力，不再占用静态工具名。
     expect(BUILTIN_TOOL_NAMES).toEqual([
       'cluster.status.read',
-      'topic.retention.set',
-      'glusterfs.volume.health.read',
-      'minio.bucket.health.read',
-      'kafka.consumer_lag.read',
+      'system.posture.read',
+      'alert.query',
+      'event.query',
+      'task.query',
+      'incident.view',
     ]);
   });
 
   test('is frozen at runtime so callers cannot accidentally mutate the shared constant', () => {
     expect(Object.isFrozen(BUILTIN_TOOL_NAMES)).toBe(true);
-    expect(BUILTIN_TOOL_NAMES.length).toBe(5);
+    expect(BUILTIN_TOOL_NAMES.length).toBe(6);
   });
 });
 
@@ -84,12 +85,13 @@ describe('hasStaticToolConflict', () => {
   });
 
   test('returns false for ordinary discovered capability names', () => {
-    // 注意：cluster.status.read / topic.retention.set / glusterfs.volume.health.read
-    // / minio.bucket.health.read / kafka.consumer_lag.read 都是内置工具名，会返回 true。
-    // 这里挑长得像但并不冲突的名字做反向断言。
+    // cluster.status.read 等是内置工具名会返回 true；这里挑长得像但并不冲突的
+    // 名字做反向断言。中间件工具名（如 topic.retention.set）现已是合法能力名，
+    // 不再冲突。
     expect(hasStaticToolConflict('minio.bucket.capacity.read')).toBe(false);
     expect(hasStaticToolConflict('kafka.topic.retention.set')).toBe(false);
     expect(hasStaticToolConflict('glusterfs.volume.health.check')).toBe(false);
+    expect(hasStaticToolConflict('topic.retention.set')).toBe(false);
   });
 
   test('returns false for empty and unrelated strings', () => {

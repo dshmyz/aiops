@@ -55,7 +55,7 @@ import type {
 import { normalizeCapability } from './capability';
 import { ref } from 'vue';
 
-class APIError extends Error {
+export class APIError extends Error {
   status: number;
   path: string;
 
@@ -172,21 +172,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export async function listCapabilities(): Promise<ManagedCapability[]> {
+export interface CapabilityListResult {
+  capabilities: ManagedCapability[];
+  /** 能力存储是否已配置。false 表示后端未配置能力管理（无 DB 且无
+   *  COPILOT_CAPABILITIES_DIR），列表为空并非"零能力"，前端应展示配置提示。 */
+  configured: boolean;
+}
+
+export async function listCapabilities(): Promise<CapabilityListResult> {
   const response = await fetch('/v1/capabilities', {
     headers: { 'Content-Type': 'application/json' },
   });
   if (import.meta.env.DEV && !response.headers.get('Content-Type')?.includes('application/json')) {
-    return localPreviewCapabilities();
+    return { capabilities: localPreviewCapabilities(), configured: true };
   }
-  const body = (await response.json()) as { capabilities?: Partial<ManagedCapability>[]; error?: string };
+  const body = (await response.json()) as { capabilities?: Partial<ManagedCapability>[]; configured?: boolean; error?: string };
   if (!response.ok) {
     throw new Error(body.error ?? '加载 Capability 失败');
   }
   if (!body.capabilities) {
     throw new Error('Capability 列表响应格式不正确');
   }
-  return body.capabilities.map(normalizeCapability);
+  return {
+    capabilities: body.capabilities.map(normalizeCapability),
+    configured: body.configured !== false,
+  };
 }
 
 export interface OpenAPIURLImportPayload {

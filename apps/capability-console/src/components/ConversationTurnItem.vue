@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { ConversationTurn, Block, DiagnosticPackage, AssistantStep } from '../types';
+import type { ConversationTurn, Block, DiagnosticPackage, AssistantStep, PlanSummary, RecommendationStatus } from '../types';
 import { formatRelativeTime, formatAbsoluteTime, formatResponseType } from '../conversationFormat';
 import AssistantSteps from './AssistantSteps.vue';
 import BlockRenderer from './BlockRenderer.vue';
@@ -115,6 +115,24 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
     return null;
   }
   return payload.diagnostic as DiagnosticPackage;
+});
+
+// 推荐落地状态（后端 Response.recommendation_plan / recommendations）：
+// 展示"AI 建议操作"卡片（已建 plan 等待确认）与每条推荐的处理结果/未落地原因。
+const recommendationPlan = computed<PlanSummary | null>(() => {
+  const payload = props.turn.response_payload;
+  if (!payload || !payload.recommendation_plan) {
+    return null;
+  }
+  return payload.recommendation_plan as PlanSummary;
+});
+
+const recommendationStatuses = computed<RecommendationStatus[]>(() => {
+  const payload = props.turn.response_payload;
+  if (!payload || !Array.isArray(payload.recommendations)) {
+    return [];
+  }
+  return payload.recommendations as RecommendationStatus[];
 });
 </script>
 
@@ -269,6 +287,37 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
       <ToolAnswerView v-if="isAssistant && toolAnswer" :tool="toolAnswer.tool" :answer="toolAnswer.answer" />
       <DiagnosticView v-if="isAssistant && diagnostic" :diagnostic="diagnostic" />
 
+      <!-- 推荐落地状态：AI 建议的操作卡片 + 每条推荐处理结果/未落地原因 -->
+      <div v-if="isAssistant && (recommendationPlan || recommendationStatuses.length)" class="recommendation-status" data-test="recommendation-status">
+        <article v-if="recommendationPlan" class="recommendation-plan-card">
+          <h4>AI 建议操作（待确认）</h4>
+          <p>工具：<code>{{ recommendationPlan.tool }}</code>（风险 {{ recommendationPlan.risk }}）
+            <template v-if="recommendationPlan.plan_id"> · plan {{ recommendationPlan.plan_id }}</template>
+          </p>
+        </article>
+        <ul v-if="recommendationStatuses.length" class="recommendation-list">
+          <li
+            v-for="r in recommendationStatuses"
+            :key="r.tool + r.status"
+            class="recommendation-item"
+            :class="`status-${r.status}`"
+          >
+            <code>{{ r.tool }}</code>
+            <span v-if="r.summary">：{{ r.summary }}</span>
+            <template v-if="r.status === 'plan_created'">
+              <span class="badge tag-success">已建 plan 待确认{{ r.plan_id ? '（' + r.plan_id + '）' : '' }}</span>
+            </template>
+            <template v-else-if="r.status === 'read_executed'">
+              <span class="badge tag-info">已执行</span>
+            </template>
+            <template v-else>
+              <span class="badge tag-error">未落地</span>
+              <span v-if="r.reason" class="recommendation-reason">{{ r.reason }}</span>
+            </template>
+          </li>
+        </ul>
+      </div>
+
       <div class="conversation-turn-actions">
         <button
           v-if="turn.error"
@@ -331,6 +380,58 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
 </template>
 
 <style scoped>
+.recommendation-status {
+  margin-top: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.recommendation-plan-card {
+  border: 1px solid var(--color-border, #d0d7de);
+  border-radius: 8px;
+  padding: var(--space-3);
+  background: var(--color-surface-2, #f6f8fa);
+}
+
+.recommendation-plan-card h4 {
+  margin: 0 0 var(--space-2);
+  font-size: 0.95rem;
+}
+
+.recommendation-plan-card p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.recommendation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.recommendation-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.88rem;
+  padding: var(--space-1) 0;
+}
+
+.recommendation-item code {
+  font-size: 0.85em;
+}
+
+.recommendation-reason {
+  color: var(--color-danger, #cf222e);
+  font-size: 0.82em;
+}
+
+.badge.tag-success { color: #1a7f37; }
+.badge.tag-error { color: #cf222e; }
+.badge.tag-info { color: #0969da; }
+
 .conversation-turn-item {
   display: flex;
   gap: var(--space-3);
@@ -474,6 +575,20 @@ const diagnostic = computed<DiagnosticPackage | null>(() => {
   overflow-wrap: anywhere;
   box-shadow: var(--shadow-sm);
   transition: transform 0.15s var(--ease-out);
+  /* 防止代码块/长行把气泡撑出容器，导致整页出现横向滚动条 */
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* markdown 代码块：超宽时块内横向滚动，而不是撑开消息气泡 */
+.conversation-turn-content :deep(pre) {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.conversation-turn-content :deep(pre code) {
+  white-space: pre;
 }
 
 .conversation-turn-item.user .conversation-turn-content {
