@@ -303,7 +303,18 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 	// 工具集。不用"域名+分隔符"这类用户不知道的规则——意图由 LLM 语义理解，
 	// 用户怎么问都行。知识型 → 空工具集，LLM 直接回答；工具型 → 只给该域工具。
 	intent := e.planIntent(ctx, message)
-	allTools := e.toolsForDomain(intent.Domain)
+	// 按意图裁剪工具集。意图规划失败/域不精确匹配（planIntent 回退 tool_call、
+	// LLM 返回的域与已发布能力名前缀不一致）时 toolsForDomain 可能返回空——
+	// 实时数据类请求在 0 工具下会被 LLM 纯文字作答（编造数据或回"无法获取"），
+	// 而 system prompt 又要求必须调用工具。此处回退全量工具集，保证数据请求
+	// 至少能取到数据；知识型请求（Intent=knowledge）仍走空工具集直接回答。
+	var allTools []tool.BaseTool
+	if intent.Intent == "tool_call" {
+		allTools = e.toolsForDomain(intent.Domain)
+		if len(allTools) == 0 {
+			allTools = e.tools
+		}
+	}
 
 	for step := 0; step < e.maxSteps; step++ {
 		lastStep = step

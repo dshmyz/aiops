@@ -322,7 +322,7 @@ func (a *HTTPAdapter) executeRead(ctx context.Context, capability Capability, in
 			}
 		}
 	}
-	name := firstString(input, "bucket", "topic", "volume", "name", "cluster")
+	name := resourceNameFromInput(capability, input)
 	return NormalizedResult{
 		Kind: capability.Output.Kind,
 		Resource: ResourceRef{
@@ -387,7 +387,7 @@ func (a *HTTPAdapter) executeWrite(ctx context.Context, capability Capability, i
 			}
 		}
 	}
-	name := firstString(input, "bucket", "topic", "volume", "name", "cluster")
+	name := resourceNameFromInput(capability, input)
 	return NormalizedResult{
 		Kind: capability.Output.Kind,
 		Resource: ResourceRef{
@@ -508,13 +508,35 @@ func buildPath(path string, input map[string]any) (string, error) {
 	return path, nil
 }
 
-func firstString(input map[string]any, names ...string) string {
-	for _, name := range names {
-		if value, ok := input[name].(string); ok && value != "" {
-			return value
+// ResourceNameKey returns the input field name that identifies the affected
+// resource for a capability. It is derived from the backend path variables —
+// the REST path itself declares which input field is the resource (e.g.
+// {topic}) — so callers never need a hardcoded field-name list. Prefers the
+// path variable matching resource_type; falls back to the first path variable;
+// empty when the path declares no variable.
+func ResourceNameKey(capability Capability) string {
+	vars := pathVariables(capability.Backend.Path)
+	for _, v := range vars {
+		if v == capability.ResourceType {
+			return v
 		}
 	}
+	if len(vars) > 0 {
+		return vars[0]
+	}
 	return ""
+}
+
+// resourceNameFromInput returns the input value naming the affected resource,
+// derived from the capability's backend path. Empty when the path declares no
+// variable or the input carries no such value.
+func resourceNameFromInput(capability Capability, input map[string]any) string {
+	key := ResourceNameKey(capability)
+	if key == "" {
+		return ""
+	}
+	name, _ := input[key].(string)
+	return name
 }
 
 func isSensitive(name string) bool {

@@ -15,15 +15,15 @@ import (
 )
 
 const (
-	envAssistantProvider = "COPILOT_ASSISTANT_PROVIDER"
-	envOpenAIAPIKey      = "COPILOT_OPENAI_API_KEY"
-	envOpenAIModel       = "COPILOT_OPENAI_MODEL"
-	envOpenAIBaseURL     = "COPILOT_OPENAI_BASE_URL"
-	envOpenAITimeout     = "COPILOT_OPENAI_TIMEOUT"
-	envOpenAIRetry       = "COPILOT_OPENAI_RETRY"
+	envAssistantProvider  = "COPILOT_ASSISTANT_PROVIDER"
+	envOpenAIAPIKey       = "COPILOT_OPENAI_API_KEY"
+	envOpenAIModel        = "COPILOT_OPENAI_MODEL"
+	envOpenAIBaseURL      = "COPILOT_OPENAI_BASE_URL"
+	envOpenAITimeout      = "COPILOT_OPENAI_TIMEOUT"
+	envOpenAIRetry        = "COPILOT_OPENAI_RETRY"
 	envOpenAIRetryBackoff = "COPILOT_OPENAI_RETRY_BACKOFF"
-	envPromptsDir        = "COPILOT_PROMPTS_DIR"
-	envOpenAIMaxTokens   = "COPILOT_OPENAI_MAX_TOKENS"
+	envPromptsDir         = "COPILOT_PROMPTS_DIR"
+	envOpenAIMaxTokens    = "COPILOT_OPENAI_MAX_TOKENS"
 
 	// 推理模型配置（可选，不设则复用主模型）
 	envReasoningModel   = "COPILOT_REASONING_MODEL"
@@ -167,21 +167,21 @@ func NewPlannerFromEnvWithPrompts(ctx context.Context, env map[string]string) (P
 
 func EnvMapFromLookup(lookup func(string) string) map[string]string {
 	return map[string]string{
-		envAssistantProvider: lookup(envAssistantProvider),
-		envOpenAIAPIKey:      lookup(envOpenAIAPIKey),
-		envOpenAIModel:       lookup(envOpenAIModel),
-		envOpenAIBaseURL:     lookup(envOpenAIBaseURL),
-		envOpenAIRetry:       lookup(envOpenAIRetry),
+		envAssistantProvider:  lookup(envAssistantProvider),
+		envOpenAIAPIKey:       lookup(envOpenAIAPIKey),
+		envOpenAIModel:        lookup(envOpenAIModel),
+		envOpenAIBaseURL:      lookup(envOpenAIBaseURL),
+		envOpenAIRetry:        lookup(envOpenAIRetry),
 		envOpenAIRetryBackoff: lookup(envOpenAIRetryBackoff),
-		envOpenAITimeout:     lookup(envOpenAITimeout),
-		envOpenAIMaxTokens:   lookup(envOpenAIMaxTokens),
-		envPromptsDir:        lookup(envPromptsDir),
-		envReasoningModel:    lookup(envReasoningModel),
-		envReasoningBaseURL:  lookup(envReasoningBaseURL),
-		envReasoningAPIKey:   lookup(envReasoningAPIKey),
-		envFallbackModel:    lookup(envFallbackModel),
-		envFallbackBaseURL:  lookup(envFallbackBaseURL),
-		envFallbackAPIKey:   lookup(envFallbackAPIKey),
+		envOpenAITimeout:      lookup(envOpenAITimeout),
+		envOpenAIMaxTokens:    lookup(envOpenAIMaxTokens),
+		envPromptsDir:         lookup(envPromptsDir),
+		envReasoningModel:     lookup(envReasoningModel),
+		envReasoningBaseURL:   lookup(envReasoningBaseURL),
+		envReasoningAPIKey:    lookup(envReasoningAPIKey),
+		envFallbackModel:      lookup(envFallbackModel),
+		envFallbackBaseURL:    lookup(envFallbackBaseURL),
+		envFallbackAPIKey:     lookup(envFallbackAPIKey),
 	}
 }
 
@@ -237,7 +237,7 @@ func NewReasoningModelFromEnv(ctx context.Context, env map[string]string) model.
 		baseURL = strings.TrimSpace(env[envOpenAIBaseURL]) // fallback 到主模型 URL
 	}
 	temperature := float32(0)
-	maxTokens := 4096 // 推理模型给更多 token
+	maxTokens := 4096           // 推理模型给更多 token
 	timeout := 60 * time.Second // 推理模型需要更长时间
 
 	chat, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{

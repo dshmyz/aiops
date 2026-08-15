@@ -3,6 +3,7 @@ package execution_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,14 +11,19 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
-// TestGenericDryRunPreview 验证已注册写工具的通用 dry-run 预演：
-// 返回摘要和影响资源，不实际执行写操作，也不包含具体命令（命令由真实
-// 执行系统解析）。
-func TestGenericDryRunPreview(t *testing.T) {
+// TestDryRunTemplateResourceKey 验证影响资源的字段名来自 DryRunTemplate.ResourceKey
+// （由能力 backend.path 路径变量派生，如 {topic}），而不是 Go 里写死的字段名列表：
+// 传 ResourceKey="topic" 时，资源取自 input["topic"]，不依赖 name/bucket/volume
+// 等其它字段是否存在。
+func TestDryRunTemplateResourceKey(t *testing.T) {
 	t.Parallel()
 	ensureMiddlewareWriteTool(t)
 	svc := execution.NewDryRunService()
-	svc.Register("topic.retention.set", execution.GenericDryRunHandler)
+	svc.Register("topic.retention.set", execution.TemplateDryRunHandler(execution.DryRunTemplate{
+		Summary:      "将把 {environment} 环境的 topic {topic} 的消息保留时间设置为 {retention_hours} 小时。",
+		ResourceType: "topic",
+		ResourceKey:  "topic",
+	}))
 
 	result, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{
 		"environment":     "prod",
@@ -30,8 +36,64 @@ func TestGenericDryRunPreview(t *testing.T) {
 	if result.Summary == "" {
 		t.Error("Summary is empty, dry-run should describe the intended operation")
 	}
-	if len(result.AffectedResources) == 0 {
-		t.Error("AffectedResources is empty, should list impacted topic")
+	if len(result.AffectedResources) != 1 || !strings.Contains(result.AffectedResources[0], "orders") {
+		t.Fatalf("AffectedResources = %v, want the resource named by ResourceKey", result.AffectedResources)
+	}
+}
+
+// TestTemplateDryRunHandler 验证数据驱动的 dry-run 预览：具体命令与风险警告
+// 由 DryRunTemplate（来自能力 YAML 的 dry_run 段）声明，handler 只按模板渲染
+// {field} 占位符，不在 Go 里写死任何组件专属内容。
+//
+// 修复回归：dry-run 曾丢命令/风险警告（operator 确认前看不到"缩短保留时间会删
+// 历史消息"）；修复方向是下沉到能力 YAML，而不是恢复组件专属 handler。
+func TestTemplateDryRunHandler(t *testing.T) {
+	t.Parallel()
+	ensureMiddlewareWriteTool(t)
+	svc := execution.NewDryRunService()
+	// 模拟 topic.retention.set 能力 YAML 的 dry_run 段转译后的模板
+	svc.Register("topic.retention.set", execution.TemplateDryRunHandler(execution.DryRunTemplate{
+		Summary: "将把 {environment} 环境的 topic {topic} 的消息保留时间设置为 {retention_hours} 小时。",
+		Commands: []string{
+			"kafka-configs --bootstrap-server <broker> --entity-type topics --entity-name {topic} --alter --add-config retention.hours={retention_hours}",
+		},
+		Warnings: []string{
+			"缩短保留时间可能导致超过 {retention_hours} 小时的历史消息被删除，请确认下游消费和审计需求。",
+		},
+		ResourceType: "topic",
+		ResourceKey:  "topic",
+	}))
+
+	result, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{
+		"environment":     "prod",
+		"topic":           "orders",
+		"retention_hours": 72,
+	})
+	if err != nil {
+		t.Fatalf("DryRun: %v", err)
+	}
+
+	// 摘要与影响资源已渲染
+	if !strings.Contains(result.Summary, "topic orders") {
+		t.Errorf("Summary = %q, want rendered topic in summary", result.Summary)
+	}
+	if len(result.AffectedResources) != 1 || !strings.Contains(result.AffectedResources[0], "orders") {
+		t.Fatalf("AffectedResources = %v, want the affected topic", result.AffectedResources)
+	}
+
+	// 具体命令渲染出实际参数
+	commands := strings.Join(result.Commands, "\n")
+	if !strings.Contains(commands, "kafka-configs") || !strings.Contains(commands, "retention.hours=72") || !strings.Contains(commands, "orders") {
+		t.Errorf("Commands not rendered from template, got: %q", commands)
+	}
+
+	// 风险警告渲染出实际保留时长
+	if len(result.Warnings) == 0 {
+		t.Fatal("Warnings empty, dry-run should warn about history message deletion")
+	}
+	warnings := strings.Join(result.Warnings, "\n")
+	if !strings.Contains(warnings, "历史消息") || !strings.Contains(warnings, "72") {
+		t.Errorf("Warnings not rendered from template, got: %q", warnings)
 	}
 }
 
@@ -75,7 +137,10 @@ func TestDryRunSuggestsStrategyForWriteTool(t *testing.T) {
 	t.Parallel()
 	ensureMiddlewareWriteTool(t)
 	svc := execution.NewDryRunService()
-	svc.Register("topic.retention.set", execution.GenericDryRunHandler)
+	svc.Register("topic.retention.set", execution.TemplateDryRunHandler(execution.DryRunTemplate{
+		ResourceType: "topic",
+		ResourceKey:  "topic",
+	}))
 
 	result, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{
 		"environment":     "prod",

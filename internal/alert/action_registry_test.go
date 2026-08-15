@@ -100,6 +100,65 @@ func TestAlertActionRegistryDeleteRemovesAndReloads(t *testing.T) {
 	}
 }
 
+// TestAlertActionRegistryUpsertPreservesDisabledState 验证 Enabled 三态语义：
+//   - 新建规则（Enabled 未显式设置）默认启用（Enabled=true 落库）
+//   - 显式停用（Enabled=&false）持久化到 DB，且不参与 List/Match
+//   - 编辑停用中的规则（不带 Enabled 字段）保留禁用状态，不会静默复活
+//
+// 修复回归：serializeRule 恒写 Enabled:true，操作者停用的规则一编辑就复活。
+// 用 fs.Get 校验 DB 记录，而非 registry.List()——List 只返回启用规则，无法
+// 区分"未落库"和"已停用"。
+func TestAlertActionRegistryUpsertPreservesDisabledState(t *testing.T) {
+	fs := &fakeRuleStore{}
+	registry := alert.NewAlertActionRegistry(fs)
+	ctx := context.Background()
+
+	// 1. 新建规则（不带 Enabled）→ 默认启用
+	if err := registry.Upsert(ctx, sampleAlertAction("capacity-critical-handler")); err != nil {
+		t.Fatalf("Upsert new rule: %v", err)
+	}
+	rec, err := fs.Get(ctx, "capacity-critical-handler")
+	if err != nil {
+		t.Fatalf("Get after new upsert: %v", err)
+	}
+	if !rec.Enabled {
+		t.Fatal("new rule should default to enabled in DB")
+	}
+
+	// 2. 显式停用 → 持久化，且不再被匹配
+	disabled := false
+	action := sampleAlertAction("capacity-critical-handler")
+	action.Enabled = &disabled
+	if err := registry.Upsert(ctx, action); err != nil {
+		t.Fatalf("Upsert disabled rule: %v", err)
+	}
+	rec, err = fs.Get(ctx, "capacity-critical-handler")
+	if err != nil {
+		t.Fatalf("Get after disable: %v", err)
+	}
+	if rec.Enabled {
+		t.Fatal("explicitly disabled rule should persist Enabled=false in DB")
+	}
+	if len(registry.List()) != 0 {
+		t.Fatalf("List() = %d after disable, want 0 (disabled rules excluded)", len(registry.List()))
+	}
+
+	// 3. 编辑停用中的规则，不带 Enabled 字段 → 保留禁用状态
+	if err := registry.Upsert(ctx, sampleAlertAction("capacity-critical-handler")); err != nil {
+		t.Fatalf("Upsert without enabled field: %v", err)
+	}
+	rec, err = fs.Get(ctx, "capacity-critical-handler")
+	if err != nil {
+		t.Fatalf("Get after edit: %v", err)
+	}
+	if rec.Enabled {
+		t.Fatal("editing a disabled rule without an enabled field must preserve disabled state (regression: previously resurrected to enabled)")
+	}
+	if len(registry.List()) != 0 {
+		t.Fatalf("List() = %d after editing disabled rule, want 0", len(registry.List()))
+	}
+}
+
 // TestAlertActionSerializeRoundTrip 验证 serializeRule → deserializeRule 往返一致，
 // 保证 DB 存储的 alert_match / tool_sequence JSON 能正确还原为可匹配的规则。
 func TestAlertActionSerializeRoundTrip(t *testing.T) {

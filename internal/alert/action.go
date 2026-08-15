@@ -12,11 +12,15 @@ import (
 // ToolSequence 是按序执行的工具序列（诊断+处置）；最后一步若是写操作
 // 且 ExecuteLastStep=false，则自动创建 PendingConfirmation plan 等人工确认。
 type AlertAction struct {
-	Name             string            `json:"name"`
-	AlertMatch       AlertMatch        `json:"alert_match"`
-	ToolSequence     []AlertActionStep `json:"tool_sequence"`
-	ExecuteLastStep  bool              `json:"execute_last_step,omitempty"` // true=直接执行最后一步，false=建 plan
-	Description      string            `json:"description"`
+	Name            string            `json:"name"`
+	AlertMatch      AlertMatch        `json:"alert_match"`
+	ToolSequence    []AlertActionStep `json:"tool_sequence"`
+	ExecuteLastStep bool              `json:"execute_last_step,omitempty"` // true=直接执行最后一步，false=建 plan
+	Description     string            `json:"description"`
+	// Enabled 控制规则是否生效。nil 表示未显式设置：新建默认生效、编辑保留 DB
+	// 现有状态（见 AlertActionRegistry.Upsert）；显式 true/false 表示启用/停用。
+	// 用指针以区分"未设置"与"显式停用"——零值 false 无法表达"新建默认生效"。
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // AlertActionStep 是序列中的一步。

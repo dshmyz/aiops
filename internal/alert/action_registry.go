@@ -75,6 +75,21 @@ func (r *AlertActionRegistry) Upsert(ctx context.Context, action AlertAction) er
 	if r.store == nil {
 		return errors.New("alert action store not configured")
 	}
+	// Enabled 未显式设置（nil）：新建默认生效；编辑已有规则保留 DB 现有状态，
+	// 避免一次 Upsert 把操作者的停用状态静默抹成启用（修复前 serializeRule
+	// 恒写 Enabled:true，停用的规则一编辑就复活）。
+	if action.Enabled == nil {
+		existing, err := r.store.Get(ctx, action.Name)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			enabled := true
+			action.Enabled = &enabled
+		case err != nil:
+			return err
+		default:
+			action.Enabled = &existing.Enabled
+		}
+	}
 	rec, err := serializeRule(action)
 	if err != nil {
 		return err
@@ -106,13 +121,17 @@ func serializeRule(action AlertAction) (store.AlertActionRuleRecord, error) {
 	if err != nil {
 		return store.AlertActionRuleRecord{}, err
 	}
+	enabled := true
+	if action.Enabled != nil {
+		enabled = *action.Enabled
+	}
 	return store.AlertActionRuleRecord{
 		Name:            action.Name,
 		AlertMatch:      alertMatch,
 		ToolSequence:    toolSequence,
 		ExecuteLastStep: action.ExecuteLastStep,
 		Description:     action.Description,
-		Enabled:         true,
+		Enabled:         enabled,
 	}, nil
 }
 
@@ -122,6 +141,8 @@ func deserializeRule(rec store.AlertActionRuleRecord) (AlertAction, error) {
 	action.Name = rec.Name
 	action.Description = rec.Description
 	action.ExecuteLastStep = rec.ExecuteLastStep
+	enabled := rec.Enabled
+	action.Enabled = &enabled
 
 	if err := json.Unmarshal(rec.AlertMatch, &action.AlertMatch); err != nil {
 		return AlertAction{}, err

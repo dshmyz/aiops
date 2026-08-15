@@ -15,7 +15,7 @@ type skillStoreAdapter struct {
 }
 
 // NewSkillLookupAdapter 用 store.SkillStore 创建一个 assistant.SkillLookup。
-// 传入 nil 时返回 nil（ActionRouter 会当作无 Skill 查询处理）。
+// 传入 nil 时返回 nil（调用方视作无 Skill 查询）。
 func NewSkillLookupAdapter(s store.SkillStore) assistant.SkillLookup {
 	if s == nil {
 		return nil

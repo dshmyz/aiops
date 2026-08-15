@@ -166,10 +166,24 @@ func CapabilityToolsFromCapabilities(
 
 // HTTPProbeTool 通用 HTTP 探活工具：对任意 URL 发请求，返回状态码、响应时间、TLS 证书等。
 // 注意：不发请求时无状态，每次调用按需 new 一个带超时的 client（超时可随参数变化）。
-type HTTPProbeTool struct{}
+//
+// SSRF 防线默认开启：拒绝私网/回环目标（含 DNS 复查、重定向每跳复查、DNS
+// pinning）。allowInternal 仅由操作者配置的内部端点巡检（HealthChecker）开启，
+// 因为操作者显式配置的端点属于可信运维配置，不属于不可信输入威胁面——否则
+// 定时巡检内部端点会全被误伤。
+type HTTPProbeTool struct {
+	allowInternal bool
+}
 
 func NewHTTPProbeTool() *HTTPProbeTool {
 	return &HTTPProbeTool{}
+}
+
+// NewInternalHTTPProbeTool 创建允许探测内部地址的探活工具，供操作者配置的
+// 内部端点巡检（HealthChecker）使用。SSRF 防线面向不可信输入；操作者显式
+// 配置的内部端点不在此威胁面内。
+func NewInternalHTTPProbeTool() *HTTPProbeTool {
+	return &HTTPProbeTool{allowInternal: true}
 }
 
 func (t *HTTPProbeTool) Info(_ context.Context) (*schema.ToolInfo, error) {
@@ -215,11 +229,40 @@ func (t *HTTPProbeTool) InvokableRun(ctx context.Context, argumentsInJSON string
 		args.TimeoutSeconds = 10
 	}
 
-	// 发请求（校验 URL 防止 SSRF 和 nil dereference）
+	// 发请求。SSRF 防线默认开启；allowInternal（操作者配置的内部巡检）跳过，
+	// 否则定时探活内部端点会被自身防线误伤。
 	start := time.Now()
 	client := &http.Client{Timeout: time.Duration(args.TimeoutSeconds) * time.Second}
-	if err := validateProbeURL(ctx, args.URL); err != nil {
-		return "", err
+	if !t.allowInternal {
+		pinIP, err := validateProbeURL(ctx, args.URL)
+		if err != nil {
+			return "", err
+		}
+		// 重定向每跳复查：默认 CheckRedirect 跟随最多 10 跳且不重检目标，攻击者
+		// 可用 302 跳到 169.254.169.254 等内部地址绕过初检。对每一跳重新校验。
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after %d redirects", len(via))
+			}
+			if _, err := validateProbeURL(ctx, req.URL.String()); err != nil {
+				return fmt.Errorf("redirect target blocked: %w", err)
+			}
+			return nil
+		}
+		// DNS pinning：用初检解析出的 IP 直连（Host 头保留原始域名），使校验时
+		// 的解析与连接时的解析是同一结果，消除 DNS rebinding 的 TOCTOU 窗口。
+		if pinIP != nil {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				_, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				var d net.Dialer
+				return d.DialContext(ctx, network, net.JoinHostPort(pinIP.String(), port))
+			}
+			client.Transport = transport
+		}
 	}
 	req, err := http.NewRequest(args.Method, args.URL, nil)
 	if err != nil {
@@ -271,32 +314,34 @@ var dnsResolve = func(ctx context.Context, host string) ([]net.IP, error) {
 	return net.DefaultResolver.LookupIP(ctx, "ip", host)
 }
 
-// validateProbeURL 校验探测 URL，防止 SSRF 攻击。
+// validateProbeURL 校验探测 URL，防止 SSRF 攻击。返回首个允许的解析 IP
+// （pinIP，直接 IP 输入时返回该 IP），供调用方做 DNS pinning：用同一解析
+// 结果直连，消除"校验时解析一次、连接时再解析一次"的 DNS rebinding TOCTOU。
 // ctx 用于 DNS 复查的超时与取消传导：请求被取消时，探测中的 DNS 查询也会中止，
 // 而不是继续占用 3s 的独立后台超时。
-func validateProbeURL(ctx context.Context, raw string) error {
+func validateProbeURL(ctx context.Context, raw string) (net.IP, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
+		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("unsupported scheme %q, only http/https allowed", u.Scheme)
+		return nil, fmt.Errorf("unsupported scheme %q, only http/https allowed", u.Scheme)
 	}
 	host := u.Hostname()
 	if host == "" {
-		return fmt.Errorf("missing host")
+		return nil, fmt.Errorf("missing host")
 	}
 	// 阻止访问内部网络
 	if ip := net.ParseIP(host); ip != nil {
 		if isBlockedIP(ip) {
-			return fmt.Errorf("internal address %q blocked", host)
+			return nil, fmt.Errorf("internal address %q blocked", host)
 		}
-		return nil
+		return ip, nil
 	}
 	// 阻止知名内部域名
 	for _, blocked := range []string{"localhost", "metadata.google.internal", "169.254.169.254"} {
 		if host == blocked || strings.HasSuffix(host, "."+blocked) {
-			return fmt.Errorf("internal host %q blocked", host)
+			return nil, fmt.Errorf("internal host %q blocked", host)
 		}
 	}
 	// DNS 复查：域名虽不是内网字面量，但解析结果可能指向内网
@@ -305,14 +350,18 @@ func validateProbeURL(ctx context.Context, raw string) error {
 	ips, err := dnsResolve(ctx, host)
 	if err != nil {
 		// 解析失败时返回明确的 SSRF 拒绝理由，避免静默放行。
-		return fmt.Errorf("resolve %q: %w", host, err)
+		return nil, fmt.Errorf("resolve %q: %w", host, err)
 	}
 	for _, ip := range ips {
 		if isBlockedIP(ip) {
-			return fmt.Errorf("internal address %q resolves to blocked IP %s", host, ip)
+			return nil, fmt.Errorf("internal address %q resolves to blocked IP %s", host, ip)
 		}
 	}
-	return nil
+	if len(ips) == 0 {
+		// 解析成功但无地址时同样不放行（无可用目标，且无法 pin）。
+		return nil, fmt.Errorf("resolve %q: no addresses", host)
+	}
+	return ips[0], nil
 }
 
 // isBlockedIP 判断 IP 是否属于禁止探测的内网/保留地址。

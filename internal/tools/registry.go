@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	ClusterStatusRead       = "cluster.status.read"
+	ClusterStatusRead = "cluster.status.read"
 	// QuerySystemPosture is the system-level posture read tool (借鉴-1: 系统
 	// 态势 SLA 入口). It aggregates multi-domain health/SLA status into a
 	// single view so the operator can ask "系统怎么样" and get an overview
@@ -557,6 +557,20 @@ func dynamicInteger(value any) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// SameDefinition 比较两个 Tool 定义是否语义等价：比较实际参与执行/校验的字段，
+// 而非逐字段相等（结构体比较会漏掉语义、且对新增字段敏感）。动态能力派生
+// （ToTool）与静态注册的同名工具若在以下执行语义字段上一致，即视为同一工具，
+// 保证运行时注册/去重（internal/capabilities/runtime.go）的判定显式且稳定。
+func SameDefinition(a, b Tool) bool {
+	return a.Name == b.Name &&
+		a.Operation == b.Operation &&
+		a.Risk == b.Risk &&
+		a.RollbackDescription == b.RollbackDescription &&
+		a.Domain == b.Domain &&
+		a.ResourceType == b.ResourceType &&
+		a.SupportsDryRun == b.SupportsDryRun
 }
 
 func validateToolDefinition(tool Tool) error {

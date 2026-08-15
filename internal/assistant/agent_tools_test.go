@@ -2,7 +2,10 @@ package assistant
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -97,7 +100,7 @@ func TestValidateProbeURL_SSRF(t *testing.T) {
 			}
 			defer func() { dnsResolve = old }()
 
-			err := validateProbeURL(context.Background(), tc.raw)
+			_, err := validateProbeURL(context.Background(), tc.raw)
 			blocked := err != nil
 			if blocked != tc.wantBlock {
 				t.Fatalf("validateProbeURL(%q) blocked=%v, want blocked=%v (err=%v)", tc.raw, blocked, tc.wantBlock, err)
@@ -106,6 +109,34 @@ func TestValidateProbeURL_SSRF(t *testing.T) {
 				t.Fatalf("validateProbeURL(%q) error %q missing substring %q", tc.raw, err.Error(), tc.wantSubstr)
 			}
 		})
+	}
+}
+
+// TestHTTPProbeToolInternalProbe 验证 SSRF 防线与内部巡检的边界：
+//   - 默认探活工具（agent 触达路径）拦截内部端点，在发请求前就拒绝
+//   - allowInternal 探活工具（HealthChecker 操作者配置的内部端点巡检）
+//     不被 SSRF 拦截，能正常探测本机服务
+//
+// 修复回归：HealthChecker 定时巡检内部端点曾被无条件 SSRF 拦截，导致巡检全挂。
+func TestHTTPProbeToolInternalProbe(t *testing.T) {
+	// 默认工具：内部端点应在发请求前被拒绝
+	_, err := NewHTTPProbeTool().InvokableRun(context.Background(), `{"url":"http://127.0.0.1:1/health","timeout_seconds":1}`)
+	if err == nil || !strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("default probe should block internal endpoint before connecting, got err=%v", err)
+	}
+
+	// allowInternal 工具：探活本机服务不被 SSRF 拦截
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	out, err := NewInternalHTTPProbeTool().InvokableRun(context.Background(), fmt.Sprintf(`{"url":%q,"timeout_seconds":5}`, server.URL))
+	if err != nil {
+		t.Fatalf("internal probe should not be SSRF-blocked: %v", err)
+	}
+	if !strings.Contains(out, `"status_code": 200`) {
+		t.Fatalf("probe output missing status_code 200: %s", out)
 	}
 }
 

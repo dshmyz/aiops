@@ -155,10 +155,6 @@ func buildLLMFormatUserMessage(req FormatRequest) string {
 		sb.WriteString("\n\n## 关联 Skill SOP（整形时遵循其输出约束）\n")
 		sb.WriteString(strings.Join(req.SkillContents, "\n\n---\n\n"))
 	}
-	if strings.TrimSpace(req.ActionCode) != "" {
-		sb.WriteString("\n\n## 匹配的 Action\n")
-		sb.WriteString(req.ActionCode)
-	}
 	return sb.String()
 }
 

@@ -647,3 +647,26 @@ func TestHTTPAdapterNoAuthWhenTypeEmpty(t *testing.T) {
 		t.Fatalf("Authorization = %q, want empty", capturedAuth)
 	}
 }
+
+// TestResourceNameKeyDerivesFromBackendPath 验证影响资源的字段名从 backend.path
+// 路径变量派生（{bucket} 就是输入里的资源字段），而不是写死的字段名列表。优先匹配
+// resource_type，无匹配时取第一个路径变量，路径无变量时为空。
+func TestResourceNameKeyDerivesFromBackendPath(t *testing.T) {
+	t.Parallel()
+	cap := validReadCapability()
+	if key := capabilities.ResourceNameKey(cap); key != "bucket" {
+		t.Fatalf("ResourceNameKey = %q, want %q (path variable matching resource_type)", key, "bucket")
+	}
+
+	// 路径变量与 resource_type 不匹配时，回退到第一个路径变量。
+	cap.ResourceType = "volume"
+	if key := capabilities.ResourceNameKey(cap); key != "cluster" {
+		t.Fatalf("ResourceNameKey = %q, want first path variable %q", key, "cluster")
+	}
+
+	// 路径无变量时返回空，调用方因此不展示影响资源。
+	cap.Backend.Path = "/api/minio/buckets/all"
+	if key := capabilities.ResourceNameKey(cap); key != "" {
+		t.Fatalf("ResourceNameKey = %q, want empty for variable-less path", key)
+	}
+}

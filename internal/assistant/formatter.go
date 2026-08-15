@@ -31,8 +31,6 @@ type FormatRequest struct {
 	// （Tool + Answer），向后兼容；非空时 CodeFallbackFormatter 遍历
 	// FactSet 生成每个工具的 tool_trace block，Summary 聚合所有事实。
 	FactSet []ToolFact
-	// ActionCode 是匹配到的 Action 编码（可为空，表示无 Action 匹配）
-	ActionCode string
 	// SkillContents 是加载的 Skill SOP 内容（用于约束整形格式）
 	SkillContents []string
 }

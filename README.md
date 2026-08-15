@@ -39,9 +39,13 @@ It regenerates `internal/assistant/eval/report.md` with per-category pass rates 
 
 ## Assistant Boundary
 
-`POST /v1/assistant/messages` currently uses a deterministic planner for local
-and CI stability. It can classify simple cluster status and topic retention
-requests, then hands the candidate intent to the existing Go safety boundary.
+`POST /v1/assistant/messages` uses a deterministic planner for local and CI
+stability. It routes middleware domain diagnostics by the registered domain
+names (data-driven: the domain list comes from YAML capability registrations,
+no hardcoded component keywords), then hands the candidate intent to the
+existing Go safety boundary. Platform intents (alerts / system posture /
+events / tasks / cluster status) are routed only by the LLM planner — the
+deterministic mode has no keyword table and clarifies instead.
 
 Eino is available behind the assistant planner boundary through `EinoPlanner`.
 The checked-in adapter uses Eino core interfaces and can wrap a provider-backed

@@ -36,7 +36,10 @@ var (
 )
 
 const (
-	clarificationMessage   = "I can help with cluster status or topic retention. Please include environment and required parameters."
+	// clarificationMessage 是确定性模式（未配置 LLM）下默认的澄清文案：
+	// 该模式只做数据驱动的中间件域诊断，平台意图（告警/态势/事件/任务）与写意图
+	// 均需 LLM 路径，提示用户点名已接入域或配置大模型。
+	clarificationMessage   = "当前为确定性模式，仅支持中间件域诊断（请在消息中点名 kafka/minio/glusterfs 等已接入域）；告警/态势/事件/任务等平台查询需配置大模型（COPILOT_ASSISTANT_PROVIDER=eino-openai）。"
 	conversationTitleMax   = 50
 	conversationPreviewMax = 500
 	historyTurnLimit       = 10
@@ -99,7 +102,7 @@ type Service struct {
 	// 不为 nil 时，handleStatelessWithHistory 走新路径（LLM 自主选工具），
 	// 跳过旧的 planner + capability matching 链路。
 	agentExecutor *AgentExecutor
-	// supervisor 是顶层编排者：按 Action 的 AgentRole 分派执行。
+	// supervisor 是通用助手入口（恒 supervisor 角色，见 supervisor.go）。
 	// WithAgentExecutor 注入 executor 时自动创建，nil 时退化为直接调用 executor。
 	supervisor *Supervisor
 }
@@ -233,7 +236,7 @@ func (s *Service) WithAutonomy(c *autonomy.Controller) *Service {
 
 // WithAgentExecutor 注入基于 LLM function calling 的执行器。
 // 设置后 handleStatelessWithHistory 走新路径：LLM 自主选工具、自动循环。
-// 同时自动创建 Supervisor 用于按 Action 角色分派执行。
+// 同时自动创建 Supervisor 作为通用助手分派入口。
 func (s *Service) WithAgentExecutor(e *AgentExecutor) *Service {
 	s.agentExecutor = e
 	s.supervisor = NewSupervisor(e)
@@ -288,7 +291,7 @@ type Response struct {
 	// 跳过+原因）。让操作员看到每条推荐为何落地或未落地，而不是静默丢弃。
 	// RecommendationPlan 兼容保留，指向第一个成功建 plan 的推荐。
 	Recommendations []RecommendationStatus `json:"recommendations,omitempty"`
-	Trace              *AssistantTrace      `json:"trace,omitempty"`
+	Trace           *AssistantTrace        `json:"trace,omitempty"`
 	// Blocks 是结构化响应块，对齐 SxDevOps AIOps 2.0 的 block 协议。
 	// 前端按 Block.Type 分发到对应渲染组件（证据时间线、审批表单、风险提示等）。
 	// 当为空时 JSON 中省略此字段（omitempty），向后兼容。
@@ -319,12 +322,12 @@ type PlanSummary struct {
 //
 // 未落地的推荐也要如实上报原因，避免"诊断给了建议却静默消失"。
 type RecommendationStatus struct {
-	Tool     string `json:"tool"`
-	Summary  string `json:"summary,omitempty"`
-	Status   string `json:"status"`
-	Reason   string `json:"reason,omitempty"`
-	PlanID   string `json:"plan_id,omitempty"`
-	Risk     string `json:"risk,omitempty"`
+	Tool      string `json:"tool"`
+	Summary   string `json:"summary,omitempty"`
+	Status    string `json:"status"`
+	Reason    string `json:"reason,omitempty"`
+	PlanID    string `json:"plan_id,omitempty"`
+	Risk      string `json:"risk,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
@@ -745,7 +748,10 @@ func (s *Service) handleWithAgentExecutor(ctx context.Context, user identity.Cur
 	result := s.supervisor.Dispatch(toolCtx, message, history, nil)
 	if result == nil || result.Error != nil {
 		if result == nil {
-			return Response{}, nil
+			// 不可静默吞成空 200：supervisor 返回空（如无执行器）时前端会得到
+			// 无消息的空白响应且无任何日志/错误，故障被藏起来。与流式路径
+			//（发错误事件）一致地报错。
+			return Response{}, fmt.Errorf("agent executor returned no result")
 		}
 		return Response{}, result.Error
 	}

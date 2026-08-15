@@ -203,6 +203,62 @@ func TestLoadPublishedParsesNumericBounds(t *testing.T) {
 	}
 }
 
+// TestLoadPublishedParsesDryRun 验证写能力 YAML 的 dry_run 段（摘要/命令/风险
+// 警告模板）被完整解析。它是数据驱动的 dry-run 预览的数据源：命令与风险警告
+// 声明在能力里，Go 侧不再为组件写死专属 handler。
+func TestLoadPublishedParsesDryRun(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	body := strings.Replace(validKafkaWriteYAML("published"), "name: topic.retention.set", "name: kafka.topic.retention.dryrun", 1) + `
+dry_run:
+  summary: 将把 {environment} 环境的 topic {topic} 的保留时间设置为 {retention_hours} 小时。
+  command: kafka-configs --entity-name {topic} --add-config retention.hours={retention_hours}
+  warnings:
+    - 缩短保留时间可能导致超过 {retention_hours} 小时的历史消息被删除，请确认下游消费和审计需求。
+`
+	mustWrite(t, filepath.Join(root, "published", "kafka.topic.retention.dryrun.yaml"), body)
+
+	loaded, err := capabilities.LoadPublished(root)
+	if err != nil {
+		t.Fatalf("LoadPublished returned %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("loaded %d capabilities, want 1", len(loaded))
+	}
+	dryRun := loaded[0].DryRun
+	if dryRun.Summary == "" {
+		t.Error("DryRun.Summary is empty, want parsed summary template")
+	}
+	if dryRun.Command == "" {
+		t.Error("DryRun.Command is empty, want parsed command template")
+	}
+	if len(dryRun.Warnings) != 1 || dryRun.Warnings[0] == "" {
+		t.Fatalf("DryRun.Warnings = %v, want one parsed warning template", dryRun.Warnings)
+	}
+	if !strings.Contains(dryRun.Warnings[0], "{retention_hours}") {
+		t.Errorf("DryRun.Warnings[0] = %q, want to keep {retention_hours} placeholder", dryRun.Warnings[0])
+	}
+}
+
+// TestLoadPublishedOmitsDryRunWhenAbsent 验证未声明 dry_run 的能力 DryRun 为零值。
+func TestLoadPublishedOmitsDryRunWhenAbsent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	body := strings.Replace(validKafkaWriteYAML("published"), "name: topic.retention.set", "name: kafka.topic.retention.nodryrun", 1)
+	mustWrite(t, filepath.Join(root, "published", "kafka.topic.retention.nodryrun.yaml"), body)
+
+	loaded, err := capabilities.LoadPublished(root)
+	if err != nil {
+		t.Fatalf("LoadPublished returned %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("loaded %d capabilities, want 1", len(loaded))
+	}
+	if loaded[0].DryRun.Command != "" || len(loaded[0].DryRun.Warnings) != 0 {
+		t.Errorf("DryRun = %+v, want zero value when not declared", loaded[0].DryRun)
+	}
+}
+
 func mustWrite(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -238,9 +238,9 @@ func main() {
 		executionService.WithObservers(knowledge.NewExecutionIngester(knowledgeStore, embedder))
 	}
 
-	// Wire AIOps Skill store → Action Router. Skills are loaded by action code
-	// so the ActionAwarePlanner can inject domain SOPs (evidence checklists,
-	// query guides, etc.) into the planner prompt before capability matching.
+	// Wire AIOps Skill store → SkillLookup, consumed by the AgentExecutor to
+	// load SOP content (evidence checklists, query guides, etc.) into the LLM
+	// prompt. Skills are addressed by action code.
 	skillStore := store.NewSQLSkillStore(db)
 	if err := store.SeedBuiltinSkills(serviceContext, skillStore); err != nil {
 		logger.Warn("seed builtin skills", zap.Error(err))
@@ -314,9 +314,11 @@ func main() {
 			} else {
 				assistantService = assistantService.WithAgentExecutor(agentExec)
 				logger.Info("agent executor enabled (LLM function calling)")
-				// 主动巡检：定期检查已注册端点的健康状态
+				// 主动巡检：定期检查已注册端点的健康状态。端点由操作者显式配置
+				//（环境变量），多为内部服务，探活必须放行内部地址——SSRF 防线面向
+				// 不可信输入，不适用于操作者自己配置的巡检目标。
 				if diagKnowledgeStore != nil {
-					probe := assistant.NewHTTPProbeTool()
+					probe := assistant.NewInternalHTTPProbeTool()
 					healthChecker := assistant.NewHealthChecker(probe, diagKnowledgeStore, 5*time.Minute)
 					// 注册 Moonlight Box 端点（可通过环境变量配置更多）
 					if mbURL := os.Getenv("COPILOT_MOONLIGHTBOX_BASE_URL"); mbURL != "" {
@@ -338,13 +340,41 @@ func main() {
 	}
 	// Wire dry-run preview: every pending write plan is auto-previewed and the
 	// result is attached as a risk_notice block so operators see the impact
-	// (affected resources, commands, warnings) before confirming. Handlers are
-	// registered per write tool; unsupported tools are silently skipped.
+	// (affected resources, commands, warnings) before confirming. Previews are
+	// data-driven: the concrete command, risk warnings and affected resource all
+	// come from each capability (dry_run section + backend path), rendered by
+	// the single domain-agnostic TemplateDryRunHandler — never from
+	// component-specific Go code. Write tools without a published capability
+	// never reach a preview: DryRun gates on SupportsDryRun, which is only set
+	// for capability-backed writes.
+	capByTool := make(map[string]capabilities.Capability, len(loadedCapabilities))
+	for _, cap := range loadedCapabilities {
+		capByTool[cap.Name] = cap
+	}
 	dryRunService := execution.NewDryRunService()
 	for _, tool := range tools.All() {
-		if tool.Operation == tools.Write {
-			dryRunService.Register(tool.Name, execution.GenericDryRunHandler)
+		if tool.Operation != tools.Write {
+			continue
 		}
+		cap, ok := capByTool[tool.Name]
+		if !ok {
+			continue
+		}
+		template := execution.DryRunTemplate{
+			Summary:      cap.DryRun.Summary,
+			Commands:     []string{cap.DryRun.Command},
+			Warnings:     cap.DryRun.Warnings,
+			ResourceType: cap.ResourceType,
+			// 影响资源来自 backend.path 路径变量（{topic} 即输入里的资源字段），
+			// 不在 Go 里维护字段名列表。
+			ResourceKey: capabilities.ResourceNameKey(cap),
+		}
+		// 未声明 dry_run.command 时退化为真实执行端点（method + path），让预览
+		// 诚实反映将要发起的调用，而不是编造一条 CLI。
+		if template.Commands[0] == "" {
+			template.Commands = []string{fmt.Sprintf("%s %s", cap.Backend.Method, cap.Backend.Path)}
+		}
+		dryRunService.Register(tool.Name, execution.TemplateDryRunHandler(template))
 	}
 	assistantService.WithDryRunRunner(dryRunService)
 	// 借鉴-5: 低风险 Runbook 自动执行。命中低风险 Runbook 的写操作创建已确认
@@ -814,8 +844,8 @@ func assistantPlannerFromEnv(ctx context.Context, env map[string]string, aug ass
 	if ep, ok := planner.(*assistant.EinoPlanner); ok && ep != nil {
 		sharedChatModel = ep.ChatModel()
 	}
-	// AgentExecutor 路径：LLM function calling 直接选工具，不需要旧的
-	// CapabilityAwarePlanner/ActionAwarePlanner 包装链。
+	// AgentExecutor 路径：LLM function calling 直接选工具，不需要旧的规则
+	// 包装链。
 	// 保留 EinoPlanner 作为 DeterministicPlanner 的 fallback（AgentExecutor 未配置时）。
 	return planner, compactor, formatter, sharedChatModel, registry, mode, nil
 }

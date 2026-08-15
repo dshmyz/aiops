@@ -35,6 +35,11 @@ output:
     severity_path: ""
     summary_template: Retention for topic {topic} set to {retention_hours}h
     fields: {}
+dry_run:
+    summary: 将把 {environment} 环境的 topic {topic} 的消息保留时间设置为 {retention_hours} 小时。
+    command: kafka-configs --bootstrap-server <broker> --entity-type topics --entity-name {topic} --alter --add-config retention.hours={retention_hours}
+    warnings:
+        - 缩短保留时间可能导致超过 {retention_hours} 小时的历史消息被删除，请确认下游消费和审计需求。
 governance:
     requires_action_plan: true
     requires_approval: true

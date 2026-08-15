@@ -90,7 +90,7 @@ func NewCapabilityReadRunner(next ReadRunner, loaded []Capability, adapter *HTTP
 		}
 		if registered, exists := tools.Lookup(capability.Name); exists {
 			tool, err := ToTool(capability)
-			if err != nil || registered != tool {
+			if err != nil || !tools.SameDefinition(registered, tool) {
 				continue
 			}
 		}
@@ -114,7 +114,7 @@ func (r *CapabilityReadRunner) AddPublishedCapability(capability Capability) err
 	if err != nil {
 		return err
 	}
-	if registered != tool {
+	if !tools.SameDefinition(registered, tool) {
 		return fmt.Errorf("published capability %q does not match registered tool metadata", capability.Name)
 	}
 	r.mu.Lock()
@@ -171,7 +171,7 @@ func NewCapabilityWriteRunnerWithVerifier(next execution.Executor, loaded []Capa
 		}
 		if registered, exists := tools.Lookup(capability.Name); exists {
 			tool, err := ToTool(capability)
-			if err != nil || registered != tool {
+			if err != nil || !tools.SameDefinition(registered, tool) {
 				continue
 			}
 		}
@@ -195,7 +195,7 @@ func (r *CapabilityWriteRunner) AddPublishedCapability(capability Capability) er
 	if err != nil {
 		return err
 	}
-	if registered != tool {
+	if !tools.SameDefinition(registered, tool) {
 		return fmt.Errorf("published capability %q does not match registered tool metadata", capability.Name)
 	}
 	r.mu.Lock()

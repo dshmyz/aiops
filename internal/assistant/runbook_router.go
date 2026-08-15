@@ -76,6 +76,24 @@ func containsString(items []string, target string) bool {
 	return false
 }
 
+// longestKeywordHit 返回 text 命中的最长关键词的字节长度。未命中返回 0。
+// 关键词比较前统一转小写。它是数据驱动匹配的共享 helper：keywords 来自
+// 用户配置的 runbook IntentPattern（runbook_router.go），而非硬编码的
+// 组件关键词列表。
+func longestKeywordHit(text string, keywords []string) int {
+	longest := 0
+	for _, kw := range keywords {
+		if kw == "" {
+			continue
+		}
+		lower := strings.ToLower(kw)
+		if strings.Contains(text, lower) && len(lower) > longest {
+			longest = len(lower)
+		}
+	}
+	return longest
+}
+
 // SequenceForMessage resolves the declared tool_sequence of the best-matching
 // enabled runbook for a message, ignoring the per-tool gate that Match applies.
 // It is the agent loop's source of a product-declared evidence-collection order

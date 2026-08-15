@@ -32,10 +32,10 @@ type RecommendationGenerator interface {
 // TemplateRecommendationGenerator 使用模板生成建议（默认实现）
 type TemplateRecommendationGenerator struct{}
 
-func (g *TemplateRecommendationGenerator) Generate(_ context.Context, domain, name, environment string, severity Severity, _ map[string]any) (RecommendationResult, error) {
+func (g *TemplateRecommendationGenerator) Generate(_ context.Context, domain, name, environment string, severity Severity, observationData map[string]any) (RecommendationResult, error) {
 	summary := recommendationSummary(domain, severity, name)
 	rationale := fmt.Sprintf("基于 %s 资源 %s 的诊断结果，严重级别为 %s", domain, name, severity)
-	toolName, candidateInput := recommendationAction(domain, severity, environment, name)
+	toolName, candidateInput := recommendationAction(domain, severity, environment, name, observationData)
 	return RecommendationResult{
 		Summary:        summary,
 		Rationale:      rationale,
@@ -46,13 +46,17 @@ func (g *TemplateRecommendationGenerator) Generate(_ context.Context, domain, na
 
 // recommendationAction returns a candidate tool name and input for an automated
 // fix based on domain and severity. The fix tool is derived from the tool
-// registry (any write tool registered for the domain), never hardcoded. When no
-// write tool is registered for the given domain, toolName is empty.
-func recommendationAction(domain string, severity Severity, environment, name string) (string, map[string]any) {
+// registry (never hardcoded): retention 语义的写工具优先（保留调整是诊断最常见
+// 的"推荐修复"语义），否则回退该域第一个写工具。输入按 schema 填充所有必填
+// 字段——资源标识字段用资源名，其余必填字段（如 retention_hours）从观察数据
+// 同名键提取；无来源的必填字段留空，让建 plan 前的 ValidateInput 明确报缺参，
+// 而不是生成一个确认后必然失败的残缺输入。When no write tool is registered
+// for the given domain, toolName is empty.
+func recommendationAction(domain string, severity Severity, environment, name string, observationData map[string]any) (string, map[string]any) {
 	if severity != SeverityCritical && severity != SeverityWarning {
 		return "", nil
 	}
-	tool, ok := tools.FindDomainWriteTool(domain)
+	tool, ok := fixWriteToolForDomain(domain)
 	if !ok {
 		return "", nil
 	}
@@ -65,15 +69,19 @@ func recommendationAction(domain string, severity Severity, environment, name st
 			}
 		}
 		sort.Strings(fields)
-		switch {
-		case fieldInSchema(fields, tool.ResourceType):
-			input[tool.ResourceType] = name
-		case fieldInSchema(fields, "name"):
-			input["name"] = name
-		case len(fields) > 0:
-			input[fields[0]] = name
-		default:
-			input["name"] = name
+		for _, field := range fields {
+			if !schema[field].Required {
+				continue
+			}
+			// 资源标识字段：优先 tool.ResourceType 语义字段，回退 name。
+			if field == tool.ResourceType || field == "name" {
+				input[field] = name
+				continue
+			}
+			// 其余必填字段：从观察数据同名键提取。
+			if v, present := observationData[field]; present {
+				input[field] = v
+			}
 		}
 	} else {
 		input["name"] = name
@@ -81,13 +89,27 @@ func recommendationAction(domain string, severity Severity, environment, name st
 	return tool.Name, input
 }
 
-func fieldInSchema(fields []string, target string) bool {
-	for _, f := range fields {
-		if f == target {
-			return true
+// fixWriteToolForDomain 返回域下最适合自动修复的写工具：优先 retention 语义
+// 的保留类工具，否则回退该域第一个写工具。多个写工具注册时避免错绑无关操作。
+func fixWriteToolForDomain(domain string) (tools.Tool, bool) {
+	if strings.TrimSpace(domain) == "" {
+		return tools.Tool{}, false
+	}
+	var fallback tools.Tool
+	haveFallback := false
+	for _, tool := range tools.All() {
+		if tool.Domain != domain || tool.Operation != tools.Write {
+			continue
+		}
+		if strings.Contains(strings.ToLower(tool.Name), "retention") {
+			return tool, true
+		}
+		if !haveFallback {
+			fallback = tool
+			haveFallback = true
 		}
 	}
-	return false
+	return fallback, haveFallback
 }
 
 // LLMRecommendationGenerator 使用 LLM 生成动态建议
@@ -152,7 +174,7 @@ func (g *LLMRecommendationGenerator) Generate(ctx context.Context, domain, name,
 
 	// The LLM focuses on summary/rationale; the candidate tool/input come
 	// from the deterministic template so the recommendation stays actionable.
-	toolName, candidateInput := recommendationAction(domain, severity, environment, name)
+	toolName, candidateInput := recommendationAction(domain, severity, environment, name, observationData)
 
 	return RecommendationResult{
 		Summary:        result.Summary,

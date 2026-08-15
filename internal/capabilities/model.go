@@ -36,8 +36,26 @@ type Capability struct {
 	Governance    GovernanceSpec        `yaml:"governance" json:"governance"`
 	Auth          AuthSpec              `yaml:"auth" json:"auth"`
 	AI            AISpec                `yaml:"ai" json:"ai"`
-	Verify        *VerifySpec           `yaml:"verify,omitempty" json:"verify,omitempty"`
-	DependsOn     []DependencySpec      `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+	// DryRun 声明写操作的 dry-run 预览（摘要/命令/风险警告模板）。它把"这个
+	// 操作具体会做什么、有什么风险"作为数据写在能力 YAML 里，Go 侧的 dry-run
+	// handler 只按模板渲染，不再为每个组件写死专属 handler。
+	DryRun      DryRunSpec            `yaml:"dry_run,omitempty" json:"dry_run,omitempty"`
+	Verify      *VerifySpec           `yaml:"verify,omitempty" json:"verify,omitempty"`
+	DependsOn   []DependencySpec      `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+}
+
+// DryRunSpec 是写操作 dry-run 预览的模板。所有字段的 {field} 占位符在执行
+// dry-run 时用写操作入参渲染。
+type DryRunSpec struct {
+	// Summary 是预览摘要模板，如"将把 {environment} 环境的 topic {topic} 的
+	// 消息保留时间设置为 {retention_hours} 小时。"为空时 handler 给出通用摘要。
+	Summary string `yaml:"summary,omitempty" json:"summary,omitempty"`
+	// Command 是具体命令/调用模板，如 kafka-configs 命令或 HTTP 端点。为空时
+	// handler 退化为渲染 backend.method + backend.path 得到真实执行端点。
+	Command string `yaml:"command,omitempty" json:"command,omitempty"`
+	// Warnings 是风险警告模板列表，如"缩短保留时间可能导致超过 {retention_hours}
+	// 小时的历史消息被删除"。
+	Warnings []string `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 }
 
 // DependencySpec declares that this capability requires another capability to

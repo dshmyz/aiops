@@ -87,15 +87,17 @@ var draftRules = map[string]draftToolSequenceRule{
 	},
 }
 
-// derivedWriteToolSequence 返回注册表中第一个已注册写工具名；无写工具时为空切片
-// （此时 retention 草稿不携带 tool_sequence，需人工补全）。
-func derivedWriteToolSequence() []string {
+// retentionWriteTool 返回注册表中 retention 语义的写工具（名字含 retention）。
+// 只绑定与 retention 语义匹配的写工具，避免错绑无关写操作（多写工具部署下
+// "第一个写工具"可能根本不是保留调整类）；未注册时 ok=false，此时 retention
+// 草稿不携带 tool_sequence，需人工补全。
+func retentionWriteTool() (tools.Tool, bool) {
 	for _, tool := range tools.All() {
-		if tool.Operation == tools.Write {
-			return []string{tool.Name}
+		if tool.Operation == tools.Write && strings.Contains(strings.ToLower(tool.Name), "retention") {
+			return tool, true
 		}
 	}
-	return nil
+	return tools.Tool{}, false
 }
 
 // runbookableTopics 是能落成 runbook 的主题键集合（其余如 format/unclassified 明确跳过）。
@@ -200,13 +202,22 @@ func InferRunbookDraft(id string, topicKey string, examples []string) RunbookDra
 	base.Name = rule.name
 	base.Slug = slugify("fb-"+topicKey+"-"+rule.name, patterns)
 	base.IntentPattern = patterns
-	// retention 主题的写工具序列在调用时从注册表派生，其他主题用静态序列。
+	// retention 主题的写工具在调用时从注册表派生，其他主题用静态序列。
 	sequence := rule.sequence
+	risk := rule.risk
 	if topicKey == "retention" {
-		sequence = derivedWriteToolSequence()
+		retentionTool, ok := retentionWriteTool()
+		if !ok {
+			base.MissingReason = "未注册 retention 相关写工具，无法自动生成写序列，需人工补全"
+			return base
+		}
+		sequence = []string{retentionTool.Name}
+		// 风险级别用工具真实风险而非硬编码 low：retention 调整可能删数据，
+		// 必须如实标记，避免草稿被低风险自动执行路径静默消费。
+		risk = string(retentionTool.Risk)
 	}
 	base.ToolSequence = append([]string(nil), sequence...)
-	base.RiskLevel = rule.risk
+	base.RiskLevel = risk
 	return base
 }
 

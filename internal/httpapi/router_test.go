@@ -544,7 +544,7 @@ func TestAssistantMessagesRequiresAuthentication(t *testing.T) {
 func TestAssistantMessagesViewerReadSuccess(t *testing.T) {
 	t.Parallel()
 	router, _ := testRouter(t, &readRunner{result: map[string]any{"status": "green"}})
-	req := signedRequest(t, "/v1/assistant/messages", `{"message":"查看 prod 集群状态"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/assistant/messages", `{"message":"查看 prod kafka 状态"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -557,9 +557,26 @@ func TestAssistantMessagesViewerReadSuccess(t *testing.T) {
 	}
 }
 
+// TestAssistantMessagesIncludesTraceForReadAnswer 钉住读答案的 trace 契约：
+// selection（规划器选择）+ tool_invocation（实际执行的工具 + 原始响应）在 HTTP
+// 响应里端到端序列化。确定性 planner 已不再路由平台元工具（平台意图走 LLM 路径，
+// 见 agent_executor.go），因此这里用固定 planner 直接驱动读路径，保持 trace 覆盖。
 func TestAssistantMessagesIncludesTraceForReadAnswer(t *testing.T) {
 	t.Parallel()
-	router, _ := testRouter(t, &readRunner{result: map[string]any{"status": "green"}})
+	repository := store.NewMemoryActionPlanStore()
+	auditService := audit.NewService(repository)
+	readService := execution.NewReadOnlyService(&readRunner{result: map[string]any{"status": "green"}}, auditService)
+	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
+		return time.Date(2026, time.July, 21, 11, 0, 0, 0, time.UTC)
+	}))
+	assistantService := assistant.NewService(tracePlanner{}, readService, planService, nil)
+	router := httpapi.NewRouter(
+		httpapi.NewHMACAuthenticator([]byte("test-secret")),
+		readService,
+		httpapi.WithAssistant(assistantService),
+		httpapi.WithActionPlans(repository),
+		httpapi.WithAuditEvents(auditService),
+	)
 	req := signedRequest(t, "/v1/assistant/messages", `{"message":"查看 prod 集群状态"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
 	res := httptest.NewRecorder()
 
@@ -2925,6 +2942,23 @@ func (p diagnosticPlanner) Plan(context.Context, identity.CurrentUser, string, [
 	return assistant.Intent{Diagnostic: &p.request}, nil
 }
 
+// tracePlanner 返回一个固定读意图（cluster.status.read）并携带能力选择元数据，
+// 用于验证读答案的 trace 字段（selection + tool_invocation + raw_response）端到端
+// 序列化。它模拟 LLM 路径 planIntent 的产物——确定性 planner 已不路由平台元工具。
+type tracePlanner struct{}
+
+func (tracePlanner) Plan(context.Context, identity.CurrentUser, string, []assistant.Turn, assistant.PageContext) (assistant.Intent, error) {
+	return assistant.Intent{
+		ToolName: tools.ClusterStatusRead,
+		Input:    map[string]any{"environment": "prod"},
+		Selection: &assistant.CapabilitySelection{
+			Selected:   tools.ClusterStatusRead,
+			Confidence: 0.9,
+			Reason:     "fixed planner for trace test",
+		},
+	}, nil
+}
+
 func (s errorAssistant) HandleMessage(context.Context, identity.CurrentUser, string, string, assistant.PageContext) (assistant.Response, error) {
 	return assistant.Response{}, s.err
 }
@@ -3039,9 +3073,9 @@ func ensureMiddlewareTools(t *testing.T) {
 	// policy-level reset elsewhere cannot leave the middleware tools unroutable.
 	policy.RegisterDynamicRolePermissions(map[string][]string{
 		"glusterfs.volume.health.read": {"viewer", "operator", "admin"},
-		"minio.bucket.health.read":   {"viewer", "operator", "admin"},
-		"kafka.consumer_lag.read":    {"viewer", "operator", "admin"},
-		"topic.retention.set":       {"operator", "admin"},
+		"minio.bucket.health.read":     {"viewer", "operator", "admin"},
+		"kafka.consumer_lag.read":      {"viewer", "operator", "admin"},
+		"topic.retention.set":          {"operator", "admin"},
 	})
 }
 

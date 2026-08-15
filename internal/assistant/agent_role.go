@@ -1,6 +1,6 @@
 package assistant
 
-// AgentRole 标识 Action 执行的智能体角色（多智能体分派）。
+// AgentRole 标识执行时的智能体角色（多智能体分派）。
 // 角色决定执行时的系统提示词边界：取证纪律、写操作纪律、计算职责。
 // 同一 AgentExecutor 复用同一 LLM 循环，角色仅注入不同的 system prompt，
 // 不引入独立进程/独立模型，避免过度设计。
@@ -19,14 +19,12 @@ const (
 	RoleKnowledge AgentRole = "knowledge"
 )
 
-// agentRoleMeta 记录每个角色的展示名与系统提示词。
+// agentRoleMeta 记录每个角色的系统提示词。
 // 提示词聚焦角色边界，不重复工具枚举（工具由执行器按消息动态过滤）。
 var agentRoleMeta = map[AgentRole]struct {
-	DisplayName  string
 	SystemPrompt string
 }{
 	RoleSupervisor: {
-		DisplayName: "编排者",
 		SystemPrompt: `你是一个中间件运维 AI 助手（编排者）。
 
 你可以使用工具来查询系统状态、执行诊断、检查健康/缓存/安全等。
@@ -50,7 +48,6 @@ var agentRoleMeta = map[AgentRole]struct {
 - 用户要的是"命令清单/操作步骤/查询方法"这类知识型问题且无匹配工具时，直接以中文 Markdown 给出完整清单，不要编造结果、不要只说"已整理"却省略内容。`,
 	},
 	RoleDiagnostic: {
-		DisplayName: "诊断侦察",
 		SystemPrompt: `你是一个运维诊断侦察 agent。你的职责是从系统取证并给出有证据的结论。
 
 工作纪律：
@@ -67,7 +64,6 @@ var agentRoleMeta = map[AgentRole]struct {
 - 建议只给出可执行措施，不替你执行`,
 	},
 	RoleChange: {
-		DisplayName: "变更执行",
 		SystemPrompt: `你是一个变更执行 agent。你的职责是安全地评估并执行配置变更与修复操作。
 
 工作纪律（fail-closed）：
@@ -84,7 +80,6 @@ var agentRoleMeta = map[AgentRole]struct {
 - 变更后验证：执行完成后必须用只读工具验证结果生效`,
 	},
 	RoleAnalysis: {
-		DisplayName: "分析规划",
 		SystemPrompt: `你是一个运维分析规划 agent。你的职责是聚合多源数据并给出量化结论。
 
 工作纪律：
@@ -99,7 +94,6 @@ var agentRoleMeta = map[AgentRole]struct {
 现状数据 → 趋势判断 → 量化结论 → 建议动作（带优先级）`,
 	},
 	RoleKnowledge: {
-		DisplayName: "知识检索",
 		SystemPrompt: `你是一个运维知识检索 agent。你的职责是基于知识库、runbook、SOP 与历史经验回答问题。
 
 工作纪律：
@@ -124,23 +118,4 @@ func roleSystemPrompt(role AgentRole) string {
 		return meta.SystemPrompt
 	}
 	return loadPlanningPrompt()
-}
-
-// RoleDisplayName 返回角色展示名，未知角色返回 "编排者"。
-func RoleDisplayName(role AgentRole) string {
-	if meta, ok := agentRoleMeta[role]; ok {
-		return meta.DisplayName
-	}
-	return agentRoleMeta[RoleSupervisor].DisplayName
-}
-
-// ActionsForRole 返回注册表中归属于该角色的 Action 列表。
-func ActionsForRole(role AgentRole) []Action {
-	var out []Action
-	for _, a := range registeredActions {
-		if a.AgentRole == role {
-			out = append(out, a)
-		}
-	}
-	return out
 }

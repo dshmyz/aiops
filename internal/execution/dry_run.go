@@ -181,40 +181,64 @@ func SuggestStrategy(tool tools.Tool, result DryRunResult, input map[string]any)
 	return strategy
 }
 
-// GenericDryRunHandler previews a registered write tool's operation in a
-// domain-agnostic way: it derives the affected resource from the tool's
-// resource type and the input, and summarizes the intended change without
-// touching the target system. Tool-specific handlers may override this generic
-// behavior by registering their own handler for a tool name.
-func GenericDryRunHandler(ctx context.Context, input map[string]any) (DryRunResult, error) {
-	environment, _ := input["environment"].(string)
-	var resourceName string
-	for _, key := range []string{"name", "topic", "bucket", "volume", "group"} {
-		if v, ok := input[key].(string); ok && v != "" {
-			resourceName = v
-			break
-		}
-	}
-	affected := ""
-	if resourceName != "" {
-		affected = fmt.Sprintf("resource:%s@%s", resourceName, environment)
-	}
-	summary := "将执行一次写操作。"
-	if resourceName != "" {
-		summary = fmt.Sprintf("将对 %s 执行写操作。", affected)
-	}
-	return DryRunResult{
-		Summary:           summary,
-		AffectedResources: nonEmptyStrings(affected),
-	}, nil
+// DryRunTemplate carries the operator-facing preview data for a write tool.
+// It is sourced from the capability YAML (dry_run section + backend), so
+// previews stay data-driven: the concrete command and risk warnings a tool
+// shows are declared by its capability, never hardcoded per-component in Go.
+type DryRunTemplate struct {
+	// Summary is the preview summary template rendered from input. Empty →
+	// the handler falls back to the generic "will execute a write" summary.
+	Summary string
+	// Commands are command templates rendered from input (e.g. the actual
+	// HTTP endpoint or a CLI command the operator would run). Empty → no
+	// concrete command shown.
+	Commands []string
+	// Warnings are risk-notice templates rendered from input.
+	Warnings []string
+	// ResourceType labels the affected resource in the preview (e.g. "topic").
+	ResourceType string
+	// ResourceKey is the input field that names the affected resource (e.g.
+	// "topic"), derived from the capability's backend path variable — the path
+	// itself declares which input is the resource, so callers never hardcode a
+	// field-name list. Empty → no affected resource is shown.
+	ResourceKey string
 }
 
-func nonEmptyStrings(values ...string) []string {
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		if v != "" {
-			out = append(out, v)
+// TemplateDryRunHandler renders a capability-declared dry-run preview. It is
+// the single, domain-agnostic dry-run handler: which command, risk warning and
+// affected resource a write tool shows is decided by its capability (dry_run
+// template + backend path), not by Go code.
+func TemplateDryRunHandler(tmpl DryRunTemplate) DryRunHandler {
+	return func(_ context.Context, input map[string]any) (DryRunResult, error) {
+		result := DryRunResult{}
+
+		if tmpl.Summary != "" {
+			result.Summary = renderTemplate(tmpl.Summary, input)
 		}
+		for _, command := range tmpl.Commands {
+			result.Commands = append(result.Commands, renderTemplate(command, input))
+		}
+		for _, warning := range tmpl.Warnings {
+			result.Warnings = append(result.Warnings, renderTemplate(warning, input))
+		}
+
+		if tmpl.ResourceKey != "" {
+			if resourceName, ok := input[tmpl.ResourceKey].(string); ok && resourceName != "" {
+				environment, _ := input["environment"].(string)
+				result.AffectedResources = []string{fmt.Sprintf("%s:%s@%s", tmpl.ResourceType, resourceName, environment)}
+			}
+		}
+		return result, nil
 	}
-	return out
+}
+
+// renderTemplate fills {field} placeholders in a template from the input map.
+// Unknown placeholders are left as-is so a missing field degrades to a readable
+// preview instead of failing the dry-run.
+func renderTemplate(template string, input map[string]any) string {
+	result := template
+	for key, value := range input {
+		result = strings.ReplaceAll(result, "{"+key+"}", fmt.Sprint(value))
+	}
+	return result
 }

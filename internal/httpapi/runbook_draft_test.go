@@ -15,8 +15,10 @@ func TestInferRunbookDraftRetentionProducesSequence(t *testing.T) {
 	if draft.MissingReason != "" {
 		t.Fatalf("MissingReason = %q, want empty for runbookable topic", draft.MissingReason)
 	}
-	if draft.Name == "" || draft.RiskLevel != "low" {
-		t.Fatalf("draft = %+v, want name/risk populated", draft)
+	// 风险用工具真实风险（topic.retention.set=medium），而非硬编码 low——
+	// retention 调整可能删数据，如实标记避免被低风险自动执行路径消费。
+	if draft.Name == "" || draft.RiskLevel != "medium" {
+		t.Fatalf("draft = %+v, want name/risk populated (retention tool risk=medium)", draft)
 	}
 	if len(draft.ToolSequence) == 0 || draft.ToolSequence[0] != "topic.retention.set" {
 		t.Fatalf("ToolSequence = %v, want to include topic.retention.set", draft.ToolSequence)

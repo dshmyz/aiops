@@ -174,22 +174,25 @@ type PageContext struct {
 type DeterministicPlanner struct{}
 
 // Plan ignores history: the rule-based planner cannot understand references
-// to previous turns. Implementations that need history (EinoPlanner) will
-// receive the same slice via the CapabilityAwarePlanner fallback.
+// to previous turns. Implementations that need history (EinoPlanner) handle it
+// in their own loop.
 //
 // pageContext supplies page-level defaults (environment, domain, resource)
 // that fill in missing fields when the message does not mention them. Message
 // tokens always override pageContext. A zero pageContext preserves the old
 // message-only behavior.
 //
-// Any ActionAwarePlanner context injection is stripped first. This planner
-// matches keywords, and the injected Action/Skill SOP text is dense with
-// "kafka"/"minio"/"glusterfs"/"健康"/"状态" — left in place it would decide the
-// intent instead of the user's own words (asking about kafka would resolve to
-// whichever domain the SOP happens to list first). Only LLM planners can
-// actually make use of the injected SOP; here it is pure noise.
+// 工具选择是数据驱动而非写死关键词：
+//   - 确定性模式只处理**中间件域诊断**：消息点名已注册域（域清单由工具注册表
+//     提供，extractDomain 走 MatchDomainBounded 有边界匹配），或 pageContext
+//     声明已注册域 → 路由到该域诊断。kafka/minio/glusterfs 等域名只存在于注册表
+//     （中间件来自 YAML 能力注册），不写死任何组件关键词。
+//   - 平台意图（告警/态势/事件/任务/集群状态）**不在此路由**：由 LLM 路径
+//     planIntent 语义分类 + function calling 解析（见 agent_executor.go）。
+//     确定性模式没有 LLM，也没有关键词表，无法区分"告警"与"天气"这类同信号
+//     消息，一律澄清。这正是"零硬编码关键词"的取舍：宁可澄清，也不写死选择。
 func (DeterministicPlanner) Plan(_ context.Context, _ identity.CurrentUser, message string, _ []Turn, pageContext PageContext) (Intent, error) {
-	userMessage := stripActionAugment(message)
+	userMessage := message
 	text := strings.ToLower(strings.TrimSpace(userMessage))
 	environment, ok := extractEnvironment(text)
 	if !ok {
@@ -198,14 +201,19 @@ func (DeterministicPlanner) Plan(_ context.Context, _ identity.CurrentUser, mess
 			environment = "prod"
 		}
 	}
-	if domain, ok := extractDomain(text); ok && containsAny(text, "status", "状态", "health", "健康", "capacity", "容量", "lag", "延迟") {
-		return Intent{Diagnostic: &diagnostics.Request{
-			Domain: domain, Environment: environment, ResourceType: defaultResourceType(domain), ResourceName: extractResourceName(text, domain), Runbook: "health",
-		}, Confidence: 0.75, Explanation: "middleware diagnostic intent"}, nil
+	// 中间件域诊断（注册表驱动）：消息点名已注册域（如 "kafka 状态如何"、
+	// "minio 健康吗"）→ 该域诊断。域清单来自工具注册表（ResourceTypeForDomain
+	// 门控），不写死任何组件关键词。平台意图不在此判定——无 LLM 时无法靠关键词
+	// 区分，统一澄清。
+	if domain, ok := extractDomain(text); ok {
+		if tools.ResourceTypeForDomain(domain) != "" {
+			return domainDiagnosticIntent(domain, environment, defaultResourceType(domain), extractResourceName(text, domain), "diagnostic from named domain"), nil
+		}
 	}
-	// PageContext domain can supply the domain when the message mentions
-	// health/status but no domain keyword (e.g. "这个 volume 健康吗").
-	if pageContext.Domain != "" && containsAny(text, "status", "状态", "health", "健康", "capacity", "容量", "lag", "延迟") {
+	// 页面上下文兜底：消息未点名域，但在某已注册域的页面上下文内提问
+	// （如 "这个 volume 健康吗"）→ 该域诊断。页面上下文来自前端当前页，
+	// 是确定性模式下唯一可用的域信号。
+	if pageContext.Domain != "" && tools.ResourceTypeForDomain(pageContext.Domain) != "" {
 		resourceName := strings.TrimSpace(pageContext.ResourceName)
 		if resourceName == "" {
 			resourceName = extractResourceName(text, pageContext.Domain)
@@ -214,95 +222,11 @@ func (DeterministicPlanner) Plan(_ context.Context, _ identity.CurrentUser, mess
 		if resourceType == "" {
 			resourceType = defaultResourceType(pageContext.Domain)
 		}
-		return Intent{Diagnostic: &diagnostics.Request{
-			Domain: pageContext.Domain, Environment: environment, ResourceType: resourceType, ResourceName: resourceName, Runbook: "health",
-		}, Confidence: 0.75, Explanation: "middleware diagnostic intent from page context"}, nil
+		return domainDiagnosticIntent(pageContext.Domain, environment, resourceType, resourceName, "diagnostic from page context"), nil
 	}
-	// Alert query branch (告警准专项). 必须在 posture / cluster status 分支之前：
-	// "告警"是明确意图，注入的 Action skill 文本（如"集群整体状态"）可能含
-	// "整体状态"/"健康"等词，不能让它盖过告警匹配。
-	if containsAny(text, "告警", "alert", "alerting") {
-		return Intent{
-			ToolName:    tools.AlertQuery,
-			Input:       map[string]any{"environment": environment},
-			Confidence:  0.85,
-			Explanation: "alert query intent",
-			Selection: &CapabilitySelection{
-				Selected:   tools.AlertQuery,
-				Confidence: 0.85,
-				Reason:     "alert query intent",
-				Extracted:  []ExtractedParameter{{Name: "environment", Value: environment, Source: "environment"}},
-			},
-		}, nil
-	}
-	// System posture branch (借鉴-1: 系统态势 SLA 入口). When the user asks
-	// about the overall system posture ("系统怎么样"/"整体健康"/"全局状态"/"系统态
-	// 势"/"整体状态"), route to the QuerySystemPosture read tool instead of the
-	// generic ClusterStatusRead. This branch must come BEFORE the cluster
-	// status branch because "整体健康" contains "健康" which would otherwise
-	// trigger ClusterStatusRead.
-	if containsAny(text, "系统怎么样", "系统态势", "整体健康", "整体状态", "全局状态", "全局健康") {
-		return Intent{
-			ToolName:    tools.QuerySystemPosture,
-			Input:       map[string]any{"environment": environment},
-			Confidence:  0.85,
-			Explanation: "system posture intent",
-			Selection: &CapabilitySelection{
-				Selected:   tools.QuerySystemPosture,
-				Confidence: 0.85,
-				Reason:     "system posture intent",
-				Extracted:  []ExtractedParameter{{Name: "environment", Value: environment, Source: "environment"}},
-			},
-		}, nil
-	}
-	// Event query branch (§4 工具生态扩展): 事件中心/审计记录查询走 event.query。
-	if containsAny(text, "事件", "审计", "audit", "event") {
-		return Intent{
-			ToolName:    tools.EventQuery,
-			Input:       map[string]any{"environment": environment, "query": userMessage},
-			Confidence:  0.85,
-			Explanation: "event query intent",
-			Selection: &CapabilitySelection{
-				Selected:   tools.EventQuery,
-				Confidence: 0.85,
-				Reason:     "event query intent",
-				Extracted:  []ExtractedParameter{{Name: "environment", Value: environment, Source: "environment"}},
-			},
-		}, nil
-	}
-	// Task query branch (§4 工具生态扩展): 定时巡检任务查询走 task.query。
-	if containsAny(text, "任务", "巡检", "定时", "task") {
-		return Intent{
-			ToolName:    tools.TaskQuery,
-			Input:       map[string]any{"environment": environment},
-			Confidence:  0.85,
-			Explanation: "task query intent",
-			Selection: &CapabilitySelection{
-				Selected:   tools.TaskQuery,
-				Confidence: 0.85,
-				Reason:     "task query intent",
-				Extracted:  []ExtractedParameter{{Name: "environment", Value: environment, Source: "environment"}},
-			},
-		}, nil
-	}
-	if containsAny(text, "status", "状态", "health", "健康") {
-		return Intent{
-			ToolName:    tools.ClusterStatusRead,
-			Input:       map[string]any{"environment": environment},
-			Confidence:  0.9,
-			Explanation: "cluster status intent",
-			Selection: &CapabilitySelection{
-				Selected:   tools.ClusterStatusRead,
-				Confidence: 0.9,
-				Reason:     "cluster status intent",
-				Extracted:  []ExtractedParameter{{Name: "environment", Value: environment, Source: "environment"}},
-			},
-		}, nil
-	}
-	// 中间件写意图（如 Kafka topic 保留）已不再在此硬编码具体静态工具名。
-	// topic.retention.set 等写能力外置为 YAML published 能力，由
-	// CapabilityAwarePlanner 按域/参数动态解析（见 capability_resolver.go），
-	// tool 名由动态解析给出。
+	// 平台意图与中间件写意图都不在确定性路径处理：写能力外置为 YAML published
+	// 能力，平台意图由 LLM 语义分类解析（见 agent_executor.go）。确定性模式对
+	// 未匹配消息返回澄清，不做关键词猜测。
 	return Intent{}, ErrClarificationNeeded
 }
 
@@ -329,6 +253,19 @@ func defaultResourceType(domain string) string {
 	return "resource"
 }
 
+// domainDiagnosticIntent 构建指向某域健康诊断（runbook=health）的 Intent。
+// 域选择已由调用方按注册表门控（ResourceTypeForDomain 非空），此处只负责
+// 组装，供文本点名域与页面上下文两个域分支复用。
+func domainDiagnosticIntent(domain, environment, resourceType, resourceName, explanation string) Intent {
+	return Intent{Diagnostic: &diagnostics.Request{
+		Domain:       domain,
+		Environment:  environment,
+		ResourceType: resourceType,
+		ResourceName: resourceName,
+		Runbook:      "health",
+	}, Confidence: 0.75, Explanation: explanation}
+}
+
 func extractResourceName(text, domain string) string {
 	words := strings.Fields(text)
 	for index, word := range words {
@@ -342,15 +279,6 @@ func extractResourceName(text, domain string) string {
 	return domain + "-" + defaultResourceType(domain)
 }
 
-func containsAny(text string, needles ...string) bool {
-	for _, needle := range needles {
-		if strings.Contains(text, needle) {
-			return true
-		}
-	}
-	return false
-}
-
 func tokenExists(text, token string) bool {
 	return regexp.MustCompile(`(^|[^a-z0-9_-])` + regexp.QuoteMeta(token) + `([^a-z0-9_-]|$)`).MatchString(text)
 }
@@ -359,22 +287,4 @@ func tokenExists(text, token string) bool {
 // middleware diagnostic domains (e.g. "检查 glusterfs、minio、kafka").
 func isMultiDomainDiagnostic(message string) bool {
 	return len(orchestrator.DomainsInText(message)) > 1
-}
-
-// stripActionAugment 移除 ActionAwarePlanner 注入的 SOP 上下文标记。
-// DeterministicPlanner 无法利用 SOP，需要剥离避免关键词匹配误判。
-const (
-	actionAugmentOpen  = "[Action 上下文引导]"
-	actionAugmentClose = "[/Action 上下文引导]"
-)
-
-func stripActionAugment(message string) string {
-	if !strings.HasPrefix(message, actionAugmentOpen) {
-		return message
-	}
-	idx := strings.Index(message, actionAugmentClose)
-	if idx < 0 {
-		return message
-	}
-	return strings.TrimLeft(message[idx+len(actionAugmentClose):], "\n")
 }
