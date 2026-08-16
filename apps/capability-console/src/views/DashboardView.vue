@@ -13,6 +13,7 @@ import {
 import { labelForRisk, labelForExecutionStatus } from '../labels';
 import { formatRelativeTime } from '../conversationFormat';
 import ViewShell from '../components/ViewShell.vue';
+import SfSymbol from '../components/SfSymbol.vue';
 
 // 运维总览（D）：首屏聚合待确认计划 / 活动告警 / 定时巡检 / 今日执行等计数。
 // 各字段可选：对应 service 未装配或当前用户无权限时后端返回缺省字段，这里优雅降级。
@@ -133,13 +134,13 @@ onMounted(() => {
     <p v-if="rejectError" data-test="dashboard-reject-error" class="error-text">{{ rejectError }}</p>
     <p v-if="notice" data-test="dashboard-notice" class="notice-text">{{ notice }}</p>
 
-    <!-- 顶部统计卡片（可点击下钻到对应视图） -->
+    <!-- 顶部统计卡片（可点击下钻到对应视图）；有「待办」时卡片顶边带警示色条 -->
     <section class="stat-grid" aria-label="运维统计">
-      <button type="button" class="stat-card" data-test="stat-pending-plans" @click="onNavigate('stat-pending-plans')">
+      <button type="button" class="stat-card" :class="{ 'has-attention': (overview.pending_plans ?? 0) > 0 }" data-test="stat-pending-plans" @click="onNavigate('stat-pending-plans')">
         <span class="stat-value" :class="{ 'stat-value--accent': (overview.pending_plans ?? 0) > 0 }">{{ overview.pending_plans ?? 0 }}</span>
         <span class="stat-label">待确认计划</span>
       </button>
-      <button type="button" class="stat-card" data-test="stat-active-alerts" @click="onNavigate('stat-active-alerts')">
+      <button type="button" class="stat-card" :class="{ 'has-danger': (overview.active_alerts ?? 0) > 0 }" data-test="stat-active-alerts" @click="onNavigate('stat-active-alerts')">
         <span class="stat-value" :class="{ 'stat-value--alert': (overview.active_alerts ?? 0) > 0 }">{{ overview.active_alerts ?? 0 }}</span>
         <span class="stat-label">活动告警</span>
       </button>
@@ -157,8 +158,10 @@ onMounted(() => {
       </button>
     </section>
 
-    <!-- Agent 状态面板：运行状态 + 一键停止 + 信任等级 -->
-    <section class="dashboard-panel" data-test="agent-status-panel">
+    <!-- 下方双栏：宽屏并排（Agent 状态 | 待确认计划），窄屏自动堆叠 -->
+    <div class="dashboard-columns">
+      <!-- Agent 状态面板：运行状态 + 一键停止 + 信任等级 -->
+      <section class="dashboard-panel" data-test="agent-status-panel">
       <div class="section-heading">
         <h2>AI Agent 状态</h2>
         <span class="section-hint">LLM 调用健康度与安全开关</span>
@@ -199,7 +202,11 @@ onMounted(() => {
             data-test="agent-kill-switch"
             @click="handleToggleAgent"
           >
-            {{ agentActionLoading ? '处理中...' : agentMetrics.agent_enabled ? '⏹ 停止 Agent' : '▶ 启动 Agent' }}
+            <template v-if="agentActionLoading">处理中...</template>
+            <template v-else>
+              <SfSymbol :name="agentMetrics.agent_enabled ? 'stop' : 'play'" :size="14" />
+              {{ agentMetrics.agent_enabled ? '停止 Agent' : '启动 Agent' }}
+            </template>
           </button>
           <div class="trust-level-group" role="radiogroup" aria-label="信任等级">
             <span class="agent-status-label">信任等级</span>
@@ -221,7 +228,7 @@ onMounted(() => {
     </section>
 
     <!-- 待确认计划速览 -->
-    <section class="dashboard-panel">
+    <section class="dashboard-panel" data-test="pending-plans-panel">
       <div class="section-heading">
         <h2>待确认计划</h2>
         <span class="section-hint">需人工确认的高风险写操作</span>
@@ -252,5 +259,6 @@ onMounted(() => {
         </li>
       </ul>
     </section>
+    </div>
   </ViewShell>
 </template>

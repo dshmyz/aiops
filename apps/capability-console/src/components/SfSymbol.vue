@@ -6,7 +6,7 @@
  */
 withDefaults(defineProps<{
   /** 图标名称，对应内置 SF Symbol 风格图形 */
-  name: 'bubble-left' | 'sparkles' | 'waveform' | 'exclamationmark-triangle' | 'checkmark-circle' | 'arrow-up-circle' | 'person'
+  name: 'bubble-left' | 'sparkles' | 'waveform' | 'exclamationmark-triangle' | 'checkmark-circle' | 'arrow-up-circle' | 'person' | 'sun' | 'moon' | 'play' | 'stop' | 'thumbs-up' | 'thumbs-down'
   /** 尺寸 px */
   size?: number
 }>(), {
@@ -70,6 +70,39 @@ withDefaults(defineProps<{
     <template v-else-if="name === 'person'">
       <circle cx="12" cy="8" r="3.5" />
       <path d="M5 20a7 7 0 0 1 14 0" />
+    </template>
+
+    <!-- 太阳（浅色模式切换） -->
+    <template v-else-if="name === 'sun'">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2.2M12 19.8V22M2 12h2.2M19.8 12H22M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M19.1 4.9l-1.6 1.6M6.5 17.5l-1.6 1.6" />
+    </template>
+
+    <!-- 月亮（深色模式切换） -->
+    <template v-else-if="name === 'moon'">
+      <path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a7 7 0 0 0 9.7 9.7z" />
+    </template>
+
+    <!-- 播放（启动 Agent） -->
+    <template v-else-if="name === 'play'">
+      <path d="M7.5 5.5l10 6.5-10 6.5z" />
+    </template>
+
+    <!-- 停止（停止 Agent） -->
+    <template v-else-if="name === 'stop'">
+      <rect x="7" y="7" width="10" height="10" rx="1.5" />
+    </template>
+
+    <!-- 好评 -->
+    <template v-else-if="name === 'thumbs-up'">
+      <path d="M7 10v12" />
+      <path d="M15 5.88 14 10h5.33a2 2 0 0 1 1.92 2.5l-1.5 6A2 2 0 0 1 17.8 20H7m0-10L9.9 4.1a2.1 2.1 0 0 1 2.2 1l0.6 1.2" />
+    </template>
+
+    <!-- 差评 -->
+    <template v-else-if="name === 'thumbs-down'">
+      <path d="M17 14V2" />
+      <path d="M9 18.12 10 14H4.67a2 2 0 0 1-1.92-2.5l1.5-6A2 2 0 0 1 6.2 4H17m0 10-2.9 5.9a2.1 2.1 0 0 1-2.2-1l-0.6-1.2" />
     </template>
   </svg>
 </template>

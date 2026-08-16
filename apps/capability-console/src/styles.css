@@ -5147,7 +5147,7 @@ nav button:focus-visible {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: var(--space-3);
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--space-4);
 }
 .stat-card {
   min-width: 0;
@@ -5159,6 +5159,7 @@ button.stat-card {
   color: inherit;
   cursor: pointer;
   transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+  position: relative;
 }
 button.stat-card:hover {
   transform: translateY(-1px);
@@ -5168,6 +5169,20 @@ button.stat-card:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+/* 卡片顶边警示条：有待确认计划 → 琥珀，有活动告警 → 红色，一眼可见「有活要干」 */
+button.stat-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: transparent;
+  transition: background 0.15s var(--ease-out);
+}
+button.stat-card.has-attention::before { background: var(--color-warning); }
+button.stat-card.has-danger::before { background: var(--color-danger); }
 .stat-value {
   display: inline-flex;
   align-items: baseline;
@@ -5184,6 +5199,17 @@ button.stat-card:focus-visible {
   border-radius: var(--radius-xl);
   padding: var(--space-4);
   box-shadow: var(--shadow-sm);
+  /* 作为容器查询的容器：让面板内的 agent 指标网格按「面板自身宽度」自适应，
+     而非按视口——半宽面板 2×2、整宽面板 4 连排，避免 auto-fit 在 ~660px 出现 3+1 尴尬换行 */
+  container-type: inline-size;
+}
+/* 面板双栏：内容宽度 ≥ ~860px 时 Agent 状态与待确认计划并排，否则自动堆叠。
+   用 auto-fit + minmax 而非硬编码断点，列宽随可用宽度自适应，两栏等高对齐表头。 */
+.dashboard-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
 }
 .section-hint {
   font-size: var(--font-xs);
@@ -5245,9 +5271,15 @@ button.stat-card:focus-visible {
 /* 入口容器 box 由 ViewShell 的 .view-shell 统一拥有（水平收边 + 高度） */
 .agent-status-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
   margin-top: var(--space-3);
+}
+/* 面板窄于 760px（侧栏并排时的半宽面板）→ 指标收敛为 2×2，避免 3+1 */
+@container (max-width: 760px) {
+  .agent-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .agent-status-item {
   display: flex;

@@ -184,7 +184,7 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
         data-test="conversation-turn-content"
         class="conversation-turn-content"
       >
-        <span v-if="turn.error" class="error-icon" aria-hidden="true">⚠</span>
+        <SfSymbol v-if="turn.error" name="exclamationmark-triangle" :size="13" class="error-icon" />
         <template v-if="showTypingDots">
           <span class="typing-dots" aria-label="正在生成">
             <span class="typing-dot"></span>

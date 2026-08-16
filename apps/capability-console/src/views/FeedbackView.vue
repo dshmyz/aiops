@@ -5,6 +5,7 @@ import type { FeedbackEntry, RunbookDraft } from '../types';
 import { buildFeedbackInsights, insightsToMarkdown } from '../composables/useFeedbackInsights';
 import type { FeedbackInsight } from '../composables/useFeedbackInsights';
 import ViewShell from '../components/ViewShell.vue';
+import SfSymbol from '../components/SfSymbol.vue';
 
 const items = ref<FeedbackEntry[]>([]);
 const total = ref(0);
@@ -117,12 +118,6 @@ function nextPage() {
   }
 }
 
-function ratingIcon(rating: number): string {
-  if (rating > 0) return '👍';
-  if (rating < 0) return '👎';
-  return '—';
-}
-
 function formatDate(iso: string): string {
   if (!iso) return '';
   return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -156,11 +151,11 @@ onMounted(() => {
       </div>
       <div class="stat-card positive">
         <span class="stat-value">{{ thumbsUp }}</span>
-        <span class="stat-label">👍 好评</span>
+        <span class="stat-label"><SfSymbol name="thumbs-up" :size="14" /> 好评</span>
       </div>
       <div class="stat-card negative">
         <span class="stat-value">{{ thumbsDown }}</span>
-        <span class="stat-label">👎 差评</span>
+        <span class="stat-label"><SfSymbol name="thumbs-down" :size="14" /> 差评</span>
       </div>
       <div class="stat-card">
         <span class="stat-value">{{ corrections.length }}</span>
@@ -257,7 +252,7 @@ onMounted(() => {
     </section>
 
     <div v-if="!loading && items.length === 0 && !error" class="empty">
-      暂无反馈数据。操作员在对话中点击 👍/👎 后会显示在这里。
+      暂无反馈数据。操作员在对话中点好评/差评后会显示在这里。
       <button
         data-test="feedback-empty-action"
         class="empty-action-btn"
@@ -279,7 +274,11 @@ onMounted(() => {
       </thead>
       <tbody>
         <tr v-for="entry in items" :key="entry.id">
-          <td class="rating-cell">{{ ratingIcon(entry.rating) }}</td>
+          <td class="rating-cell">
+              <SfSymbol v-if="entry.rating > 0" name="thumbs-up" :size="18" />
+              <SfSymbol v-else-if="entry.rating < 0" name="thumbs-down" :size="18" />
+              <template v-else>—</template>
+            </td>
           <td>{{ entry.subject }}</td>
           <td class="correction-cell">{{ entry.correction || '—' }}</td>
           <td class="time-cell">{{ formatDate(entry.created_at) }}</td>

@@ -817,7 +817,7 @@ onUnmounted(() => {
         :title="isDarkTheme ? '切换到浅色模式' : '切换到深色模式'"
         @click="toggleTheme"
       >
-        {{ isDarkTheme ? '☀️' : '🌙' }}
+        <SfSymbol :name="isDarkTheme ? 'sun' : 'moon'" :size="16" />
       </button>
     </aside>
 
@@ -902,7 +902,7 @@ onUnmounted(() => {
               data-test="assistant-capability-guidance"
               class="assistant-capability-guidance"
             >
-              <span class="guidance-icon" aria-hidden="true">⚠</span>
+              <span class="guidance-icon" aria-hidden="true"><SfSymbol name="exclamationmark-triangle" :size="20" /></span>
               <div class="guidance-body">
                 <strong>没有可用的 AI 工具</strong>
                 <small>需要先在能力管理中发布至少一个能力，AI 才能响应提问</small>
