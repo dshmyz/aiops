@@ -18,6 +18,7 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/capabilities"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
+	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 // AgentExecutor 基于 LLM function calling 的执行器。
@@ -31,10 +32,12 @@ type AgentExecutor struct {
 	audit         *audit.Service
 	modelName     string
 	maxSteps      int
-	knowledge     *KnowledgeStore // 知识库（可为 nil）
-	skills        SkillLookup     // SOP/Skill 查询（可为 nil）
-	cache         *ResponseCache  // LLM 响应缓存（可为 nil）
-	rateLimiter   *RateLimiter    // LLM 调用限流（可为 nil）
+	knowledge     *KnowledgeStore                        // 知识库（可为 nil）
+	skills        SkillLookup                            // SOP/Skill 查询（可为 nil）
+	cache         *ResponseCache                         // LLM 响应缓存（可为 nil）
+	rateLimiter   *RateLimiter                           // LLM 调用限流（可为 nil）
+	writeGate     agentWriteGate                         // 写工具门：policy/E2 准入门/pending plan 三态（可为 nil）
+	sequenceFor   func(context.Context, string) []string // 声明证据顺序解析器（可为 nil）
 }
 
 // AgentExecutorConfig 构建 AgentExecutor 所需的依赖。
@@ -104,6 +107,93 @@ func NewAgentExecutorWithCache(cfg AgentExecutorConfig) (*AgentExecutor, error) 
 	return exec, nil
 }
 
+// WithWriteGate 挂载写工具门。写工具（Operation==Write）在 e.executeTool 之前先过此
+// 门，返回与 agentWriteStep 一致的三态语义：拒绝（失败，让 LLM 换路径）/ 自动执行
+// （E2 准入放行，结果作为工具结果回传消息历史）/ pending plan 交接（终止循环，由
+// 调用方渲染为 confirmation_required）。nil（未装配）时写工具退化为工具层自身的
+// RequiresConfirmation fail-closed 拦截（见 agent_tools.go），不会出现"无确认直接执行"。
+func (e *AgentExecutor) WithWriteGate(gate agentWriteGate) *AgentExecutor {
+	e.writeGate = gate
+	return e
+}
+
+// WithSequenceFor 挂载 runbook 声明证据顺序解析器（Service 侧封装 runbookRouter）。
+// 模型在声明步骤未收集齐前提前收尾时，executor 注入一次引导轮（而不是把半成结论
+// 当最终答复）。空序列（未匹配 runbook）不产生任何引导。
+func (e *AgentExecutor) WithSequenceFor(seqFor func(context.Context, string) []string) *AgentExecutor {
+	e.sequenceFor = seqFor
+	return e
+}
+
+// agentWriteOutcome 是一次写工具调用的处置结果，三态对应 policy.Evaluate
+// （拒绝 / E2 自动执行 / 待人工确认交接）。Version/ExpiresAt 与 plan/Response 对齐
+//（uint / time.Time），便于 executorWriteHandoff 与 confirmationResponseFromOutcome
+// 直接透传。
+type agentWriteOutcome struct {
+	Denied            bool   // policy 拒绝写入（reason 携带原因）
+	Reason            string // 拒绝原因（仅 Denied 使用）
+	AutoExec          bool   // E2 准入门放行，已按已确认计划执行
+	PlanID            string
+	ExecutionID       string
+	Status            string
+	Version           uint
+	ExpiresAt         time.Time
+	Summary           string
+	Reused            bool
+	Blocks            []Block
+	ConfirmationToken string
+	Tool              string
+	Trace             string
+}
+
+// agentWriteGate 拦截一次写工具调用。user 为空身份时 policy 一律拒绝（fail-closed）。
+type agentWriteGate func(ctx context.Context, user identity.CurrentUser, toolName string, input map[string]any) (*agentWriteOutcome, error)
+
+// writeOutcomeToolResult 把已落地的写调用（自动执行）渲染为工具结果 JSON，回传消息
+// 历史供 LLM 继续推理。
+func writeOutcomeToolResult(toolName string, out *agentWriteOutcome) string {
+	data := map[string]any{
+		"tool":    toolName,
+		"summary": out.Summary,
+	}
+	if out.AutoExec {
+		data["execution_id"] = out.ExecutionID
+		data["status"] = out.Status
+		data["reused"] = out.Reused
+		data["plan_id"] = out.PlanID
+	} else {
+		data["plan_id"] = out.PlanID
+		data["status"] = out.Status
+		data["confirmation_token"] = out.ConfirmationToken
+	}
+	b, _ := json.Marshal(data)
+	return string(b)
+}
+
+// executorPendingSequence 列出声明顺序中尚未被满足的成员（空=顺序已收齐）。
+func executorPendingSequence(sequence []string, touched map[string]bool) []string {
+	if len(sequence) == 0 {
+		return nil
+	}
+	var pending []string
+	for _, m := range sequence {
+		if m == "" {
+			continue
+		}
+		if !touched[m] {
+			pending = append(pending, m)
+		}
+	}
+	return pending
+}
+
+// executorSequenceSteer 是 executor 的声明顺序引导轮文案：点名剩余声明步骤，要求
+// 模型先取证再收尾。
+func executorSequenceSteer(pending []string) string {
+	return "告警根因序列尚未收集齐声明的证据步骤，请先执行下列步骤完成取证：" + strings.Join(pending, "、") +
+		"。全部执行完后再给面向用户的中文总结收尾。"
+}
+
 // AgentRunResult 是执行结果。
 type AgentRunResult struct {
 	Answer    string        // LLM 最终回复
@@ -111,6 +201,7 @@ type AgentRunResult struct {
 	Reasoning []string      // 每轮 LLM 的中间推理（决策链）
 	TurnCount int           // LLM 调用次数
 	Error     error
+	Handoff   *agentWriteOutcome // 写交接：已建 pending plan，调用方应渲染 confirmation_required
 }
 
 // ToolCallLog 记录一次工具调用。
@@ -315,12 +406,26 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 	lastStep := 0
 	seen := map[string]bool{} // 去重：同一工具+参数不重复调用
 
+	// 写门身份：executor ctx 已由入口 WithToolUser 注入真实请求者。缺失时为空身份
+	// ——policy 对空身份一律拒绝写（fail-closed），与工具层行为一致。
+	gateUser, _ := toolUserFromContext(ctx)
+	// runbook 声明证据顺序：匹配到启用 runbook 的 tool_sequence 时，模型在声明步骤
+	// 未收集齐前提前收尾会收到一次引导轮；未匹配则为空，行为与历史一致。
+	var sequence []string
+	if e.sequenceFor != nil {
+		sequence = e.sequenceFor(ctx, message)
+	}
+	sequenceTouched := map[string]bool{}
+	steered := false // 声明顺序引导最多注入一次，防止无限引导
+	var handoff *agentWriteOutcome
+
 	// 工具集：全量已注册工具每轮都对模型开放，不再单独跑一次意图分类 LLM
 	//（省一次 ~4s 往返）。意图与工具选择由模型在每轮内语义判断：知识型问题直接
 	// 文字回答，实时数据问题从全量工具中选相关者（角色提示词 agent_role.go 两条
 	// 都已写明）。
 	allTools := e.tools
 
+loop:
 	for step := 0; step < e.maxSteps; step++ {
 		lastStep = step
 		// Kill switch：agent 被禁用时立即停止
@@ -337,19 +442,21 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 		}
 
 		// 调 LLM（带 tools 参数）。流式请求整轮走流式：推理 token 逐 chunk 实时
-		// 转发 thinking（独立通道，无闪烁）；content 先累积，仅在该轮无工具调用
-		//（终轮）时 flush 为 delta——工具轮 content 是"边说边决定"的叙述、先于
-		// 工具调用出现，直接转发会被后续工具执行结果覆盖造成闪烁。工具调用 deltas
-		// 在 streamRound 内部按 index 聚合，返回完整 ToolCalls。
+		// 转发 thinking（独立通道，无闪烁）；content 先累积、flush 时机由本函数在
+		// 无工具调用分支决定——真终轮 flush 为 delta，声明顺序引导轮丢弃（不让半成
+		// 结论闪现），工具轮的先导叙述丢弃（避免被执行结果覆盖的闪烁）。工具调用
+		// deltas 在 streamRound 内部按 index 聚合，返回完整 ToolCalls。
 		toolInfos := e.toolInfosFiltered(allTools)
 		logWithCtx(ctx, "[agent] calling LLM with %d tools: %v", len(toolInfos), toolNames(toolInfos))
 		e.acquireLLM()
 		var resp *schema.Message
+		var chunks []string
 		var err error
 		if onDelta != nil {
-			// 终轮流式：内容按 chunk flush 为 delta 由 streamRound 承担（只有
-			// 该轮无工具调用时才 flush，见 streamRound）。
-			resp, err = e.streamRound(ctx, messages, toolInfos, onThinking, onDelta)
+			// 流式轮：推理 token 逐 chunk 实时转发 onThinking（独立通道无闪烁），
+			// content chunk 缓冲在本轮内不动（见下方终轮分支：真终轮 flush、声明顺序
+			// 引导时丢弃半成结论）。工具轮 content 是"边说边决定"的先导叙述，正常丢弃。
+			resp, chunks, err = e.streamRound(ctx, messages, toolInfos, onThinking)
 		} else {
 			resp, err = e.chat.Generate(ctx, messages, model.WithTools(toolInfos))
 		}
@@ -369,6 +476,12 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 		if len(resp.ToolCalls) == 0 {
 			// 数据诚实性兜底：所有工具都失败时，不给 LLM 脑补的机会
 			if len(allToolCalls) > 0 && allToolsFailed(allToolCalls) {
+				// 流式：已缓冲的内容照样增量渲染（token 手感保留，结论由兜底覆盖）
+				if onDelta != nil {
+					for _, c := range chunks {
+						onDelta(c)
+					}
+				}
 				honest := fmt.Sprintf("抱歉，本次检查的所有工具调用都失败了，无法获取任何数据。失败详情：%s", summarizeFailures(allToolCalls))
 				e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
 				result := &AgentRunResult{
@@ -381,6 +494,23 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 					e.cache.Set(ctx, message, result)
 				}
 				return result
+			}
+			// 声明证据顺序未完成 → 注入一次引导轮，不接受"半成结论"当最终答复。
+			// 与 loop 侧 sequenceSteerTurn 语义一致：宁可多走一轮取证，也不让模型
+			// 只查了一个维度就下结论。全部收齐或已引导过一次才放行真终轮。
+			if pending := executorPendingSequence(sequence, sequenceTouched); len(pending) > 0 && !steered {
+				steered = true
+				steer := schema.UserMessage(executorSequenceSteer(pending))
+				logWithCtx(ctx, "[agent] step %d: steering runbook sequence pending %v", step+1, pending)
+				messages = append(messages, steer)
+				continue
+			}
+			// 真终轮：把缓冲的 content 按原 chunk 次序 flush 为 delta（最终答案
+			// 增量渲染）。声明顺序引导轮已 continue，不会走到这里。
+			if onDelta != nil {
+				for _, c := range chunks {
+					onDelta(c)
+				}
 			}
 			// 如果已有工具调用结果，走分析层生成深度报告。流式请求跳过分析层：
 			// analyze 是又一次非流式 LLM 调用（深度报告），在 SSE 的 30s 预算内
@@ -401,9 +531,8 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 			}
 			e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
 			answer := resp.Content
-			// 流式轮：终轮（无工具调用）的 content 已由 streamRound 按 chunk flush
-			// 为 delta（即最终答案，逐段增量渲染），这里不再重复 flush。旧实现是
-			// "非流式 Generate → streamGenerate 重放一遍"，多花一次 LLM 调用。
+			// 流式轮：终轮 content 已在上方按 chunk flush 为 delta（最终答案逐段
+			// 增量渲染），这里不再重复 flush。
 			result := &AgentRunResult{
 				Answer:    answer,
 				ToolCalls: allToolCalls,
@@ -439,8 +568,20 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 			stepIdx := len(allToolCalls)
 			logWithCtx(ctx, "[agent] step %d: calling %s(%s)", stepIdx+1, toolName, toolArgs)
 
-			// 执行工具
-			result, execErr := e.executeTool(ctx, toolName, toolArgs)
+			// 执行工具。写工具（registered Write）先过写门：拒绝 → 失败让 LLM 换路径；
+			// E2 放行 → 自动执行（结果回传）；其它 → 交接（build pending plan 终止循环，
+			// 由调用方渲染 confirmation_required，写绝不在此处直接执行）。
+			result, execErr, gateOut := e.handleToolCall(ctx, gateUser, toolName, toolArgs)
+			if gateOut != nil {
+				handoff = gateOut
+				if onStep != nil {
+					onStep(AgentStepEvent{Step: stepIdx, Tool: toolName, Status: "done", Summary: gateOut.Summary})
+				}
+				break loop
+			}
+			// 声明证据顺序：本步工具已执行，标记可能命中的声明成员（子串匹配让域
+			// 诊断也能满足命名该域的顺序成员）。
+			sequenceTrackTouched(sequenceTouched, sequence, toolName)
 			agentMetrics.recordToolCall(execErr == nil)
 
 			toolLog := ToolCallLog{Tool: toolName, Input: toolArgs}
@@ -505,6 +646,18 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 		}
 	}
 
+	// 写交接：循环在写门上中断（gateOut 非空），把已落库的 pending plan 带出。
+	// 不写缓存——计划是一次性的，缓存会串到后续用户的确认状态。
+	if handoff != nil {
+		return &AgentRunResult{
+			Answer:    handoff.Summary,
+			ToolCalls: allToolCalls,
+			Reasoning: reasoningTrail,
+			TurnCount: lastStep + 1,
+			Handoff:   handoff,
+		}
+	}
+
 	// 达到最大步数或 LLM 结束调用 → 进入分析层
 	// 收集所有工具结果，发给推理模型做深度分析
 	if len(allToolCalls) > 0 {
@@ -550,14 +703,17 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 // streamRound 以流式方式生成单轮回复，是流式请求下每个循环轮次的统一生成入口。
 //   - 推理 token（chunk.ReasoningContent）逐片段实时转发给 onThinking，让前端边
 //     想边显示思考过程；
-//   - content 片段缓冲在该轮内、不实时转发，loop 结束按 msg.ToolCalls 判定终局：
-//     仅终轮（无工具调用）把缓冲的 content 按原 chunk 次序逐段转发给 onContent
-//     （即最终答案逐段增量渲染，保持"token 式"流式手感）；工具轮的先导叙述直接
-//     丢弃，避免"边说边决定再被工具路径覆盖"的闪烁；
+//   - content 片段缓冲在该轮内、不实时转发、随返回值交还给调用方：调用方在真终轮
+//     （无工具调用 + 无声明顺序引导）按原 chunk 次序逐段转发 onDelta（即最终答案
+//     逐段增量渲染），在声明顺序引导轮则丢弃缓冲（不让半成结论闪现）——flush 时机
+//     由 runWithCallbackRole 决定，这里不再替它做决定；工具轮的先导叙述正常丢弃，
+//     避免"边说边决定再被工具路径覆盖"的闪烁；
 //   - 工具调用 deltas 按 index 聚合：OpenAI 兼容接口把一次函数调用按 index 分片
 //     下发（id/name 在首片、arguments 跨片追加），聚合后返回完整的 ToolCalls。
-// 返回累积消息，并保留流式响应中携带的 ResponseMeta（token 用量，供审计）。
-func (e *AgentExecutor) streamRound(ctx context.Context, messages []*schema.Message, toolInfos []*schema.ToolInfo, onThinking func(string), onContent func(string)) (*schema.Message, error) {
+//
+// 返回累积消息、缓冲的 content chunk 列表，并保留流式响应中携带的 ResponseMeta
+// （token 用量，供审计）。
+func (e *AgentExecutor) streamRound(ctx context.Context, messages []*schema.Message, toolInfos []*schema.ToolInfo, onThinking func(string)) (*schema.Message, []string, error) {
 	var reader *schema.StreamReader[*schema.Message]
 	var err error
 	if len(toolInfos) > 0 {
@@ -566,7 +722,7 @@ func (e *AgentExecutor) streamRound(ctx context.Context, messages []*schema.Mess
 		reader, err = e.chat.Stream(ctx, messages)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer reader.Close()
 	var builder strings.Builder
@@ -580,7 +736,7 @@ func (e *AgentExecutor) streamRound(ctx context.Context, messages []*schema.Mess
 			if errors.Is(recvErr, io.EOF) {
 				break
 			}
-			return nil, recvErr
+			return nil, nil, recvErr
 		}
 		if chunk == nil {
 			continue
@@ -621,14 +777,8 @@ func (e *AgentExecutor) streamRound(ctx context.Context, messages []*schema.Mess
 	if lastResponse != nil && lastResponse.ResponseMeta != nil {
 		msg.ResponseMeta = lastResponse.ResponseMeta
 	}
-	// 终轮：把缓冲的 content 按原次序逐段 flush 为 delta（最终答案增量渲染）。
-	// 工具轮（msg.ToolCalls 非空）不 flush——先导叙述留给执行结果覆盖。
-	if len(msg.ToolCalls) == 0 && onContent != nil && len(contentChunks) > 0 {
-		for _, c := range contentChunks {
-			onContent(c)
-		}
-	}
-	return msg, nil
+	// flush 时机交给调用方决定（真终轮 flush、声明顺序引导轮丢弃），这里只返回缓冲。
+	return msg, contentChunks, nil
 }
 
 // saveKnowledge 异步保存诊断记录到知识库。
@@ -696,27 +846,22 @@ func (e *AgentExecutor) analyze(ctx context.Context, userMessage string, toolCal
 	emptyCount := 0
 	for _, tc := range toolCalls {
 		sb.WriteString(fmt.Sprintf("\n### %s\n", tc.Tool))
-		if tc.Error != "" {
+		_, failed, empty := classifyToolResult(tc)
+		switch {
+		case failed:
 			failedCount++
-			sb.WriteString(fmt.Sprintf("调用失败: %s\n", tc.Error))
-		} else if len(tc.Output) == 0 {
+			if tc.Error != "" {
+				sb.WriteString(fmt.Sprintf("调用失败: %s\n", tc.Error))
+			} else {
+				sb.WriteString(compressToolOutput(tc.Output))
+				sb.WriteString("\n")
+			}
+		case empty:
 			emptyCount++
 			sb.WriteString("(工具返回空结果)\n")
-		} else {
-			// 压缩数据：只保留 summary/status 等关键字段，丢弃大体积 data
-			summary := compressToolOutput(tc.Output)
-			if summary == "(无结果)" || summary == "" {
-				emptyCount++
-			} else if strings.Contains(strings.ToLower(summary), "error") ||
-				strings.Contains(strings.ToLower(summary), "failed") ||
-				strings.Contains(strings.ToLower(summary), "不可用") {
-				// 工具返回内容含 error/failed/不可用：如 K8s 未配置、探活失败等，
-				// 归入失败而非成功，避免把错误响应统计成"成功获取数据"。
-				failedCount++
-			} else {
-				successCount++
-			}
-			sb.WriteString(summary)
+		default:
+			successCount++
+			sb.WriteString(compressToolOutput(tc.Output))
 			sb.WriteString("\n")
 		}
 	}
@@ -774,6 +919,80 @@ func allToolsFailed(toolCalls []ToolCallLog) bool {
 	return true
 }
 
+// classifyToolResult 判定一次工具调用属于 成功/失败/空，供 analyze 的数据完整性统计。
+//
+//   - error 非空 / 结构化 status|severity 命中失败值 → failed；
+//   - 无 output → empty；
+//   - 摘要命中"本维度无数据"的明确短语（未配置/不可用/探活失败等）→ failed——
+//     如 K8s 未配置、探活失败，是"该维度取不到数"，不能统计成"成功获取数据"；
+//   - 其它 → success。
+//
+// 刻意不做通用文本子串扫描：summary 里出现 "error"/"failed" 往往是数据本身的
+// 现象（"发现 3 条 error 日志"、"errors 记录 N 条"）而非取数失败，误扫会把有完整
+// 数据的正常召回判成失败，进而让报告声称"该维度无数据"。结构化字段优先，摘要只
+// 匹配合法的"无数据"短语。
+func classifyToolResult(tc ToolCallLog) (success, failed, empty bool) {
+	if tc.Error != "" {
+		return false, true, false
+	}
+	if len(tc.Output) == 0 {
+		return false, false, true
+	}
+	if v, _ := tc.Output["status"].(string); isFailedStatus(v) {
+		return false, true, false
+	}
+	if v, _ := tc.Output["severity"].(string); isFailedStatus(v) {
+		return false, true, false
+	}
+	if summary, _ := tc.Output["summary"].(string); summary != "" {
+		if matchesNoDataPhrase(summary) {
+			return false, true, false
+		}
+		return true, false, false
+	}
+	// 无 summary：结构化状态字段（status/severity）在即视为有内容；都没有则空。
+	if _, hasStatus := tc.Output["status"]; hasStatus {
+		return true, false, false
+	}
+	if _, hasSev := tc.Output["severity"]; hasSev {
+		return true, false, false
+	}
+	return false, false, true
+}
+
+// failedStatusValues 是"工具取数失败"的结构化失败值。注意不含 "critical"/"danger"——
+// 那些是"取到了关键异常数据"，属于成功召回，只是数据高危，归成失败会误报无数据。
+var failedStatusValues = map[string]bool{
+	"error": true, "failed": true, "unavailable": true, "not_available": true,
+	"timeout": true, "aborted": true,
+}
+
+func isFailedStatus(v string) bool {
+	return v != "" && failedStatusValues[strings.ToLower(v)]
+}
+
+// noDataSummaryPhrases 是"本维度无数据"的明确摘要短语（取数本身失败），命中任一即
+// 视为失败归类。刻意不含 "error"/"failed" 单字——summary 中的 "包含 N 条 error 记录"
+// 是数据内容，不是取数失败。
+var noDataSummaryPhrases = []string{
+	"不可用", "无数据", "未配置", "未接入", "未启用", "未部署",
+	"获取失败", "探活失败", "调用失败", "无法获取", "暂不支持",
+	"not available", "unavailable", "no data", "not configured", "not enabled",
+}
+
+func matchesNoDataPhrase(summary string) bool {
+	if summary == "" {
+		return false
+	}
+	lower := strings.ToLower(summary)
+	for _, p := range noDataSummaryPhrases {
+		if strings.Contains(lower, strings.ToLower(p)) {
+			return true
+		}
+	}
+	return false
+}
+
 // summarizeFailures 汇总工具失败原因。
 func summarizeFailures(toolCalls []ToolCallLog) string {
 	var parts []string
@@ -828,6 +1047,38 @@ func (e *AgentExecutor) executeTool(ctx context.Context, name string, args strin
 		return invokable.InvokableRun(ctx, args)
 	}
 	return "", fmt.Errorf("tool %s does not support invokable run", name)
+}
+
+// handleToolCall 执行一次工具调用，返回 (结果字符串, 错误, 写交接)。
+// 对 registered Write 工具，在 InvokableRun 之前先过写门（e.writeGate）：
+//   - Denied：按工具失败处理（execErr 非空，下游提示 LLM 换路径）；
+//   - AutoExec：E2 准入门放行，已按已确认计划自动执行，结果作为工具结果回传历史；
+//   - 其它：pending plan 交接（第三个返回值非空，调用方 break loop 终止循环）。
+//
+// 未挂写门（writeGate==nil）时写工具落到工具层自身的 RequiresConfirmation
+// fail-closed 拦截（agent_tools.go）——任何路径都不会"无确认直接执行写"。
+func (e *AgentExecutor) handleToolCall(ctx context.Context, user identity.CurrentUser, toolName, toolArgs string) (string, error, *agentWriteOutcome) {
+	if e.writeGate != nil {
+		if t, ok := tools.Lookup(toolName); ok && t.Operation == tools.Write {
+			var input map[string]any
+			if err := json.Unmarshal([]byte(toolArgs), &input); err != nil {
+				return "", fmt.Errorf("parse write arguments: %w", err), nil
+			}
+			out, err := e.writeGate(ctx, user, toolName, input)
+			if err != nil {
+				return "", err, nil
+			}
+			if out.Denied {
+				return "", fmt.Errorf("write denied by policy: %s", out.Reason), nil
+			}
+			if out.AutoExec {
+				return writeOutcomeToolResult(toolName, out), nil, nil
+			}
+			return "", nil, out // 交接：计划已落库，等待调用方渲染 confirmation_required
+		}
+	}
+	result, err := e.executeTool(ctx, toolName, toolArgs)
+	return result, err, nil
 }
 
 // toolInfos 返回所有工具的 Info 列表（传给 LLM）。

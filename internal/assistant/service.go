@@ -237,7 +237,15 @@ func (s *Service) WithAutonomy(c *autonomy.Controller) *Service {
 // WithAgentExecutor 注入基于 LLM function calling 的执行器。
 // 设置后 handleStatelessWithHistory 走新路径：LLM 自主选工具、自动循环。
 // 同时自动创建 Supervisor 作为通用助手分派入口。
+//
+// 安全边界装配（executor 活跃路径缺失就要出问题清单里的那三个）：
+//  1. 写门：把 Service 侧的 policy/E2/待确认交接三态写门挂给 executor，Actively
+//     execute 的写工具不再"在 confirm 信任等级下无确认直接执行"；
+//  2. 声明证据顺序：把 runbookRouter 的 tool_sequence 解析挂给 executor，模型提前
+//     收尾时会收到引导轮（该特性此前只在被 shadow 的 agent loop 里生效）。
 func (s *Service) WithAgentExecutor(e *AgentExecutor) *Service {
+	e.WithWriteGate(s.executorWriteGate)
+	e.WithSequenceFor(s.agentLoopSequence)
 	s.agentExecutor = e
 	s.supervisor = NewSupervisor(e)
 	return s
@@ -684,6 +692,23 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 		send(StreamEvent{Err: result.Error, Done: true})
 		return
 	}
+	// 写交接：executor 在写门上停下，已建 pending plan ——渲染 confirmation_required
+	//（前端已支持该 shape：待审批卡片 + 确认 token），而不是把"计划已提交待确认"
+	// 混进普通 answer。不写 LLM 缓存（计划是一次性的）。
+	if result.Handoff != nil {
+		response := confirmationResponseFromOutcome(result.Handoff)
+		if hasConversation {
+			assistantTurnID, perr := s.persistTurns(ctx, convID, message, response)
+			if perr != nil {
+				fmt.Printf("[agent] persist turns failed: %v\n", perr)
+			} else {
+				response.ConversationID = convID
+				response.TurnID = assistantTurnID
+			}
+		}
+		send(StreamEvent{Response: &response, Done: true})
+		return
+	}
 	if result.Answer == "" {
 		send(StreamEvent{
 			Response: &Response{
@@ -764,6 +789,10 @@ func (s *Service) handleWithAgentExecutor(ctx context.Context, user identity.Cur
 			return Response{}, fmt.Errorf("agent executor returned no result")
 		}
 		return Response{}, result.Error
+	}
+	// 写交接：与流式路径一致渲染 confirmation_required（pending plan 已落库）。
+	if result.Handoff != nil {
+		return confirmationResponseFromOutcome(result.Handoff), nil
 	}
 	if result.Answer == "" {
 		return Response{

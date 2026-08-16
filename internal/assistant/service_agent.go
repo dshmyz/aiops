@@ -213,10 +213,10 @@ func (s *Service) agentWriteAutoExec(ctx context.Context, user identity.CurrentU
 	}
 	s.recordAutoExec(ctx, user)
 	out := StepOutcome{
-		Intent:  intent,
-		Kind:    StepAdvisory,
-		Tool:    tool.Name,
-		Input:   intent.Input,
+		Intent: intent,
+		Kind:   StepAdvisory,
+		Tool:   tool.Name,
+		Input:  intent.Input,
 		Output: map[string]any{
 			"execution_id": executionResult.ID,
 			"status":       executionResult.Status,
@@ -262,6 +262,111 @@ func (s *Service) agentWriteHandoff(ctx context.Context, user identity.CurrentUs
 		}
 	}
 	return out, nil
+}
+
+// executorWriteGate 是 AgentExecutor 路径的写工具门，与 loop 侧 agentWriteStep 三态
+// 语义一致：policy 拒绝 / E2 准入门放行自动执行 / 其余写入建 pending plan 交接给人。
+// executor 没有 planner Intent：写工具判定依据是注册表里该工具的 Operation==Write，
+// 输入是 LLM 原始 tool args；身份由调用方 ctx（WithToolUser）注入，空身份时 policy
+// 一律拒绝（fail-closed）。挂载点：WithAgentExecutor → e.WithWriteGate。
+func (s *Service) executorWriteGate(ctx context.Context, user identity.CurrentUser, toolName string, input map[string]any) (*agentWriteOutcome, error) {
+	if s.plans == nil {
+		return nil, errors.New("plan service is required")
+	}
+	tool, ok := tools.Lookup(toolName)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrPolicyDenied, policy.ToolNotRegistered)
+	}
+	decision := policy.Evaluate(user, tool, input)
+	if !decision.Allowed {
+		return &agentWriteOutcome{Denied: true, Tool: toolName, Reason: string(decision.Reason)}, nil
+	}
+	// E2：低风险写过准入门 → 自动执行（已确认 plan → 执行 → 结果回传）。与 loop
+	// 一致，executor 无 runbook 模板评审单元，走裸写严格门（Admit：工具自身必须 low）。
+	if s.admitAutoExec(ctx, user, tool, decision, autonomy.SourceAgentExec, nil) {
+		return s.executorWriteAutoExec(ctx, user, tool, input, decision)
+	}
+	return s.executorWriteHandoff(ctx, user, tool, input, decision)
+}
+
+// executorWriteAutoExec 执行一次被准入门放行的低风险写（executor 路径）：创建已确认
+// plan → 立即执行 → 结果回传消息历史，与 loop 侧 agentWriteAutoExec 语义一致。
+func (s *Service) executorWriteAutoExec(ctx context.Context, user identity.CurrentUser, tool tools.Tool, input map[string]any, decision policy.Decision) (*agentWriteOutcome, error) {
+	if s.execution == nil {
+		// 无执行器时回落普通 pending plan（不放行自动执行）。
+		return s.executorWriteHandoff(ctx, user, tool, input, decision)
+	}
+	plan, err := s.plans.CreateRunbookPlan(ctx, user, decision, input, "", "low")
+	if err != nil {
+		return nil, err
+	}
+	executionResult, execErr := s.execution.ExecuteConfirmedStoredPlan(ctx, plan.ID)
+	if execErr != nil {
+		return nil, execErr
+	}
+	s.recordAutoExec(ctx, user)
+	out := &agentWriteOutcome{
+		AutoExec:    true,
+		Tool:        tool.Name,
+		PlanID:      plan.ID,
+		ExecutionID: executionResult.ID,
+		Status:      executionResult.Status,
+		Reused:      executionResult.Reused,
+		Summary:     fmt.Sprintf("已自动执行 %s（准入放行）：执行 %s 状态 %s", tool.Name, executionResult.ID, executionResult.Status),
+	}
+	if s.dryRun != nil {
+		if block, _, ok := s.previewWritePlan(ctx, tool.Name, input); ok {
+			out.Blocks = append(out.Blocks, block)
+		}
+	}
+	return out, nil
+}
+
+// executorWriteHandoff 建 pending plan 交还给人（executor 路径的硬禁止默认），与 loop
+// 侧 agentWriteHandoff 语义一致。
+func (s *Service) executorWriteHandoff(ctx context.Context, user identity.CurrentUser, tool tools.Tool, input map[string]any, decision policy.Decision) (*agentWriteOutcome, error) {
+	plan, err := s.plans.CreatePlan(ctx, user, decision, input)
+	if err != nil {
+		return nil, err
+	}
+	out := &agentWriteOutcome{
+		Tool:              tool.Name,
+		PlanID:            plan.ID,
+		Status:            string(plan.Status),
+		Version:           plan.Version,
+		ExpiresAt:         plan.ExpiresAt,
+		ConfirmationToken: plan.ConfirmationToken,
+		Summary:           summarizePlan(tool.Name, input),
+	}
+	if s.dryRun != nil {
+		if block, result, ok := s.previewWritePlan(ctx, tool.Name, input); ok {
+			out.Blocks = append(out.Blocks, block)
+			if encoded, err := json.Marshal(result); err == nil {
+				_ = s.plans.AttachDryRun(ctx, plan.ID, encoded)
+			}
+		}
+	}
+	return out, nil
+}
+
+// confirmationResponseFromOutcome 把 executor 一次写交接渲染为 confirmation_required
+// Response，与 loop 侧 handoffResponse 同构——前端已按该 shape 渲染待审批计划。
+func confirmationResponseFromOutcome(out *agentWriteOutcome) Response {
+	if out == nil {
+		return Response{Type: "answer", Message: "无法创建待确认计划"}
+	}
+	return Response{
+		Type:              "confirmation_required",
+		Tool:              out.Tool,
+		Message:           out.Summary,
+		PlanID:            out.PlanID,
+		Status:            out.Status,
+		Version:           out.Version,
+		ExpiresAt:         out.ExpiresAt,
+		Summary:           out.Summary,
+		ConfirmationToken: out.ConfirmationToken,
+		Blocks:            out.Blocks,
+	}
 }
 
 // stepReadSummary produces a lightweight human summary of a read step's raw

@@ -26,6 +26,7 @@ const (
 	SourceDirect    Source = "direct"     // 直接对话低风险 runbook
 	SourceScheduler Source = "scheduler"  // 定时触发的低风险 runbook（Phase 3）
 	SourceAgentLoop Source = "agent-loop" // agent loop 内低风险写
+	SourceAgentExec Source = "agent-exec" // LLM function calling 执行器（活跃路径）内低风险写
 )
 
 // ErrDenied 表示一次自动执行被准入门拒绝（总开关/风险/白名单/每日上限）。调用方

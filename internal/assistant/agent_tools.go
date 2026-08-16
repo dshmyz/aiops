@@ -92,6 +92,14 @@ func (t *CapabilityTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	if !decision.Allowed {
 		return "", fmt.Errorf("policy denied: %s", decision.Reason)
 	}
+	// 3. RequiresConfirmation：写工具在两个信任等级（confirm/auto）下都必须先人工
+	// 确认，policy 只标记不执行。等待确认的职责在 Service 写门（agentWriteStep）
+	// 和 executor 写门（executorWriteGate）——它们会建 pending plan 交还给人；但任何
+	// 绕开写门直接 InvokableRun 的路径都必须对 confirm 级写 fail-closed 拒绝，否则
+	// "写要在人工确认处停下"这一承诺会在活跃执行路径上被静默绕过（直接执行）。
+	if decision.RequiresConfirmation {
+		return "", fmt.Errorf("write requires human confirmation: %s (create a plan for approval)", t.cap.Name)
+	}
 
 	// 3. 执行 HTTP 调用
 	result, err := t.adapter.Execute(ctx, t.cap, input)
@@ -443,7 +451,7 @@ func (t *K8sPodListTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 		Name: tools.K8sPodList,
 		Desc: "列出 Kubernetes Pod 状态。用于检查 Pod 是否正常运行、是否有重启、OOM 等问题。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"namespace": {Desc: "K8s 命名空间，默认 'default'", Required: false, Type: schema.String},
+			"namespace":      {Desc: "K8s 命名空间，默认 'default'", Required: false, Type: schema.String},
 			"label_selector": {Desc: "标签选择器，如 'app=nginx'", Required: false, Type: schema.String},
 		}),
 	}, nil
