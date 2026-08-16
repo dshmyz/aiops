@@ -303,10 +303,23 @@ type Response struct {
 	// Blocks 是结构化响应块，对齐 SxDevOps AIOps 2.0 的 block 协议。
 	// 前端按 Block.Type 分发到对应渲染组件（证据时间线、审批表单、风险提示等）。
 	// 当为空时 JSON 中省略此字段（omitempty），向后兼容。
-	Blocks            []Block `json:"blocks,omitempty"`
-	ConfirmationToken string  `json:"-"`
-	ConversationID    string  `json:"conversation_id,omitempty"`
-	TurnID            string  `json:"turn_id,omitempty"`
+	Blocks []Block `json:"blocks,omitempty"`
+	// Process 是一次执行的过程证据（思考文本 / 已执行步骤）。executor 流式路径在
+	// 终局只落最终 Response，思考与步骤不在其中；挂上 Process 后 persistTurns 会写进
+	// turn 的 response_payload，刷新或换设备回放仍能复原生成时的过程内容。
+	Process           *ResponseProcess `json:"process,omitempty"`
+	ConfirmationToken string           `json:"-"`
+	ConversationID    string           `json:"conversation_id,omitempty"`
+	TurnID            string           `json:"turn_id,omitempty"`
+}
+
+// ResponseProcess 记录一次执行的过程证据。Thinking 是流式过程中实时推给前端的推理
+// 文本（与 SSE thinking 事件一致），Steps 是已执行步骤（与 SSE step 事件一致，
+// json 字段对齐前端 AssistantStep）。二者都在流式期间累积、随 turn 落库，保证回放
+// "所见即所得"，而不是拿最终答复反推过程。仅前端展示用，不回喂给 LLM。
+type ResponseProcess struct {
+	Thinking string      `json:"thinking,omitempty"`
+	Steps    []StepEvent `json:"steps,omitempty"`
 }
 
 // PlanSummary is the operator-facing summary of an action plan derived from a
@@ -676,18 +689,25 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 	toolCtx := WithToolUser(ctx, user)
 	// 最终答案的流式 delta 与推理 token 的实时 thinking：两条都由 executor 承担
 	//（终轮 flush / 逐 chunk 转发），共用 send 推给前端，最终 response 事件权威覆盖。
+	// 过程证据累计：thinking 逐 chunk 累积、每条已执行步骤记录在案，随 turn 落库
+	//（response_payload.process），刷新后回放仍能看到生成时的思考与工具调用。
+	var (
+		processThinking strings.Builder
+		processSteps    []StepEvent
+	)
 	emitDelta := func(delta string) { send(StreamEvent{Delta: delta}) }
-	emitThinking := func(t string) { send(StreamEvent{Thinking: t}) }
-	result := s.supervisor.DispatchStream(toolCtx, message, history, func(step AgentStepEvent) {
-		send(StreamEvent{
-			Step: &StepEvent{
-				Tool:      step.Tool,
-				StepIndex: step.Step,
-				Status:    step.Status,
-				Summary:   step.Summary,
-			},
-		})
-	}, emitDelta, emitThinking)
+	emitThinking := func(t string) {
+		if t != "" {
+			processThinking.WriteString(t)
+		}
+		send(StreamEvent{Thinking: t})
+	}
+	onStep := func(step AgentStepEvent) {
+		se := StepEvent{Tool: step.Tool, StepIndex: step.Step, Status: step.Status, Summary: step.Summary}
+		processSteps = append(processSteps, se)
+		send(StreamEvent{Step: &se})
+	}
+	result := s.supervisor.DispatchStream(toolCtx, message, history, onStep, emitDelta, emitThinking)
 	if result.Error != nil {
 		send(StreamEvent{Err: result.Error, Done: true})
 		return
@@ -696,7 +716,7 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 	//（前端已支持该 shape：待审批卡片 + 确认 token），而不是把"计划已提交待确认"
 	// 混进普通 answer。不写 LLM 缓存（计划是一次性的）。
 	if result.Handoff != nil {
-		response := confirmationResponseFromOutcome(result.Handoff)
+		response := attachProcess(confirmationResponseFromOutcome(result.Handoff), processThinking.String(), processSteps)
 		if hasConversation {
 			assistantTurnID, perr := s.persistTurns(ctx, convID, message, response)
 			if perr != nil {
@@ -724,6 +744,9 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 		Message: result.Answer,
 		Answer:  map[string]any{"message": result.Answer},
 	}
+	// 挂上过程证据（思考文本 / 已执行步骤），随 turn 的 response_payload 落库，
+	// 刷新/回放后仍能看到生成时的思考与工具调用（与流式界面所见一致）。
+	response = attachProcess(response, processThinking.String(), processSteps)
 	// 二阶段格式化：仅当实际执行了工具时再整形。无工具调用（知识型直接回答）
 	// 的答案已是面向用户的完整文本，跳过二次整形可避免改写与泄露内部术语。
 	// 工具路径同样不再走 LLM formatter：agent 终轮已流式写出面向用户的最终答复
@@ -754,6 +777,17 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 		}
 	}
 	send(StreamEvent{Response: &response, Done: true})
+}
+
+// attachProcess 把流式期间累计的过程证据（思考文本 / 已执行步骤）挂到 Response 上，
+// 供 persistTurns 写进 turn 的 response_payload。两者皆空时原样返回，保持旧 turn 的
+// response_payload 结构不变（纯知识回答无过程内容，不产生多余的 process 字段）。
+func attachProcess(response Response, thinking string, steps []StepEvent) Response {
+	if thinking == "" && len(steps) == 0 {
+		return response
+	}
+	response.Process = &ResponseProcess{Thinking: thinking, Steps: steps}
+	return response
 }
 
 // handleStateless preserves the pre-multiturn behavior: no history, no
@@ -1563,6 +1597,9 @@ func responsePayload(response Response) map[string]any {
 	}
 	if response.Trace != nil {
 		payload["trace"] = response.Trace
+	}
+	if response.Process != nil {
+		payload["process"] = response.Process
 	}
 	return payload
 }

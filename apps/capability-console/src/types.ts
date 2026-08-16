@@ -429,6 +429,17 @@ export interface ConversationTurn {
   progress_stages?: ProgressStage[];
 }
 
+/**
+ * 后端持久化的过程证据（turn 的 response_payload.process）。executor 流式路径在
+ * 终局只落最终答复，思考文本与已执行步骤由后端流式期间累积、随 turn 落库；
+ * 刷新或换设备回放后前端据此水合回瞬态字段，保证"所见即所得"。仅前端展示用，
+ * 不会被回喂给 LLM。
+ */
+export interface TurnProcess {
+  thinking?: string;
+  steps?: AssistantStep[];
+}
+
 export interface ConversationSummary {
   id: string;
   subject: string;

@@ -112,4 +112,82 @@ describe('useConversations refreshTurns 保留瞬时过程内容', () => {
     expect(conversationTurns.value).toHaveLength(2);
     expect(conversationTurns.value[1].thinking).toBe('进行中…');
   });
+
+  test('刷新后从 response_payload.process 水合思考与步骤（后端已落库）', async () => {
+    const { getConversation } = await import('../api');
+    const viGet = vi.mocked(getConversation);
+
+    const { conversationTurns, refreshTurns } = useConversations();
+
+    // 页面刷新：内存瞬态已清空，只能靠后端持久化的过程证据（response_payload.process）
+    // 复原生成时的思考与工具调用步骤。
+    viGet.mockResolvedValueOnce({
+      id: 'conv-1',
+      subject: 't',
+      title: 't',
+      last_message_preview: '',
+      created_at: '2026-08-16T00:00:00Z',
+      last_active_at: '2026-08-16T00:00:00Z',
+      turns: [
+        Object.assign(turn('a-persisted-2', 'assistant', 'Kafka 集群健康，3 节点在线'), {
+          response_payload: {
+            type: 'answer',
+            process: {
+              thinking: '先查 lag 再查 topic…',
+              steps: [
+                { tool: 'kafka.consumer_lag.read', step_index: 0, status: 'done', summary: 'lag 12ms' },
+                { tool: 'kafka.topic.read', step_index: 1, status: 'done', summary: 'topic ok' },
+              ],
+            },
+          },
+        }),
+        turn('u1', 'user', 'kafka 健康吗'),
+      ],
+      next_turn_cursor: null,
+    });
+
+    await refreshTurns('conv-1');
+
+    const assistantTurn = conversationTurns.value[1];
+    expect(assistantTurn.thinking).toContain('先查 lag');
+    expect(assistantTurn.steps).toHaveLength(2);
+    expect(assistantTurn.steps?.[0]).toMatchObject({
+      tool: 'kafka.consumer_lag.read',
+      step_index: 0,
+      status: 'done',
+    });
+    expect(assistantTurn.steps?.[1].summary).toContain('topic ok');
+    // response_payload 原样保留，水合只补瞬态字段、不动持久化数据
+    expect(assistantTurn.response_payload).toMatchObject({ type: 'answer' });
+  });
+
+  test('无 process payload 的旧 turn 不被水合', async () => {
+    const { getConversation } = await import('../api');
+    const viGet = vi.mocked(getConversation);
+
+    const { conversationTurns, refreshTurns } = useConversations();
+
+    viGet.mockResolvedValueOnce({
+      id: 'conv-1',
+      subject: 't',
+      title: 't',
+      last_message_preview: '',
+      created_at: '2026-08-16T00:00:00Z',
+      last_active_at: '2026-08-16T00:00:00Z',
+      turns: [
+        // 修复前落库的 turn：response_payload 只有 answer，无 process。
+        Object.assign(turn('a-old', 'assistant', '已执行完成'), {
+          response_payload: { type: 'answer' },
+        }),
+        turn('u1', 'user', '查一下'),
+      ],
+      next_turn_cursor: null,
+    });
+
+    await refreshTurns('conv-1');
+
+    const assistantTurn = conversationTurns.value[1];
+    expect(assistantTurn.thinking).toBeUndefined();
+    expect(assistantTurn.steps).toBeUndefined();
+  });
 });

@@ -9,6 +9,7 @@ import type {
   ConversationRole,
   ConversationSummary,
   ConversationTurn,
+  TurnProcess,
 } from '../types';
 
 // 流式生成期间只在内存 turn 上累积、后端持久化 turn 不含的瞬时字段。
@@ -60,6 +61,39 @@ function mergeTransient(
     applied.add(turn.role);
     return { ...turn, ...patch };
   });
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+// processFromPayload 读取后端持久化的过程证据（turn 的 response_payload.process）。
+// executor 流式路径把思考文本与已执行步骤随 turn 落库，刷新/换设备后回读据此复原。
+function processFromPayload(turn: ConversationTurn): TurnProcess | undefined {
+  const payload = turn.response_payload;
+  if (!isRecord(payload) || !isRecord(payload.process)) {
+    return undefined;
+  }
+  return payload.process as TurnProcess;
+}
+
+// hydrateProcess 把后端持久化的 process 填回瞬态字段（thinking/steps），仅当顶层
+// 缺席时补——流式期间内存里的实时值优先，二者内容本就同源。
+function hydrateProcess(turn: ConversationTurn): ConversationTurn {
+  const process = processFromPayload(turn);
+  if (!process) return turn;
+  const next: ConversationTurn = { ...turn };
+  if (!next.thinking && typeof process.thinking === 'string' && process.thinking.trim()) {
+    next.thinking = process.thinking;
+  }
+  if ((!next.steps || next.steps.length === 0) && Array.isArray(process.steps) && process.steps.length) {
+    next.steps = process.steps;
+  }
+  return next;
+}
+
+function hydrateTurns(turns: ConversationTurn[]): ConversationTurn[] {
+  return turns.map(hydrateProcess);
 }
 
 export type ArchivedView = 'active' | 'archived';
@@ -148,7 +182,9 @@ export function useConversations(): UseConversations {
       const detail = await getConversation(conversationID);
       const rawTurns = detail.turns ?? [];
       // 后端返回 CreatedAt DESC（最新消息在前），渲染需要正序（user -> assistant）。
-      conversationTurns.value = mergeTransient(rawTurns.slice().reverse(), transient);
+      // 先水合后端持久化的过程证据（response_payload.process 的 thinking/steps），
+      // 再并入同会话瞬态快照，保证刷新后思考与工具调用步骤不丢。
+      conversationTurns.value = mergeTransient(hydrateTurns(rawTurns.slice().reverse()), transient);
       conversationHasMore.value = Boolean(detail.next_turn_cursor) && rawTurns.length > 0;
       conversationOldestTurnID.value = rawTurns[0]?.id ?? null;
     } catch {
@@ -171,7 +207,8 @@ export function useConversations(): UseConversations {
         const existingIDs = new Set(conversationTurns.value.map((turn) => turn.id));
         const deduped = olderTurns.filter((turn) => !existingIDs.has(turn.id));
         const oldestFirst = deduped.slice().reverse();
-        conversationTurns.value = [...oldestFirst, ...conversationTurns.value];
+        // 更早的 turn 同样水合持久化的过程证据（thinking/steps）。
+        conversationTurns.value = [...hydrateTurns(oldestFirst), ...conversationTurns.value];
         conversationOldestTurnID.value = deduped[0]?.id ?? conversationOldestTurnID.value;
       }
       conversationHasMore.value = Boolean(detail.next_turn_cursor) && olderTurns.length > 0;
