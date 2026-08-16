@@ -107,7 +107,6 @@ function onDelete(server: MCPServer) {
 .mcp-server-list {
   width: 100%;
   overflow-x: auto;
-  padding: 0 var(--space-6, 1.5rem) var(--space-6, 1.5rem);
 }
 
 .mcp-server-empty {

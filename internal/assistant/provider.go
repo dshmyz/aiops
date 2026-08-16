@@ -109,20 +109,10 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 		}
 	}
 	// chat is typed as the model interface so it can be swapped for the retry
-	// wrapper below while still being shared by planner/compactor/formatter.
+	// wrapper below while still being shared by planner/compactor.
 	var chat model.BaseChatModel
 	var err error
-	chat, err = einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
-		APIKey:              apiKey,
-		BaseURL:             strings.TrimSpace(env[envOpenAIBaseURL]),
-		Model:               modelName,
-		Timeout:             timeout,
-		Temperature:         &temperature,
-		MaxCompletionTokens: &maxCompletionTokens,
-		ResponseFormat: &einoopenai.ChatCompletionResponseFormat{
-			Type: einoopenai.ChatCompletionResponseFormatTypeJSONObject,
-		},
-	})
+	chat, err = newOpenAIChat(ctx, apiKey, strings.TrimSpace(env[envOpenAIBaseURL]), modelName, temperature, maxCompletionTokens, timeout, true)
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("create eino openai chat model: %w", err)
 	}
@@ -130,9 +120,40 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 	// stalls awaiting headers) so momentary backends don't surface as hard
 	// failures. Attempts defaults to 2; both knobs are configurable via env.
 	chat = withChatRetry(chat, retryAttempts(env), retryBackoff(env))
-	// LLMFormatter 复用同一个 chat model，失败时由 CodeFallbackFormatter 兜底。
-	formatter := NewChainedFormatter(NewLLMFormatter(chat), NewCodeFallbackFormatter())
+
+	// LLMFormatter 用独立的无 json_object chat：其 prompt 是分隔符格式的自由文本
+	//（[[SUMMARY_START]]...[[SUMMARY_END]]），流式路径把 SUMMARY 区间逐 token 转发。
+	// 若复用 planner 的 json_object chat，模型只回严格 JSON，没有 [[SUMMARY_START]]
+	// 标记 → 0 delta，且空 summary 触发 code 兜底（工具调用路径"一波输出"的根因）。
+	formatterChat, ferr := newOpenAIChat(ctx, apiKey, strings.TrimSpace(env[envOpenAIBaseURL]), modelName, temperature, maxCompletionTokens, timeout, false)
+	if ferr != nil {
+		// 极端回退：共享 planner chat（丧失流式，但整形功能不降级）。
+		formatterChat = chat
+	} else {
+		formatterChat = withChatRetry(formatterChat, retryAttempts(env), retryBackoff(env))
+	}
+	formatter := NewChainedFormatter(NewLLMFormatter(formatterChat), NewCodeFallbackFormatter())
 	return NewEinoPlanner(chat), NewLLMCompactor(chat), formatter, "eino-openai", nil
+}
+
+// newOpenAIChat 创建 eino-openai 聊天模型。jsonMode 为 true 时强制
+// response_format=json_object（planner/compactor 的 prompt 输出严格 JSON）；为
+// false 时模型可输出自由文本（formatter 的分隔符格式、agent 的 tool call 都用它）。
+func newOpenAIChat(ctx context.Context, apiKey, baseURL, model string, temperature float32, maxTokens int, timeout time.Duration, jsonMode bool) (model.BaseChatModel, error) {
+	cfg := &einoopenai.ChatModelConfig{
+		APIKey:              apiKey,
+		BaseURL:             baseURL,
+		Model:               model,
+		Timeout:             timeout,
+		Temperature:         &temperature,
+		MaxCompletionTokens: &maxTokens,
+	}
+	if jsonMode {
+		cfg.ResponseFormat = &einoopenai.ChatCompletionResponseFormat{
+			Type: einoopenai.ChatCompletionResponseFormatTypeJSONObject,
+		}
+	}
+	return einoopenai.NewChatModel(ctx, cfg)
 }
 
 // NewPlannerFromEnvWithPrompts extends NewPlannerFromEnv with a prompt

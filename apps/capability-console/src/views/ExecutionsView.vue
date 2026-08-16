@@ -4,6 +4,7 @@ import type { ExecutionFilter, ExecutionRecord } from '../types';
 import { labelForExecutionStatus } from '../labels';
 import { formatAbsoluteTime, formatCompactDateTime } from '../conversationFormat';
 import { useExecutions } from '../composables/useExecutions';
+import ViewShell from '../components/ViewShell.vue';
 
 const {
   executions,
@@ -80,19 +81,19 @@ function prettyJSON(value: unknown): string {
 </script>
 
 <template>
-  <section data-test="executions-entry" data-view="executions" class="executions-entry">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Execution History</p>
-        <h1>执行历史</h1>
-        <p class="topbar-copy">查看每次写操作计划的执行记录（仅管理员可见），按状态/工具过滤定位执行情况。</p>
-      </div>
-      <div class="actions">
-        <button class="mini-button" :disabled="executionsLoading" data-test="executions-refresh" @click="refresh">
-          {{ executionsLoading ? '刷新中' : '刷新' }}
-        </button>
-      </div>
-    </header>
+  <ViewShell
+    class="executions-entry"
+    data-test="executions-entry"
+    data-view="executions"
+    eyebrow="Execution History"
+    title="执行历史"
+    copy="查看每次写操作计划的执行记录（仅管理员可见），按状态/工具过滤定位执行情况。"
+  >
+    <template #actions>
+      <button class="mini-button" :disabled="executionsLoading" data-test="executions-refresh" @click="refresh">
+        {{ executionsLoading ? '刷新中' : '刷新' }}
+      </button>
+    </template>
 
     <div class="executions-filters">
       <select v-model="localFilter.status" data-test="executions-filter-status">
@@ -209,24 +210,10 @@ function prettyJSON(value: unknown): string {
         </div>
       </aside>
     </div>
-  </section>
+  </ViewShell>
 </template>
 
 <style scoped>
-.executions-entry {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3, 0.75rem);
-  padding: 0 var(--space-6, 1.5rem) var(--space-6, 1.5rem);
-  flex: 1;
-  min-height: 0;
-}
-
-/* 与其它带顶栏视图一致：entry 已提供 24px 左右内边距，顶栏自身不再叠加左边距。 */
-.executions-entry .topbar {
-  padding: var(--space-5, 1.25rem) 0 var(--space-4, 1rem);
-}
-
 .executions-filters {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
@@ -462,7 +449,4 @@ function prettyJSON(value: unknown): string {
   color: var(--color-danger, #d33);
 }
 
-.tag-execution-succeeded { background: var(--color-success, #2c8a3e); color: #fff; }
-.tag-execution-failed { background: var(--color-danger, #d33); color: #fff; }
-.tag-execution-denied { background: var(--color-warning, #b8860b); color: #fff; }
 </style>

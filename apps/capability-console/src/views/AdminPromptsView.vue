@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { ElInput } from 'element-plus';
 import { updateAdminPrompt } from '../api';
 import type { AdminPrompt, AdminPromptListResponse } from '../types';
+import ViewShell from '../components/ViewShell.vue';
 
 const prompts = ref<AdminPrompt[]>([]);
 const loading = ref(false);
@@ -85,15 +86,16 @@ onMounted(load);
 </script>
 
 <template>
-  <section data-test="admin-prompts" class="admin-page">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Admin</p>
-        <h1>Prompt 版本管理</h1>
-        <p class="topbar-copy">查看和编辑系统提示词，修改后自动递增版本号并热加载到 Planner。</p>
-      </div>
+  <ViewShell
+    class="admin-page"
+    data-test="admin-prompts"
+    eyebrow="Admin"
+    title="Prompt 版本管理"
+    copy="查看和编辑系统提示词，修改后自动递增版本号并热加载到 Planner。"
+  >
+    <template #actions>
       <button class="mini-button" @click="load" :disabled="loading">刷新</button>
-    </header>
+    </template>
 
     <p v-if="error" class="error-text" role="alert">{{ error }}</p>
     <p v-if="loading" class="loading-text">加载中…</p>
@@ -145,5 +147,5 @@ onMounted(load);
         <pre v-else class="prompt-content">{{ prompt.content }}</pre>
       </article>
     </div>
-  </section>
+  </ViewShell>
 </template>

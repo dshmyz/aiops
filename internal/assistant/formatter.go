@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
@@ -48,6 +49,15 @@ type FormatResult struct {
 // 当 LLM 整形失败时，由代码兜底 Formatter 从 Answer 提取关键字段生成基础 Blocks。
 type ResponseFormatter interface {
 	Format(ctx context.Context, req FormatRequest) (FormatResult, error)
+}
+
+// StreamingResponseFormatter 是支持流式整形的 ResponseFormatter。
+// FormatStream 在生成 Summary 时把已产出的 token 片段实时转发给 onDelta，
+// 让前端能增量渲染最终答案；结束后返回与 Format 一致的完整结果。
+// 不实现此接口的 formatter（如 CodeFallbackFormatter，确定性瞬时产出）退化为
+// 一次性 Format——调用方应把流式当作可选能力，最终 response 事件权威覆盖前端。
+type StreamingResponseFormatter interface {
+	FormatStream(ctx context.Context, req FormatRequest, onDelta func(string)) (FormatResult, error)
 }
 
 // CodeFallbackFormatter 是代码兜底整形器，不依赖 LLM。
@@ -212,6 +222,29 @@ func (c *ChainedFormatter) Format(ctx context.Context, req FormatRequest) (Forma
 	}
 	// primary 失败或空，回退到 fallback
 	return c.fallback.Format(ctx, req)
+}
+
+// FormatStream 以流式方式整形：primary 支持流式时透传 delta；流式失败或
+// primary 不支持流式时退化为代码兜底（无 delta，最终 response 事件权威覆盖）。
+func (c *ChainedFormatter) FormatStream(ctx context.Context, req FormatRequest, onDelta func(string)) (FormatResult, error) {
+	if sf, ok := c.primary.(StreamingResponseFormatter); ok {
+		result, err := sf.FormatStream(ctx, req, onDelta)
+		if err == nil && strings.TrimSpace(result.Summary) != "" {
+			return result, nil
+		}
+		// primary 流式失败/空摘要 → 回退代码兜底
+		log.Printf("[formatter] FormatStream fallback to code: err=%v summary=%q tool=%s", err, firstChars(result.Summary, 40), req.Tool)
+	}
+	return c.fallback.Format(ctx, req)
+}
+
+// firstChars 返回字符串前 n 个字符（按 rune 计数，日志截断用）。
+func firstChars(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // WithLLMAudit 把 LLM 调用审计透传给 primary（若 primary 是 LLMFormatter）。

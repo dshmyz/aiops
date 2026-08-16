@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify';
 import type { InspectionReport } from '../types';
 import { useInspectionReports } from '../composables/useInspectionReports';
 import { formatCompactDateTime } from '../conversationFormat';
+import ViewShell from '../components/ViewShell.vue';
 
 const {
   reports,
@@ -102,19 +103,19 @@ function fmtWindow(start: string, end: string): string {
 </script>
 
 <template>
-  <section data-test="inspection-entry" data-view="inspection-reports" class="inspection-entry">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Inspection Reports</p>
-        <h1>巡检报告</h1>
-        <p class="topbar-copy">查看 by Reporter 按时间窗口聚合生成的巡检报告，展示每个定时任务在窗口内的执行统计与 HTML 详情。</p>
-      </div>
-      <div class="actions">
-        <button class="mini-button" :disabled="reportsLoading" data-test="inspection-refresh" @click="refresh">
-          {{ reportsLoading ? '刷新中' : '刷新' }}
-        </button>
-      </div>
-    </header>
+  <ViewShell
+    class="inspection-entry"
+    data-test="inspection-entry"
+    data-view="inspection-reports"
+    eyebrow="Inspection Reports"
+    title="巡检报告"
+    copy="查看 by Reporter 按时间窗口聚合生成的巡检报告，展示每个定时任务在窗口内的执行统计与 HTML 详情。"
+  >
+    <template #actions>
+      <button class="mini-button" :disabled="reportsLoading" data-test="inspection-refresh" @click="refresh">
+        {{ reportsLoading ? '刷新中' : '刷新' }}
+      </button>
+    </template>
 
     <p v-if="reportsError" class="error-text">{{ reportsError }}</p>
 
@@ -278,24 +279,10 @@ function fmtWindow(start: string, end: string): string {
         </div>
       </aside>
     </div>
-  </section>
+  </ViewShell>
 </template>
 
 <style scoped>
-.inspection-entry {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3, 0.75rem);
-  padding: 0 var(--space-6, 1.5rem) var(--space-6, 1.5rem);
-  flex: 1;
-  min-height: 0;
-}
-
-/* 与其它带顶栏视图一致：entry 已提供 24px 左右内边距，顶栏自身不再叠加左边距。 */
-.inspection-entry .topbar {
-  padding: var(--space-5, 1.25rem) 0 var(--space-4, 1rem);
-}
-
 .inspection-workspace {
   display: grid;
   grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);

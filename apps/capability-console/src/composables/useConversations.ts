@@ -6,9 +6,61 @@ import {
   listConversations,
 } from '../api';
 import type {
+  ConversationRole,
   ConversationSummary,
   ConversationTurn,
 } from '../types';
+
+// 流式生成期间只在内存 turn 上累积、后端持久化 turn 不含的瞬时字段。
+// refreshTurns 从后端拿回持久化 turn 后会丢失这些过程内容，需在替换时合并回去。
+type TransientFields = Pick<ConversationTurn, 'steps' | 'tool_calls' | 'progress_stages' | 'thinking'>;
+const TRANSIENT_KEYS: (keyof TransientFields)[] = ['steps', 'tool_calls', 'progress_stages', 'thinking'];
+
+// hasTransientContent 判断 turn 是否携带了值得保留的瞬时过程内容。
+function hasTransientContent(turn: ConversationTurn): boolean {
+  return TRANSIENT_KEYS.some((key) => {
+    const value = turn[key];
+    if (Array.isArray(value)) return value.length > 0;
+    return typeof value === 'string' ? value.trim() !== '' : value != null;
+  });
+}
+
+// snapshotTransientByRole 按角色收集当前列表里的瞬时过程内容（同一角色取最后一次）。
+function snapshotTransientByRole(
+  turns: ConversationTurn[],
+): Map<ConversationRole, Partial<TransientFields>> {
+  const snapshot = new Map<ConversationRole, Partial<TransientFields>>();
+  for (const turn of turns) {
+    if (!hasTransientContent(turn)) continue;
+    const patch = snapshot.get(turn.role) ?? {};
+    for (const key of TRANSIENT_KEYS) {
+      const value = turn[key];
+      if (value != null) {
+        (patch as Record<string, unknown>)[key] = value;
+      }
+    }
+    snapshot.set(turn.role, patch);
+  }
+  return snapshot;
+}
+
+// mergeTransient 把瞬时时序内容合并回刷新后的持久化 turn 列表。
+// 瞬时字段只出现在最新一条流式 turn 上，而刷新结果以同一 user+assistant 对结尾，
+// 因此从列表末尾按角色合并一次即可命中目标（避免同名角色多处错配）。
+function mergeTransient(
+  refreshed: ConversationTurn[],
+  snapshot: Map<ConversationRole, Partial<TransientFields>>,
+): ConversationTurn[] {
+  if (snapshot.size === 0) return refreshed;
+  const applied = new Set<ConversationRole>();
+  return refreshed.map((turn) => {
+    if (applied.has(turn.role)) return turn;
+    const patch = snapshot.get(turn.role);
+    if (!patch) return turn;
+    applied.add(turn.role);
+    return { ...turn, ...patch };
+  });
+}
 
 export type ArchivedView = 'active' | 'archived';
 
@@ -89,10 +141,14 @@ export function useConversations(): UseConversations {
 
   async function refreshTurns(conversationID: string) {
     try {
+      // 流式结束后后端返回的持久化 turn 不含 steps/tool_calls/progress_stages/
+      // thinking 这些瞬时字段，直接替换会让"输出过程中的东西"消失。先快照再合并，
+      // 保证用户在回复完成后仍能看到之前的思考/工具调用/进度过程。
+      const transient = snapshotTransientByRole(conversationTurns.value);
       const detail = await getConversation(conversationID);
       const rawTurns = detail.turns ?? [];
       // 后端返回 CreatedAt DESC（最新消息在前），渲染需要正序（user -> assistant）。
-      conversationTurns.value = rawTurns.slice().reverse();
+      conversationTurns.value = mergeTransient(rawTurns.slice().reverse(), transient);
       conversationHasMore.value = Boolean(detail.next_turn_cursor) && rawTurns.length > 0;
       conversationOldestTurnID.value = rawTurns[0]?.id ?? null;
     } catch {

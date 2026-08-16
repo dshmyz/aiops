@@ -139,11 +139,14 @@ const rows = computed(() =>
 }
 
 .run-status {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   padding: 2px 8px;
   border-radius: var(--radius-pill);
   font-size: var(--font-sm);
   font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
 }
 
 .status-succeeded {

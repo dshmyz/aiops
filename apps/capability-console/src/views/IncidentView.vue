@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { useIncident } from '../composables/useIncident';
 import { executeRead } from '../api';
 import type { IncidentProbe, IncidentTimelineItem } from '../types';
+import ViewShell from '../components/ViewShell.vue';
 
 const emit = defineEmits<{
   'jump-to-audit': [toolName: string];
@@ -85,18 +86,20 @@ function fmt(ts: string | undefined | null): string {
 const severityClass: Record<string, string> = {
   critical: 'sev-critical',
   warning: 'sev-warning',
+  ok: 'sev-ok',
+  info: 'sev-info',
 };
 </script>
 
 <template>
-  <section data-test="incident-entry" data-view="incident" class="incident-entry">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Incident View</p>
-        <h1>告警全景</h1>
-        <p class="topbar-copy">输入资源身份（域 / 资源类型 / 资源名 / 环境），把告警与其相关审计、定时巡检、只读探测与匹配 Runbook 串成一张可回链的全景。</p>
-      </div>
-    </header>
+  <ViewShell
+    class="incident-entry"
+    data-test="incident-entry"
+    data-view="incident"
+    eyebrow="Incident View"
+    title="告警全景"
+    copy="输入资源身份（域 / 资源类型 / 资源名 / 环境），把告警与其相关审计、定时巡检、只读探测与匹配 Runbook 串成一张可回链的全景。"
+  >
 
     <form class="incident-form" @submit.prevent="submit">
       <label class="field">
@@ -250,25 +253,10 @@ const severityClass: Record<string, string> = {
         </section>
       </template>
     </div>
-  </section>
+  </ViewShell>
 </template>
 
 <style scoped>
-.incident-entry {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  /* 与其它 topbar 视图一致的水平节奏：左 24px（--space-6），顶底视内容定。
-     此前用 --space-4(16px) 使该视图整体比其它页面左缩 8px。 */
-  padding: 0 var(--space-6) var(--space-6);
-  overflow-y: auto;
-}
-
-/* 与其它带顶栏视图一致：entry 已提供 24px 左右内边距，顶栏自身不再叠加左边距。 */
-.incident-entry .topbar {
-  padding: var(--space-5) 0 var(--space-4);
-}
-
 .incident-form {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
@@ -333,15 +321,21 @@ const severityClass: Record<string, string> = {
 
 .alert-title { margin: 0 0 var(--space-2); font-size: var(--font-lg); color: var(--color-text-primary); }
 .severity-badge {
+  display: inline-flex;
+  align-items: center;
   padding: 2px 8px;
   border-radius: var(--radius-pill);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   font-weight: 600;
-  background: var(--color-danger);
-  color: var(--color-bg);
-  text-transform: uppercase;
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
-.sev-warning { background: #b45309; }
+.sev-critical { background: var(--color-danger-soft); color: var(--color-danger); }
+.sev-warning  { background: var(--color-warning-soft); color: var(--color-warning); }
+.sev-ok       { background: var(--color-success-soft); color: var(--color-success); }
 
 .kv { margin: 0; display: grid; grid-template-columns: 1fr; gap: 4px; }
 .kv > div { display: flex; gap: 8px; }

@@ -46,13 +46,13 @@ defineEmits<{ 'go-to-management': [] }>();
   height: 8px;
   border-radius: 50%;
   background: var(--color-success);
-  box-shadow: 0 0 0 3px rgba(48, 209, 88, 0.24);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 24%, transparent);
   animation: status-pulse 2s ease-in-out infinite;
 }
 
 @keyframes status-pulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(48, 209, 88, 0.24); }
-  50% { box-shadow: 0 0 0 6px rgba(48, 209, 88, 0.12); }
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 24%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-success) 12%, transparent); }
 }
 
 .capability-status-badge strong {

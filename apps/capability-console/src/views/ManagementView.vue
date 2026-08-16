@@ -7,6 +7,7 @@ import ReviewStage from '../components/management/ReviewStage.vue';
 import AIStage from '../components/management/AIStage.vue';
 import type { UseCapabilities } from '../composables/useCapabilities';
 import type { PageContext } from '../composables/useAssistantStream';
+import ViewShell from '../components/ViewShell.vue';
 
 const props = defineProps<{ capabilities: UseCapabilities }>();
 
@@ -28,25 +29,26 @@ function askAi() {
 </script>
 
 <template>
-  <section v-show="capabilities.managementPhase.value" data-test="management-entry" data-view="management" class="management-entry">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">AI Capability Studio</p>
-        <h1>把后台 API 翻译成 AI 工具</h1>
-        <p class="topbar-copy">从 Swagger 收件箱选择接口，补齐参数和摘要，然后直接在右侧用自然语言试运行。</p>
-      </div>
-      <div class="actions">
-        <el-button data-test="new-draft" type="primary" @click="capabilities.newDraft">新建草稿</el-button>
-        <el-button @click="capabilities.loadCapabilities">刷新</el-button>
-        <el-button
-          data-test="management-ask-ai"
-          :disabled="!capabilities.selected.value.domain"
-          @click="askAi"
-        >
-          问 AI
-        </el-button>
-      </div>
-    </header>
+  <ViewShell
+    v-show="capabilities.managementPhase.value"
+    class="management-entry"
+    data-test="management-entry"
+    data-view="management"
+    eyebrow="AI Capability Studio"
+    title="把后台 API 翻译成 AI 工具"
+    copy="从 Swagger 收件箱选择接口，补齐参数和摘要，然后直接在右侧用自然语言试运行。"
+  >
+    <template #actions>
+      <el-button data-test="new-draft" type="primary" @click="capabilities.newDraft">新建草稿</el-button>
+      <el-button @click="capabilities.loadCapabilities">刷新</el-button>
+      <el-button
+        data-test="management-ask-ai"
+        :disabled="!capabilities.selected.value.domain"
+        @click="askAi"
+      >
+        问 AI
+      </el-button>
+    </template>
 
     <el-alert v-if="capabilities.error.value" class="alert" type="error" :title="capabilities.error.value" show-icon />
 
@@ -68,5 +70,5 @@ function askAi() {
       <ReviewStage v-else-if="capabilities.managementPhase.value === 'review'" :capabilities="capabilities" />
       <AIStage v-else :capabilities="capabilities" />
     </section>
-  </section>
+  </ViewShell>
 </template>

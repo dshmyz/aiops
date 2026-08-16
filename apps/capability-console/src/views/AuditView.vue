@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AuditLogView from '../components/AuditLogView.vue';
+import ViewShell from '../components/ViewShell.vue';
 import type { UseAuditEvents } from '../composables/useAuditEvents';
 
 defineProps<{ audit: UseAuditEvents }>();
@@ -10,14 +11,14 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <section data-test="audit-entry" data-view="audit" class="audit-entry">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Audit Log</p>
-        <h1>审计记录</h1>
-        <p class="topbar-copy">追踪每一次计划创建、确认和执行，按工具/操作/决策过滤定位事件。</p>
-      </div>
-    </header>
+  <ViewShell
+    class="audit-entry"
+    data-test="audit-entry"
+    data-view="audit"
+    eyebrow="Audit Log"
+    title="审计记录"
+    copy="追踪每一次计划创建、确认和执行，按工具/操作/决策过滤定位事件。"
+  >
 
     <AuditLogView
       :events="audit.auditEvents.value"
@@ -32,5 +33,5 @@ const emit = defineEmits<{
       @jump-to-plan="(id: string) => emit('jump-to-plan', id)"
       @search="audit.search"
     />
-  </section>
+  </ViewShell>
 </template>

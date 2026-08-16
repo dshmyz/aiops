@@ -1542,7 +1542,11 @@ func (r *Router) serveAssistantStream(writer http.ResponseWriter, request *http.
 	writer.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	ctx, cancel := context.WithTimeout(request.Context(), 30*time.Second)
+	// 工具调用路径的 agent 循环每轮一次 LLM 调用，快则 1-3s；但多轮循环（含工具
+	// 执行）累加、慢速 provider 下单轮也可达 5-15s，30s 预算会被一轮带工具调用的
+	// 慢响应挤爆。与同步端点 assistantRequestTimeout 对齐为 60s；流式期间前端增量
+	// 渲染（thinking + 逐段 delta），不受影响。
+	ctx, cancel := context.WithTimeout(request.Context(), 60*time.Second)
 	defer cancel()
 
 	ch, err := r.assistant.HandleMessageStream(ctx, user, body.Message, body.ConversationID, pc)

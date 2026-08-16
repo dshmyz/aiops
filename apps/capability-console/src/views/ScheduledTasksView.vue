@@ -6,6 +6,7 @@ import type { Runbook } from '../types';
 import ScheduledTaskForm from '../components/ScheduledTaskForm.vue';
 import ScheduledTaskList from '../components/ScheduledTaskList.vue';
 import ScheduledTaskRunHistory from '../components/ScheduledTaskRunHistory.vue';
+import ViewShell from '../components/ViewShell.vue';
 import type { UseScheduledTasks } from '../composables/useScheduledTasks';
 
 defineProps<{ scheduledTasks: UseScheduledTasks }>();
@@ -26,20 +27,20 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section data-test="scheduled-tasks-entry" data-view="scheduled-tasks" class="scheduled-tasks-entry">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Scheduled Inspections</p>
-        <h1>定时巡检任务</h1>
-        <p class="topbar-copy">配置定时巡检任务，自动执行只读能力并追踪执行历史与失败情况。</p>
-      </div>
-      <div class="actions">
-        <button class="mini-button" :disabled="scheduledTasks.scheduledTasksLoading.value" @click="scheduledTasks.refresh">
-          {{ scheduledTasks.scheduledTasksLoading.value ? '刷新中' : '刷新' }}
-        </button>
-        <button data-test="scheduled-task-new" class="primary-button" @click="scheduledTasks.openForm">+ 新建定时任务</button>
-      </div>
-    </header>
+  <ViewShell
+    class="scheduled-tasks-entry"
+    data-test="scheduled-tasks-entry"
+    data-view="scheduled-tasks"
+    eyebrow="Scheduled Inspections"
+    title="定时巡检任务"
+    copy="配置定时巡检任务，自动执行只读能力并追踪执行历史与失败情况。"
+  >
+    <template #actions>
+      <button class="mini-button" :disabled="scheduledTasks.scheduledTasksLoading.value" @click="scheduledTasks.refresh">
+        {{ scheduledTasks.scheduledTasksLoading.value ? '刷新中' : '刷新' }}
+      </button>
+      <button data-test="scheduled-task-new" class="primary-button" @click="scheduledTasks.openForm">+ 新建定时任务</button>
+    </template>
 
     <el-alert v-if="scheduledTasks.error.value" class="alert" type="error" :title="scheduledTasks.error.value" show-icon />
 
@@ -68,5 +69,5 @@ onMounted(async () => {
       </div>
       <ScheduledTaskRunHistory :runs="scheduledTasks.scheduledTaskRuns.value" />
     </div>
-  </section>
+  </ViewShell>
 </template>

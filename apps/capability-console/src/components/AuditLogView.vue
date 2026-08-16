@@ -230,7 +230,7 @@ function submitSearch() {
   display: flex;
   flex-direction: column;
   gap: var(--space-3, 0.75rem);
-  padding: 0 var(--space-6, 1.5rem) var(--space-6, 1.5rem);
+  padding: 0;
   flex: 1;
   min-height: 0;
 }

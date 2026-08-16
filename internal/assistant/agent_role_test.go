@@ -45,4 +45,7 @@ func TestSupervisorDispatchNilExecutor(t *testing.T) {
 	if NewSupervisor(nil).Dispatch(t.Context(), "hi", nil, nil) != nil {
 		t.Error("Dispatch with nil executor should return nil")
 	}
+	if NewSupervisor(nil).DispatchStream(t.Context(), "hi", nil, nil, nil, nil) != nil {
+		t.Error("DispatchStream with nil executor should return nil")
+	}
 }

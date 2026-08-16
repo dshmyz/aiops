@@ -391,15 +391,18 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="assistant-suggestions"]').exists()).toBe(false);
   });
 
-  // 数据驱动空状态：hero 副标题与建议提问均从已发布能力生成，不写死中间件
-  test('hero copy derives from published capability domains', async () => {
+  // 数据驱动空状态：hero 副标题是通用文案，不枚举具体中间件/域（域列表随注册表
+  // 变化，罗列会失真）；建议提问才从已发布能力生成
+  test('hero copy is generic and does not enumerate middleware names', async () => {
     const wrapper = mountApp();
     await flushPromises();
 
     const hero = wrapper.find('[data-test="assistant-hero-copy"]');
-    // 默认 mock 只有 glusterfs 已发布，hero 应动态列出该域
-    expect(hero.text()).toContain('glusterfs');
+    expect(hero.text()).toContain('用自然语言描述中间件问题');
     expect(hero.text()).toContain('已发布能力');
+    // 不写死/不罗列具体中间件名：即使 mock 有 glusterfs 已发布，hero 也不点名
+    expect(hero.text()).not.toContain('glusterfs');
+    expect(hero.text()).not.toContain('kafka');
   });
 
   test('quick-start suggestions derive from published capabilities', async () => {

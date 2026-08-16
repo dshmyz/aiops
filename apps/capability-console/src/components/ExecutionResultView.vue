@@ -166,21 +166,6 @@ defineProps<{
   color: var(--color-text-primary);
 }
 
-.tag-verification-success {
-  background: var(--color-success);
-  color: #fff;
-}
-
-.tag-verification-failed {
-  background: var(--color-danger);
-  color: #fff;
-}
-
-.tag-verification-denied {
-  background: var(--color-warning);
-  color: #fff;
-}
-
 .verification-summary {
   display: grid;
   grid-template-columns: 1fr 1fr;

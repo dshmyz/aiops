@@ -26,8 +26,15 @@ func NewSupervisor(exec *AgentExecutor) *Supervisor {
 // Dispatch 执行一次通用分派：以 supervisor 角色交给执行循环。
 // onStep 为 nil 时静默执行（等价于 Run）。
 func (s *Supervisor) Dispatch(ctx context.Context, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
+	return s.DispatchStream(ctx, message, history, onStep, nil, nil)
+}
+
+// DispatchStream 与 Dispatch 相同，额外把最终答案的流式 token 转发给 onDelta、
+// 把模型推理 token 实时转发给 onThinking。两路都由 executor 承担：onDelta 在
+// 终轮 flush（每轮都流式），onThinking 把推理逐 chunk 转发，前端实时显示思考。
+func (s *Supervisor) DispatchStream(ctx context.Context, message string, history []Turn, onStep func(AgentStepEvent), onDelta func(string), onThinking func(string)) *AgentRunResult {
 	if s == nil || s.exec == nil {
 		return nil
 	}
-	return s.exec.RunWithRoleCallback(ctx, RoleSupervisor, message, history, onStep)
+	return s.exec.RunWithRoleCallbackStream(ctx, RoleSupervisor, message, history, onStep, onDelta, onThinking)
 }

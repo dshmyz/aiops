@@ -3,6 +3,7 @@ import { ElAlert } from 'element-plus';
 import PendingPlanList from '../components/PendingPlanList.vue';
 import PendingPlanDetail from '../components/PendingPlanDetail.vue';
 import ExecutionResultView from '../components/ExecutionResultView.vue';
+import ViewShell from '../components/ViewShell.vue';
 import type { UsePendingPlans } from '../composables/usePendingPlans';
 
 defineProps<{
@@ -12,19 +13,19 @@ defineProps<{
 </script>
 
 <template>
-  <section data-test="plans-entry" data-view="plans" class="plans-entry">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Action Plan Approval</p>
-        <h1>待确认计划</h1>
-        <p class="topbar-copy">查看待审批的写入操作计划，确认后执行。生产环境需要外部审批 token。</p>
-      </div>
-      <div class="actions">
-        <button class="mini-button" :disabled="plans.pendingPlansLoading.value" @click="plans.refresh">
-          {{ plans.pendingPlansLoading.value ? '刷新中' : '刷新' }}
-        </button>
-      </div>
-    </header>
+  <ViewShell
+    class="plans-entry"
+    data-test="plans-entry"
+    data-view="plans"
+    eyebrow="Action Plan Approval"
+    title="待确认计划"
+    copy="查看待审批的写入操作计划，确认后执行。生产环境需要外部审批 token。"
+  >
+    <template #actions>
+      <button class="mini-button" :disabled="plans.pendingPlansLoading.value" @click="plans.refresh">
+        {{ plans.pendingPlansLoading.value ? '刷新中' : '刷新' }}
+      </button>
+    </template>
 
     <el-alert v-if="plans.pendingPlansError.value" class="alert" type="error" :title="plans.pendingPlansError.value" show-icon />
 
@@ -63,5 +64,5 @@ defineProps<{
         </div>
       </section>
     </section>
-  </section>
+  </ViewShell>
 </template>

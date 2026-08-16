@@ -12,6 +12,7 @@ import {
 } from '../api';
 import { labelForRisk, labelForExecutionStatus } from '../labels';
 import { formatRelativeTime } from '../conversationFormat';
+import ViewShell from '../components/ViewShell.vue';
 
 // 运维总览（D）：首屏聚合待确认计划 / 活动告警 / 定时巡检 / 今日执行等计数。
 // 各字段可选：对应 service 未装配或当前用户无权限时后端返回缺省字段，这里优雅降级。
@@ -114,19 +115,19 @@ onMounted(() => {
 </script>
 
 <template>
-  <section data-test="dashboard-entry" data-view="dashboard" class="dashboard-entry">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Ops Overview</p>
-        <h1>运维总览</h1>
-        <p class="topbar-copy">聚合当前待确认计划、活动告警、定时巡检与今日执行结果，一眼掌握中间件运维态势。</p>
-      </div>
-      <div class="actions">
-        <button class="mini-button" :disabled="overviewLoading" @click="refresh">
-          {{ overviewLoading ? '刷新中' : '刷新' }}
-        </button>
-      </div>
-    </header>
+  <ViewShell
+    class="dashboard-entry"
+    data-test="dashboard-entry"
+    data-view="dashboard"
+    eyebrow="Ops Overview"
+    title="运维总览"
+    copy="聚合当前待确认计划、活动告警、定时巡检与今日执行结果，一眼掌握中间件运维态势。"
+  >
+    <template #actions>
+      <button class="mini-button" :disabled="overviewLoading" @click="refresh">
+        {{ overviewLoading ? '刷新中' : '刷新' }}
+      </button>
+    </template>
 
     <p v-if="overviewError" data-test="dashboard-error" class="error-text" role="alert">{{ overviewError }}</p>
     <p v-if="rejectError" data-test="dashboard-reject-error" class="error-text">{{ rejectError }}</p>
@@ -251,5 +252,5 @@ onMounted(() => {
         </li>
       </ul>
     </section>
-  </section>
+  </ViewShell>
 </template>

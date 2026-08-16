@@ -24,7 +24,7 @@ func registerKafkaReadTool(t *testing.T) {
 // TestDeterministicPlannerDomainDiagnostic 钉住确定性 planner 的域诊断分支：
 // 工具选择由注册表驱动（消息点名已注册域 → 该域诊断），不依赖任何硬编码关键词
 // 列表。平台意图（告警/态势/集群状态）不在此路由——确定性模式无 LLM 也无关键词
-// 表，一律澄清，由 LLM 路径（planIntent）处理。
+// 表，一律澄清，由 LLM 路径的 agent 循环处理。
 func TestDeterministicPlannerDomainDiagnostic(t *testing.T) {
 	registerKafkaReadTool(t)
 	p := DeterministicPlanner{}

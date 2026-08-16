@@ -145,7 +145,6 @@ function onDelete(task: ScheduledTask) {
 .scheduled-task-list {
   width: 100%;
   overflow-x: auto;
-  padding: 0 var(--space-6, 1.5rem) var(--space-6, 1.5rem);
 }
 
 .scheduled-task-empty {
@@ -248,11 +247,14 @@ function onDelete(task: ScheduledTask) {
 }
 
 .task-status {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   padding: 2px 8px;
   border-radius: var(--radius-pill);
   font-size: var(--font-sm);
   font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
 }
 
 .status-succeeded {

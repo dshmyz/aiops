@@ -2944,7 +2944,7 @@ func (p diagnosticPlanner) Plan(context.Context, identity.CurrentUser, string, [
 
 // tracePlanner 返回一个固定读意图（cluster.status.read）并携带能力选择元数据，
 // 用于验证读答案的 trace 字段（selection + tool_invocation + raw_response）端到端
-// 序列化。它模拟 LLM 路径 planIntent 的产物——确定性 planner 已不路由平台元工具。
+// 序列化。它模拟 LLM 路径 agent 循环的产物——确定性 planner 已不路由平台元工具。
 type tracePlanner struct{}
 
 func (tracePlanner) Plan(context.Context, identity.CurrentUser, string, []assistant.Turn, assistant.PageContext) (assistant.Intent, error) {

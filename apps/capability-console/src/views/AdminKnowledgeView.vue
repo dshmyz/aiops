@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { ElInput } from 'element-plus';
 import { listKnowledgeDocuments, addKnowledgeDocument, getKnowledgeStatus } from '../api';
 import type { KnowledgeDocument } from '../types';
+import ViewShell from '../components/ViewShell.vue';
 
 const documents = ref<KnowledgeDocument[]>([]);
 const loading = ref(false);
@@ -83,18 +84,17 @@ onMounted(load);
 </script>
 
 <template>
-  <section data-test="admin-knowledge" class="admin-page">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Admin</p>
-        <h1>运维知识库</h1>
-        <p class="topbar-copy">管理 RAG 检索文档：Runbook、SOP、历史故障。执行记录会自动摄入。</p>
-      </div>
-      <div class="topbar-actions">
-        <button class="secondary-inline" @click="load" :disabled="loading">刷新</button>
-        <button class="primary-inline" @click="openForm">+ 添加文档</button>
-      </div>
-    </header>
+  <ViewShell
+    class="admin-page"
+    data-test="admin-knowledge"
+    eyebrow="Admin"
+    title="运维知识库"
+    copy="管理 RAG 检索文档：Runbook、SOP、历史故障。执行记录会自动摄入。"
+  >
+    <template #actions>
+      <button class="secondary-inline" @click="load" :disabled="loading">刷新</button>
+      <button class="primary-inline" @click="openForm">+ 添加文档</button>
+    </template>
 
     <p v-if="error" class="error-text" role="alert">{{ error }}</p>
     <p v-if="loading" class="loading-text">加载中…</p>
@@ -162,5 +162,5 @@ onMounted(load);
         </footer>
       </article>
     </div>
-  </section>
+  </ViewShell>
 </template>

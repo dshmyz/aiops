@@ -209,6 +209,40 @@ code {
   font-size: var(--font-md);
 }
 
+/* ============================================
+   徽章系统
+   .badge 基类 + .tag-* 语义色；诊断块/调用链/推荐态、
+   执行与验证状态统一复用同一套 soft-chip 语言
+   ============================================ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+}
+
+.badge.tag-info      { background: var(--color-accent-soft);  color: var(--color-accent); }
+.badge.tag-success   { background: var(--color-success-soft); color: var(--color-success); }
+.badge.tag-warning   { background: var(--color-warning-soft); color: var(--color-warning); }
+.badge.tag-danger,
+.badge.tag-error     { background: var(--color-danger-soft);  color: var(--color-danger); }
+
+/* 执行/验证状态徽章：沿用 tag 语言（soft-bg + 语义色，不再实底反白） */
+.badge.tag-execution-succeeded,
+.badge.tag-verification-success { background: var(--color-success-soft); color: var(--color-success); }
+.badge.tag-execution-failed,
+.badge.tag-verification-failed  { background: var(--color-danger-soft);  color: var(--color-danger); }
+.badge.tag-execution-denied,
+.badge.tag-verification-denied  { background: var(--color-warning-soft); color: var(--color-warning); }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -404,12 +438,9 @@ code {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  /* Unified content frame: bounded width + symmetric padding so every view
-     shares the same horizontal rhythm. Avoids per-view max-width hacks that
-     left large gutters on wide screens. Each *-entry child inherits this
-     width and only manages its internal vertical layout. */
-  max-width: 1440px;
-  margin: 0 auto;
+  /* 水平节奏统一由各视图顶栏/容器自设（24px）；app-main 本身不设 max-width，
+     让内容填满主列——max-width:1440 + margin:0 auto 在宽屏会把内容居中，
+     两侧空出几十 px 空隙（左菜单↔主面板 63px 即此因）。 */
   width: 100%;
 }
 
@@ -441,7 +472,8 @@ code {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-5) var(--space-6) var(--space-4);
+  /* 水平边距由 ViewShell 的 .view-shell 统一提供（24px），此处水平归零 */
+  padding: var(--space-5) 0 var(--space-4);
   border: none;
   background: var(--color-bg);
   margin: 0 0 0;
@@ -1056,7 +1088,7 @@ nav button:focus-visible {
   display: flex;
   align-items: stretch;
   justify-content: flex-start;
-  padding: var(--space-5) var(--space-6) var(--space-4);
+  padding: var(--space-5) 0 var(--space-4);
   gap: 0;
   border: none;
   background: transparent;
@@ -1202,10 +1234,9 @@ nav button:focus-visible {
   overflow: hidden;
   /* Unified breathing room for all four steps. Previously each step picked
      its own padding (32/24/24×32), which made the rhythm feel inconsistent
-     and cramped. Left/right use --space-6(24px) so stage content aligns with
-     the topbar title and workflow-rail (also 24px); vertical keeps --space-8
-     for breathing room. */
-  padding: var(--space-8) var(--space-6);
+     and cramped. 水平边距由 ViewShell 的 .view-shell 统一提供（24px），
+     此处只留垂直呼吸 --space-8。 */
+  padding: var(--space-8) 0;
 }
 
 /* ============================================
@@ -3259,8 +3290,11 @@ nav button:focus-visible {
 .assistant-workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 280px;
-  gap: var(--space-4);
+  /* 对话列是步骤/工具执行块的宽度来源：左会话列表与右「本次能力调用」都是辅助列，
+     默认收窄到 200/240 把空间让给中间对话列。列宽可拖拽调宽——App.vue 经
+     --asst-left/--asst-right 注入；两条 var(--space-4) 轨道是 SplitHandle 拖拽
+     手柄，宽度与原先的 gap 等宽，视觉节奏不变。 */
+  grid-template-columns: var(--asst-left, 200px) var(--space-4) minmax(0, 1fr) var(--space-4) var(--asst-right, 240px);
   width: 100%;
   min-height: 0;
   padding: 0 var(--space-6) var(--space-6);
@@ -4145,7 +4179,9 @@ nav button:focus-visible {
 
 @media (max-width: 1100px) {
   .assistant-workspace {
-    grid-template-columns: 220px minmax(0, 1fr);
+    /* 右列 + 右手柄随 .assistant-detail 一起隐藏（SplitHandle 经 hide-below
+       自行 v-show），左列与左手柄保留 3 轨布局。 */
+    grid-template-columns: var(--asst-left, 220px) var(--space-4) minmax(0, 1fr);
   }
 
   .assistant-detail {
@@ -4169,7 +4205,9 @@ nav button:focus-visible {
   }
 
   .assistant-workspace {
+    /* 单手柄都被 SplitHandle 自行隐藏，竖排栈叠需恢复行间距。 */
     grid-template-columns: 1fr;
+    gap: var(--space-4);
   }
 
   .assistant-shortcuts,
@@ -4193,31 +4231,8 @@ nav button:focus-visible {
 /* ============================================
    Pending Plans View
    ============================================ */
-.plans-entry {
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  height: 100%;
-}
-
-.audit-entry {
-  /* Inherit width from .app-main; only manage vertical rhythm. */
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  height: 100%;
-}
-
-.scheduled-tasks-entry {
-  /* Inherit width from .app-main; only manage vertical rhythm. */
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  height: 100%;
-}
+/* 入口容器 box（水平收边 + 高度）由 ViewShell 的 .view-shell 统一拥有，
+   此处不再重复各 entry 的 padding/flex/height 规则。 */
 
 /* "新建" primary button in management topbars (scheduled tasks, MCP servers).
    Previously this used class="primary-button" which had no CSS definition,
@@ -4328,7 +4343,7 @@ nav button:focus-visible {
   width: 100%;
   min-height: 0;
   flex: 1;
-  padding: 0 var(--space-6) var(--space-6);
+  /* 水平收边由 ViewShell 的 .view-shell 提供；这里只保留垂直布局与滚动 */
   /* overflow:hidden 让 grid 成为 BFC，行高不被内容撑开，
      grid item stretch 高度被容器固定，panel 才能固定高度 +
      内部滚动。与 .workflow-review 一致。 */
@@ -4849,24 +4864,16 @@ nav button:focus-visible {
    表单元素对齐 .filter-input、按钮用 .mini-button/.primary-inline。
    ============================================ */
 .admin-page {
-  /* 不自设 padding：水平节奏由 .app-main max-width + 各 entry 自身布局管理。
-     垂直方向用 flex column + gap 组织区块，与 .plans-entry 一致。 */
+  /* 入口 box（水平收边 + 高度）由 ViewShell 的 .view-shell 统一拥有；
+     这里只管内部区块的垂直节奏与弹性，与其它视图一致。 */
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  padding: 0 var(--space-6) var(--space-6);
   flex: 1;
   min-height: 0;
 }
 
-.admin-page .topbar { padding: var(--space-5) 0 var(--space-4); }
-
-/* 顶栏右侧操作组：与 .topbar .actions 一致 */
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
+/* 顶栏右侧操作组由 ViewShell 统一渲染为 .topbar-right（见上方 .topbar-right 定义） */
 
 /* 文本状态：错误/加载中/通知，复用全局 muted/tertiary 语义色 */
 .error-text {
@@ -5235,14 +5242,7 @@ button.stat-card:focus-visible {
 }
 
 /* ---- AI Agent 状态面板 ---- */
-.dashboard-entry {
-  /* 与 .plans-entry 一致的入口容器：垂直 flex，让顶栏与面板自然堆叠 */
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  height: 100%;
-}
+/* 入口容器 box 由 ViewShell 的 .view-shell 统一拥有（水平收边 + 高度） */
 .agent-status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

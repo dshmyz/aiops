@@ -3,7 +3,9 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 	"time"
@@ -146,7 +148,17 @@ func (e *AgentExecutor) RunWithRole(ctx context.Context, role AgentRole, message
 
 // RunWithRoleCallback 以指定角色执行并流式回调工具步骤。
 func (e *AgentExecutor) RunWithRoleCallback(ctx context.Context, role AgentRole, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
-	result := e.runWithCallbackRole(ctx, role, message, history, onStep)
+	return e.RunWithRoleCallbackStream(ctx, role, message, history, onStep, nil, nil)
+}
+
+// RunWithRoleCallbackStream 与 RunWithRoleCallback 相同，额外把最终答案的流式
+// token 转发给 onDelta、把模型推理 token 实时转发给 onThinking。
+// 流式请求的每个循环轮次都走流式生成：推理逐 chunk 转发 thinking（思考过程实时
+// 可见），content 在无工具调用的终轮 flush 为 delta（最终答案增量渲染）。工具
+// 调用 deltas 内部按 index 聚合，终轮不再额外重生成一轮。让前端增量渲染，不再
+// 依赖二阶段 formatter。
+func (e *AgentExecutor) RunWithRoleCallbackStream(ctx context.Context, role AgentRole, message string, history []Turn, onStep func(AgentStepEvent), onDelta func(string), onThinking func(string)) *AgentRunResult {
+	result := e.runWithCallbackRole(ctx, role, message, history, onStep, onDelta, onThinking)
 	// 指标：记录请求结果（覆盖所有 return 路径）
 	if result == nil {
 		agentMetrics.recordRequest(false, "agent returned nil result")
@@ -216,10 +228,14 @@ func logPrefix(ctx context.Context) string {
 	return "[" + strings.Join(attrs, " ") + "]"
 }
 
-// runWithCallbackRole 是 RunWithRoleCallback 的实现（defer 指标在包装层处理）。
-func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole, message string, history []Turn, onStep func(AgentStepEvent)) *AgentRunResult {
-	// 缓存检查：相同问题直接返回缓存结果
-	if e.cache != nil {
+// runWithCallbackRole 是 RunWithRoleCallbackStream 的实现（defer 指标在包装层处理）。
+// 流式请求（onDelta 非 nil）每轮走 streamRound：推理实时转发 onThinking、终轮
+// content flush 给 onDelta。非流式请求（onDelta 为 nil）每轮走一次性 Generate。
+func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole, message string, history []Turn, onStep func(AgentStepEvent), onDelta func(string), onThinking func(string)) *AgentRunResult {
+	// 缓存检查：相同问题直接返回缓存结果。流式请求（onDelta 非 nil）跳过缓存读，
+	// 因为缓存命中会绕过流式生成，前端整段"一波"显示——必须重新调 LLM 才能产出
+	// 逐 token delta。非流式路径仍享缓存（避免重复 LLM 调用）。
+	if e.cache != nil && onDelta == nil {
 		if cached := e.cache.Get(ctx, message); cached != nil {
 			logWithCtx(ctx, "[agent] cache hit for: %s", message[:min(50, len(message))])
 			return cached
@@ -299,22 +315,11 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 	lastStep := 0
 	seen := map[string]bool{} // 去重：同一工具+参数不重复调用
 
-	// 意图规划：先让 LLM 判断用户意图（知识型 / 工具型+涉及域），按意图裁剪
-	// 工具集。不用"域名+分隔符"这类用户不知道的规则——意图由 LLM 语义理解，
-	// 用户怎么问都行。知识型 → 空工具集，LLM 直接回答；工具型 → 只给该域工具。
-	intent := e.planIntent(ctx, message)
-	// 按意图裁剪工具集。意图规划失败/域不精确匹配（planIntent 回退 tool_call、
-	// LLM 返回的域与已发布能力名前缀不一致）时 toolsForDomain 可能返回空——
-	// 实时数据类请求在 0 工具下会被 LLM 纯文字作答（编造数据或回"无法获取"），
-	// 而 system prompt 又要求必须调用工具。此处回退全量工具集，保证数据请求
-	// 至少能取到数据；知识型请求（Intent=knowledge）仍走空工具集直接回答。
-	var allTools []tool.BaseTool
-	if intent.Intent == "tool_call" {
-		allTools = e.toolsForDomain(intent.Domain)
-		if len(allTools) == 0 {
-			allTools = e.tools
-		}
-	}
+	// 工具集：全量已注册工具每轮都对模型开放，不再单独跑一次意图分类 LLM
+	//（省一次 ~4s 往返）。意图与工具选择由模型在每轮内语义判断：知识型问题直接
+	// 文字回答，实时数据问题从全量工具中选相关者（角色提示词 agent_role.go 两条
+	// 都已写明）。
+	allTools := e.tools
 
 	for step := 0; step < e.maxSteps; step++ {
 		lastStep = step
@@ -331,13 +336,23 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 			break
 		}
 
-		// 调 LLM（带 tools 参数）
+		// 调 LLM（带 tools 参数）。流式请求整轮走流式：推理 token 逐 chunk 实时
+		// 转发 thinking（独立通道，无闪烁）；content 先累积，仅在该轮无工具调用
+		//（终轮）时 flush 为 delta——工具轮 content 是"边说边决定"的叙述、先于
+		// 工具调用出现，直接转发会被后续工具执行结果覆盖造成闪烁。工具调用 deltas
+		// 在 streamRound 内部按 index 聚合，返回完整 ToolCalls。
 		toolInfos := e.toolInfosFiltered(allTools)
 		logWithCtx(ctx, "[agent] calling LLM with %d tools: %v", len(toolInfos), toolNames(toolInfos))
 		e.acquireLLM()
-		resp, err := e.chat.Generate(ctx, messages,
-			model.WithTools(toolInfos),
-		)
+		var resp *schema.Message
+		var err error
+		if onDelta != nil {
+			// 终轮流式：内容按 chunk flush 为 delta 由 streamRound 承担（只有
+			// 该轮无工具调用时才 flush，见 streamRound）。
+			resp, err = e.streamRound(ctx, messages, toolInfos, onThinking, onDelta)
+		} else {
+			resp, err = e.chat.Generate(ctx, messages, model.WithTools(toolInfos))
+		}
 		e.releaseLLM()
 		agentMetrics.recordLLMCall(err == nil)
 		if err != nil {
@@ -367,8 +382,12 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 				}
 				return result
 			}
-			// 如果已有工具调用结果，走分析层生成深度报告
-			if len(allToolCalls) > 0 {
+			// 如果已有工具调用结果，走分析层生成深度报告。流式请求跳过分析层：
+			// analyze 是又一次非流式 LLM 调用（深度报告），在 SSE 的 30s 预算内
+			// 会挤占最终答案的流式窗口。流式路径直接采用 agent 自己流式生成的
+			// 最终回答（streamRound 已 flush delta）。非流式请求保留 analyze 的
+			// 深度报告。
+			if len(allToolCalls) > 0 && onDelta == nil {
 				analysis := e.analyze(ctx, message, allToolCalls)
 				if analysis != "" {
 					e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
@@ -381,8 +400,12 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 				}
 			}
 			e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
+			answer := resp.Content
+			// 流式轮：终轮（无工具调用）的 content 已由 streamRound 按 chunk flush
+			// 为 delta（即最终答案，逐段增量渲染），这里不再重复 flush。旧实现是
+			// "非流式 Generate → streamGenerate 重放一遍"，多花一次 LLM 调用。
 			result := &AgentRunResult{
-				Answer:    resp.Content,
+				Answer:    answer,
 				ToolCalls: allToolCalls,
 				Reasoning: reasoningTrail,
 				TurnCount: step + 1,
@@ -522,6 +545,90 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 		e.cache.Set(ctx, message, result)
 	}
 	return result
+}
+
+// streamRound 以流式方式生成单轮回复，是流式请求下每个循环轮次的统一生成入口。
+//   - 推理 token（chunk.ReasoningContent）逐片段实时转发给 onThinking，让前端边
+//     想边显示思考过程；
+//   - content 片段缓冲在该轮内、不实时转发，loop 结束按 msg.ToolCalls 判定终局：
+//     仅终轮（无工具调用）把缓冲的 content 按原 chunk 次序逐段转发给 onContent
+//     （即最终答案逐段增量渲染，保持"token 式"流式手感）；工具轮的先导叙述直接
+//     丢弃，避免"边说边决定再被工具路径覆盖"的闪烁；
+//   - 工具调用 deltas 按 index 聚合：OpenAI 兼容接口把一次函数调用按 index 分片
+//     下发（id/name 在首片、arguments 跨片追加），聚合后返回完整的 ToolCalls。
+// 返回累积消息，并保留流式响应中携带的 ResponseMeta（token 用量，供审计）。
+func (e *AgentExecutor) streamRound(ctx context.Context, messages []*schema.Message, toolInfos []*schema.ToolInfo, onThinking func(string), onContent func(string)) (*schema.Message, error) {
+	var reader *schema.StreamReader[*schema.Message]
+	var err error
+	if len(toolInfos) > 0 {
+		reader, err = e.chat.Stream(ctx, messages, model.WithTools(toolInfos))
+	} else {
+		reader, err = e.chat.Stream(ctx, messages)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	var builder strings.Builder
+	var contentChunks []string
+	var lastResponse *schema.Message
+	aggCalls := map[int]*schema.ToolCall{} // index → 聚合后的完整调用
+	var callOrder []int
+	for {
+		chunk, recvErr := reader.Recv()
+		if recvErr != nil {
+			if errors.Is(recvErr, io.EOF) {
+				break
+			}
+			return nil, recvErr
+		}
+		if chunk == nil {
+			continue
+		}
+		if chunk.ResponseMeta != nil {
+			lastResponse = chunk
+		}
+		if chunk.ReasoningContent != "" && onThinking != nil {
+			onThinking(chunk.ReasoningContent)
+		}
+		if chunk.Content != "" {
+			builder.WriteString(chunk.Content)
+			contentChunks = append(contentChunks, chunk.Content)
+		}
+		for _, tc := range chunk.ToolCalls {
+			idx := 0
+			if tc.Index != nil {
+				idx = *tc.Index
+			}
+			agg, ok := aggCalls[idx]
+			if !ok {
+				agg = &tc
+				aggCalls[idx] = agg
+				callOrder = append(callOrder, idx)
+				continue
+			}
+			agg.Function.Name += tc.Function.Name
+			agg.Function.Arguments += tc.Function.Arguments
+			if agg.ID == "" {
+				agg.ID = tc.ID
+			}
+		}
+	}
+	msg := schema.AssistantMessage(builder.String(), nil)
+	for _, idx := range callOrder {
+		msg.ToolCalls = append(msg.ToolCalls, *aggCalls[idx])
+	}
+	if lastResponse != nil && lastResponse.ResponseMeta != nil {
+		msg.ResponseMeta = lastResponse.ResponseMeta
+	}
+	// 终轮：把缓冲的 content 按原次序逐段 flush 为 delta（最终答案增量渲染）。
+	// 工具轮（msg.ToolCalls 非空）不 flush——先导叙述留给执行结果覆盖。
+	if len(msg.ToolCalls) == 0 && onContent != nil && len(contentChunks) > 0 {
+		for _, c := range contentChunks {
+			onContent(c)
+		}
+	}
+	return msg, nil
 }
 
 // saveKnowledge 异步保存诊断记录到知识库。
@@ -735,85 +842,6 @@ func (e *AgentExecutor) toolInfosFiltered(filtered []tool.BaseTool) []*schema.To
 		infos = append(infos, info)
 	}
 	return infos
-}
-
-// intentPlan 是意图规划的输出：LLM 判断用户这次请求要工具还是直接回答。
-type intentPlan struct {
-	// Intent: "tool_call" | "knowledge"
-	Intent string `json:"intent"`
-	// Domain：tool_call 时涉及的工具域（如 kafka/minio），knowledge 时为 ""。
-	Domain string `json:"domain"`
-}
-
-// planIntent 让 LLM 判断用户意图（知识型 / 工具型+涉及域）。
-// 意图由 LLM 语义理解，用户怎么问都行——不依赖"域名+分隔符"这类用户不知道的
-// 规则。知识型（要命令/步骤/方法）→ Intent=knowledge，agent 不拿工具直接回答；
-// 工具型（查实时状态）→ Intent=tool_call + Domain，只给该域工具。
-//
-// 调用失败/解析失败时回退 Intent=tool_call、Domain=""（工具集为空，LLM 直接
-// 回答），保证知识型请求不被误伤、工具型请求也不会拿到无关工具乱用。
-func (e *AgentExecutor) planIntent(ctx context.Context, message string) intentPlan {
-	if e.chat == nil {
-		return intentPlan{Intent: "tool_call"}
-	}
-	const prompt = `判断用户请求的意图，只返回 JSON（不要 markdown 代码块）：
-{
-  "intent": "tool_call" | "knowledge",
-  "domain": "字符串或 null",
-  "explanation": "一句话判断依据"
-}
-
-判断标准：
-- tool_call：用户想查询/诊断某个系统的实时状态或数据，需要调用监控工具获取数据。domain 填涉及的中间件域（如 kafka、minio、glusterfs、redis）。
-- knowledge：用户想要命令清单、操作步骤、查询方法、排障思路，或询问某组件/域"能做什么、是什么、有什么用、有哪些功能"这类介绍类回答，不需要调用工具。domain 填 null。
-- 判断不出来时优先 tool_call。
-
-用户消息：%s`
-
-	messages := []*schema.Message{
-		schema.SystemMessage("你是意图分类器，只返回 JSON。"),
-		schema.UserMessage(fmt.Sprintf(prompt, message)),
-	}
-	e.acquireLLM()
-	resp, err := e.chat.Generate(ctx, messages)
-	e.releaseLLM()
-	if err != nil {
-		logWithCtx(ctx, "[agent] intent planning failed: %v", err)
-		return intentPlan{Intent: "tool_call"}
-	}
-	var plan intentPlan
-	if err := json.Unmarshal([]byte(extractJSONBody(resp.Content)), &plan); err != nil {
-		logWithCtx(ctx, "[agent] intent planning parse failed, raw=%s", resp.Content)
-		return intentPlan{Intent: "tool_call"}
-	}
-	if plan.Intent != "knowledge" {
-		plan.Intent = "tool_call"
-	}
-	plan.Domain = strings.TrimSpace(plan.Domain)
-	logWithCtx(ctx, "[agent] intent: %s domain=%q", plan.Intent, plan.Domain)
-	return plan
-}
-
-// toolsForDomain 按意图规划的域裁剪工具集：只给该域已注册的能力工具。
-// 知识型（Domain 为空）→ 空工具集，LLM 只能直接文字回答；未注册域 → 空（LLM
-// 拿不到工具也直接回答）。http.probe 不进入 agent 工具集——探活由独立的健康
-// 检查器承担，agent 专注已发布能力工具，避免通用工具被 LLM 滥用。
-func (e *AgentExecutor) toolsForDomain(domain string) []tool.BaseTool {
-	domain = strings.TrimSpace(domain)
-	if domain == "" {
-		return nil
-	}
-	out := make([]tool.BaseTool, 0, len(e.tools))
-	for _, t := range e.tools {
-		info, _ := t.Info(context.Background())
-		if info == nil {
-			continue
-		}
-		if strings.HasPrefix(info.Name, domain+".") {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // extractJSONBody 从 LLM 输出中提取 JSON：剥离可能的 ```json ... ``` 代码块包裹

@@ -19,6 +19,7 @@ import type {
   MarketplaceStats,
   MarketplaceVersion,
 } from '../types';
+import ViewShell from '../components/ViewShell.vue';
 
 type Mode = 'browse' | 'publish';
 const mode = ref<Mode>('browse');
@@ -214,13 +215,15 @@ async function submitPublish() {
 </script>
 
 <template>
-  <section data-test="marketplace-entry" data-view="marketplace" class="marketplace-entry">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Capability Marketplace</p>
-        <h1>能力市场</h1>
-        <p class="topbar-copy">浏览、搜索与发布可复用能力。自然语言搜索会触发语义召回，按相似度返回最相关能力。</p>
-      </div>
+  <ViewShell
+    class="marketplace-entry"
+    data-test="marketplace-entry"
+    data-view="marketplace"
+    eyebrow="Capability Marketplace"
+    title="能力市场"
+    copy="浏览、搜索与发布可复用能力。自然语言搜索会触发语义召回，按相似度返回最相关能力。"
+  >
+    <template #actions>
       <nav class="mode-tabs" aria-label="市场模式">
         <button
           class="mode-tab"
@@ -239,7 +242,7 @@ async function submitPublish() {
           发布
         </button>
       </nav>
-    </header>
+    </template>
 
     <!-- ================= Browse ================= -->
     <div v-if="mode === 'browse'">
@@ -425,24 +428,10 @@ async function submitPublish() {
         </section>
       </template>
     </div>
-  </section>
+  </ViewShell>
 </template>
 
 <style scoped>
-.marketplace-entry {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3, 0.75rem);
-  padding: 0 var(--space-6, 1.5rem) var(--space-6, 1.5rem);
-  flex: 1;
-  min-height: 0;
-}
-
-/* 与其它带顶栏视图一致：entry 已提供 24px 左右内边距，顶栏自身不再叠加左边距。 */
-.marketplace-entry .topbar {
-  padding: var(--space-5, 1.25rem) 0 var(--space-4, 1rem);
-}
-
 .mode-tabs {
   display: flex;
   gap: 4px;

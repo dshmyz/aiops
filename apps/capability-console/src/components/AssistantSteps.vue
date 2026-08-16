@@ -83,10 +83,10 @@ function stepStatusVariant(step: AssistantStep): string {
       :aria-expanded="expanded"
       @click="expanded = !expanded"
     >
-      <SfSymbol name="arrow-up-circle" :size="14" class="steps-toggle-icon" />
+      <SfSymbol name="arrow-up-circle" :size="16" class="steps-toggle-icon" />
       <span class="steps-summary">已执行 {{ steps.length }} 个步骤</span>
       <span class="steps-chevron" :class="{ expanded }">
-        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
           <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
         </svg>
       </span>
@@ -100,7 +100,7 @@ function stepStatusVariant(step: AssistantStep): string {
         :data-test="`assistant-step-item-${index}`"
       >
         <span class="step-item-icon">
-          <SfSymbol name="checkmark-circle" :size="14" />
+          <SfSymbol name="checkmark-circle" :size="16" />
         </span>
         <span class="step-item-body">
           <span class="step-item-head">
@@ -144,13 +144,13 @@ function stepStatusVariant(step: AssistantStep): string {
 .steps-toggle {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   width: 100%;
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 1rem;
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.95rem;
   color: #20242a;
   text-align: left;
 }
@@ -165,7 +165,7 @@ function stepStatusVariant(step: AssistantStep): string {
 
 .steps-summary {
   flex: 1;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .steps-chevron {
@@ -180,20 +180,20 @@ function stepStatusVariant(step: AssistantStep): string {
 
 .steps-list {
   margin: 0;
-  padding: 0.35rem 0.75rem 0.6rem;
+  padding: 0.45rem 1rem 0.75rem;
   list-style: none;
   border-top: 1px solid rgba(32, 36, 42, 0.06);
 }
 
 .step-item {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 22px minmax(0, 1fr);
   grid-template-rows: auto auto auto auto;
-  column-gap: 0.4rem;
-  row-gap: 0.15rem;
+  column-gap: 0.5rem;
+  row-gap: 0.2rem;
   align-items: start;
-  padding: 0.4rem 0;
-  font-size: 0.75rem;
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
   color: #68717a;
 }
 
@@ -232,13 +232,13 @@ function stepStatusVariant(step: AssistantStep): string {
   color: #20242a;
   font-weight: 550;
   font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 0.74rem;
+  font-size: 0.84rem;
   word-break: break-word;
 }
 
 .step-item-status {
-  font-size: 0.66rem;
-  padding: 1px 6px;
+  font-size: 0.74rem;
+  padding: 2px 8px;
   border-radius: 999px;
   background: #e8f5ee;
   color: #3f9b62;
@@ -277,7 +277,7 @@ function stepStatusVariant(step: AssistantStep): string {
   padding: 0;
   cursor: pointer;
   color: #a0a8b0;
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 500;
 }
 
@@ -295,17 +295,17 @@ function stepStatusVariant(step: AssistantStep): string {
 }
 
 .step-item-label {
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   color: #a0a8b0;
   font-weight: 500;
 }
 
 .step-item-json {
   margin: 0;
-  font-size: 0.68rem;
+  font-size: 0.76rem;
   color: #4a5159;
   background: rgba(32, 36, 42, 0.04);
-  padding: 0.35rem 0.5rem;
+  padding: 0.4rem 0.55rem;
   border-radius: 4px;
   overflow-x: auto;
   white-space: pre-wrap;

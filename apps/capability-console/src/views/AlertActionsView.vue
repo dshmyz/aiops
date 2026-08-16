@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import ViewShell from '../components/ViewShell.vue';
 
 interface AlertMatch {
   alertname?: string;
@@ -107,18 +108,17 @@ onMounted(load);
 </script>
 
 <template>
-  <section data-test="admin-alert-actions" class="admin-page">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Admin</p>
-        <h1>告警响应编排</h1>
-        <p class="topbar-copy">配置告警→动作的自动响应规则。告警到达时自动执行工具序列（诊断+处置）。</p>
-      </div>
-      <div class="topbar-actions">
-        <button class="mini-button" @click="load" :disabled="loading">刷新</button>
-        <button class="primary-mini-button" @click="startCreate">新建规则</button>
-      </div>
-    </header>
+  <ViewShell
+    class="admin-page"
+    data-test="admin-alert-actions"
+    eyebrow="Admin"
+    title="告警响应编排"
+    copy="配置告警→动作的自动响应规则。告警到达时自动执行工具序列（诊断+处置）。"
+  >
+    <template #actions>
+      <button class="mini-button" @click="load" :disabled="loading">刷新</button>
+      <button class="primary-mini-button" @click="startCreate">新建规则</button>
+    </template>
 
     <p v-if="error" class="error-text" role="alert">{{ error }}</p>
     <p v-if="loading" class="loading-text">加载中…</p>
@@ -209,15 +209,10 @@ onMounted(load);
         </div>
       </article>
     </div>
-  </section>
+  </ViewShell>
 </template>
 
 <style scoped>
-.admin-page { padding: var(--space-4); }
-.topbar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-4); }
-.topbar-actions { display: flex; gap: var(--space-2); }
-.eyebrow { font-size: var(--font-xs); color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
-.topbar-copy { color: var(--color-text-secondary); font-size: var(--font-sm); }
 .error-text { color: var(--color-danger); }
 .loading-text { color: var(--color-text-tertiary); }
 .config-banner { padding: var(--space-3); background: var(--color-bg-elevated); border-radius: var(--radius-lg); border: 1px solid var(--color-border); margin-bottom: var(--space-3); }

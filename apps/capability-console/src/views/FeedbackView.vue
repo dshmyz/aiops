@@ -4,6 +4,7 @@ import { listFeedback, inferRunbookDraft, activateRunbookDraft } from '../api';
 import type { FeedbackEntry, RunbookDraft } from '../types';
 import { buildFeedbackInsights, insightsToMarkdown } from '../composables/useFeedbackInsights';
 import type { FeedbackInsight } from '../composables/useFeedbackInsights';
+import ViewShell from '../components/ViewShell.vue';
 
 const items = ref<FeedbackEntry[]>([]);
 const total = ref(0);
@@ -136,15 +137,16 @@ onMounted(() => {
 </script>
 
 <template>
-  <section data-test="feedback-view" class="admin-page">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Admin</p>
-        <h1>用户反馈</h1>
-        <p class="topbar-copy">查看操作员对 AI 回复的评分与纠正，驱动 Planner 迭代优化。</p>
-      </div>
+  <ViewShell
+    class="admin-page"
+    data-test="feedback-view"
+    eyebrow="Admin"
+    title="用户反馈"
+    copy="查看操作员对 AI 回复的评分与纠正，驱动 Planner 迭代优化。"
+  >
+    <template #actions>
       <button class="mini-button" @click="load(true)" :disabled="loading">刷新</button>
-    </header>
+    </template>
 
     <!-- 统计卡片 -->
     <div class="stats-row">
@@ -291,7 +293,7 @@ onMounted(() => {
       <span class="page-info">{{ offset + 1 }}–{{ Math.min(offset + limit, total) }} / {{ total }}</span>
       <button class="secondary-inline" :disabled="offset + limit >= total" @click="nextPage">下一页</button>
     </div>
-  </section>
+  </ViewShell>
 </template>
 
 <style scoped>

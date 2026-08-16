@@ -484,7 +484,11 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 		}
 		// Run the execution pipeline (policy + plan + execution), reusing the
 		// same logic as HandleMessage via executeFromIntent.
-		resp, err := s.executeFromIntent(ctx, user, message, resolvedIntent, planErr)
+		// 整形器摘要叙述以 delta 流式转发（消除诊断/读路径整形期间的空窗等待），
+		// 最终 response 事件权威覆盖前端文本。
+		resp, err := s.executeFromIntent(ctx, user, message, resolvedIntent, planErr, func(delta string) {
+			events <- StreamEvent{Delta: delta}
+		})
 		if err != nil {
 			events <- StreamEvent{Err: err, Done: true}
 			return
@@ -662,7 +666,11 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 	// 关键：把真实请求者身份注入 ctx。缺了它，CapabilityTool 会走到空的
 	// fallback 身份并被策略拒绝（RBAC 归属错误 + 审计不可归因 + 缓存串用户）。
 	toolCtx := WithToolUser(ctx, user)
-	result := s.supervisor.Dispatch(toolCtx, message, history, func(step AgentStepEvent) {
+	// 最终答案的流式 delta 与推理 token 的实时 thinking：两条都由 executor 承担
+	//（终轮 flush / 逐 chunk 转发），共用 send 推给前端，最终 response 事件权威覆盖。
+	emitDelta := func(delta string) { send(StreamEvent{Delta: delta}) }
+	emitThinking := func(t string) { send(StreamEvent{Thinking: t}) }
+	result := s.supervisor.DispatchStream(toolCtx, message, history, func(step AgentStepEvent) {
 		send(StreamEvent{
 			Step: &StepEvent{
 				Tool:      step.Tool,
@@ -671,7 +679,7 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 				Summary:   step.Summary,
 			},
 		})
-	})
+	}, emitDelta, emitThinking)
 	if result.Error != nil {
 		send(StreamEvent{Err: result.Error, Done: true})
 		return
@@ -693,17 +701,18 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 	}
 	// 二阶段格式化：仅当实际执行了工具时再整形。无工具调用（知识型直接回答）
 	// 的答案已是面向用户的完整文本，跳过二次整形可避免改写与泄露内部术语。
+	// 工具路径同样不再走 LLM formatter：agent 终轮已流式写出面向用户的最终答复
+	//（由 executor 的 streamRound 终轮 flush delta），这里仅用代码兜底即时生成
+	// tool_trace/incident_card block。省去 formatter 一次 ~17s 的 LLM 二次生成
+	//（诊断类富卡片如 evidence_timeline 是整形器的增值产物，简单的工具查询不再
+	// 为其付出重复生成成本）。result.Answer 保留作 Message。
 	if s.formatter != nil && len(result.ToolCalls) > 0 {
 		factSet := make([]ToolFact, 0, len(result.ToolCalls))
 		for _, tc := range result.ToolCalls {
 			factSet = append(factSet, ToolFact{Tool: tc.Tool, Result: tc.Output})
 		}
 		req := FormatRequest{Tool: "agent", Answer: map[string]any{"message": result.Answer}, FactSet: factSet}
-		if formatted, err := s.formatter.Format(ctx, req); err == nil {
-			if strings.TrimSpace(formatted.Summary) != "" {
-				response.Summary = formatted.Summary
-				response.Message = formatted.Summary
-			}
+		if formatted, ferr := NewCodeFallbackFormatter().Format(ctx, req); ferr == nil {
 			if len(formatted.Blocks) > 0 {
 				response.Blocks = formatted.Blocks
 			}
@@ -738,7 +747,7 @@ func (s *Service) handleStatelessWithHistory(ctx context.Context, user identity.
 	planCtx, planSpan := tracer().Start(ctx, "planner.Plan")
 	intent, err := s.planner.Plan(planCtx, user, message, history, pageContext)
 	planSpan.End()
-	return s.executeFromIntent(ctx, user, message, intent, err)
+	return s.executeFromIntent(ctx, user, message, intent, err, nil)
 }
 
 // handleWithAgentExecutor 用 AgentExecutor（LLM function calling）处理请求。
@@ -769,7 +778,9 @@ func (s *Service) handleWithAgentExecutor(ctx context.Context, user identity.Cur
 	}
 	// 二阶段格式化：把 LLM 回复转为结构化 Summary + Blocks。
 	// 无工具调用（知识型直接回答）时跳过——答案已是面向用户的完整文本，
-	// 二次整形反而会改写或泄露内部术语。
+	// 二次整形反而会改写或泄露内部术语。工具路径这里也不再走 LLM formatter，
+	// 与流式路径一致：agent 终轮答复保留作 Message，仅用代码兜底即时生成
+	// tool_trace/incident_card block（省去 formatter 约 17s 的二次生成）。
 	if s.formatter != nil && len(result.ToolCalls) > 0 {
 		factSet := make([]ToolFact, 0, len(result.ToolCalls))
 		for _, tc := range result.ToolCalls {
@@ -783,11 +794,7 @@ func (s *Service) handleWithAgentExecutor(ctx context.Context, user identity.Cur
 			Answer:  map[string]any{"message": result.Answer},
 			FactSet: factSet,
 		}
-		if formatted, err := s.formatter.Format(ctx, req); err == nil {
-			if strings.TrimSpace(formatted.Summary) != "" {
-				response.Summary = formatted.Summary
-				response.Message = formatted.Summary
-			}
+		if formatted, err := NewCodeFallbackFormatter().Format(ctx, req); err == nil {
 			if len(formatted.Blocks) > 0 {
 				response.Blocks = formatted.Blocks
 			}
@@ -808,7 +815,11 @@ func (s *Service) handleWithAgentExecutor(ctx context.Context, user identity.Cur
 // default clarification Response, and any other error is returned as-is.
 // When planErr is nil, intent must hold the resolved planner intent and the
 // full diagnostic/tool/policy/read/plan pipeline runs.
-func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUser, message string, intent Intent, planErr error) (Response, error) {
+//
+// formatDelta 非 nil 时（流式调用方），二阶段整形走 FormatStream：整形器产出的
+// 摘要叙述逐段以 delta 转发给前端增量渲染，消除诊断/读路径整形期间的空窗等待；
+// nil 时保持原来的非流式 Format（一次性调用方行为不变）。
+func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUser, message string, intent Intent, planErr error, formatDelta func(string)) (Response, error) {
 	if planErr != nil {
 		var clarification ClarificationError
 		if errors.As(planErr, &clarification) {
@@ -923,7 +934,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 			},
 		}
 		factSet = append(factSet, diagFact)
-		response = s.formatResponse(ctx, response, intent, factSet...)
+		response = s.formatResponse(ctx, response, intent, formatDelta, factSet...)
 		return response, nil
 	}
 	tool, ok := tools.Lookup(intent.ToolName)
@@ -969,7 +980,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 			Tool:   tool.Name,
 			Answer: answer,
 			Trace:  buildAssistantTrace(intent, tool.Name, intent.Input, answer),
-		}, intent), nil
+		}, intent, formatDelta), nil
 	}
 	if s.plans == nil {
 		return Response{}, errors.New("plan service is required")
@@ -1121,7 +1132,11 @@ func (s *Service) previewDraftPlan(ctx context.Context, toolName string, input m
 // factSet 是多工具场景下的事实集（缺口-4）。为空时走单工具路径
 // （response.Tool + response.Answer）；非空时传给 formatter 遍历生成
 // 完整草稿。诊断分支收集诊断包工具 + 推荐执行工具的事实。
-func (s *Service) formatResponse(ctx context.Context, response Response, intent Intent, factSet ...ToolFact) Response {
+//
+// formatDelta 非 nil 且 formatter 支持流式（StreamingResponseFormatter）时走
+// FormatStream：整形器产出的摘要叙述实时转发给前端，消除整形期空窗；流式失败
+// 或不支持流式回退非流式 Format，行为与旧路径一致。
+func (s *Service) formatResponse(ctx context.Context, response Response, intent Intent, formatDelta func(string), factSet ...ToolFact) Response {
 	if s.formatter == nil {
 		return response
 	}
@@ -1134,7 +1149,17 @@ func (s *Service) formatResponse(ctx context.Context, response Response, intent 
 		Answer:  response.Answer,
 		FactSet: factSet,
 	}
-	result, err := s.formatter.Format(ctx, req)
+	var result FormatResult
+	var err error
+	if formatDelta != nil {
+		if streamer, ok := s.formatter.(StreamingResponseFormatter); ok {
+			result, err = streamer.FormatStream(ctx, req, formatDelta)
+		} else {
+			result, err = s.formatter.Format(ctx, req)
+		}
+	} else {
+		result, err = s.formatter.Format(ctx, req)
+	}
 	if err != nil {
 		return response
 	}

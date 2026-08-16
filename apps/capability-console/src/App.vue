@@ -33,6 +33,7 @@ import AssistantSuggestions from './components/AssistantSuggestions.vue';
 import CapabilityStatusBadge from './components/CapabilityStatusBadge.vue';
 import BlockRenderer from './components/BlockRenderer.vue';
 import ConversationSidebar from './components/ConversationSidebar.vue';
+import SplitHandle from './components/SplitHandle.vue';
 import DiagnosticView from './components/DiagnosticView.vue';
 import ExecutionResultView from './components/ExecutionResultView.vue';
 import ToolAnswerView from './components/ToolAnswerView.vue';
@@ -353,34 +354,39 @@ const allSlashCommands = computed<SlashCommand[]>(() => {
   }));
 });
 
-// 已发布能力（hero 文案与建议提问的唯一数据源）
+// 已发布能力（建议提问的唯一数据源）
 const publishedCapabilities = computed(() =>
   capabilitiesComposable.capabilities.value.filter((cap) => cap.source === 'published'),
 );
 
-// 已发布能力的域列表（去重保序），用于 hero 副标题
-const publishedDomains = computed<string[]>(() => {
-  const seen = new Set<string>();
-  const domains: string[] = [];
-  for (const cap of publishedCapabilities.value) {
-    if (cap.domain && !seen.has(cap.domain)) {
-      seen.add(cap.domain);
-      domains.push(cap.domain);
-    }
-  }
-  return domains;
-});
+// hero 副标题：通用文案，不枚举具体中间件/域——域列表会随注册表变化，
+// 在副标题里罗列「glusterfs、kafka、minio」既像写死广告，又会在能力增减时失真。
+const assistantHeroCopy = '用自然语言描述中间件问题，AI 会通过已发布能力调用现有后台 API 帮你排查。';
 
-// hero 副标题：从已发布能力动态生成，不写死具体中间件
-const assistantHeroCopy = computed(() => {
-  const domains = publishedDomains.value;
-  if (domains.length === 0) {
-    return '用自然语言描述中间件问题，AI 会通过已发布能力调用现有后台 API 帮你排查。';
+// —— 助手三栏列宽拖拽：左会话列表 / 右「本次能力调用」由 SplitHandle 调宽，
+//    宽度持久化到 localStorage，刷新后保留用户偏好。默认值与 styles.css 网格回退一致。 ——
+const ASST_LEFT_KEY = 'copilot:assistant-left';
+const ASST_RIGHT_KEY = 'copilot:assistant-right';
+
+function loadColumnWidth(key: string, fallback: number): number {
+  try {
+    const v = Number(localStorage.getItem(key));
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  } catch {
+    return fallback;
   }
-  const names = domains.slice(0, 3).join('、');
-  const more = domains.length > 3 ? ` 等 ${domains.length} 类` : '';
-  return `用自然语言查询 ${names}${more}，AI 会通过已发布能力调用现有后台 API。`;
-});
+}
+
+const assistantLeftWidth = ref(loadColumnWidth(ASST_LEFT_KEY, 200));
+const assistantRightWidth = ref(loadColumnWidth(ASST_RIGHT_KEY, 240));
+watch(assistantLeftWidth, (v) => localStorage.setItem(ASST_LEFT_KEY, String(v)));
+watch(assistantRightWidth, (v) => localStorage.setItem(ASST_RIGHT_KEY, String(v)));
+
+// 注入网格的列宽 CSS 变量：grid-template-columns 读取，拖拽即改。
+const assistantColumnsStyle = computed(() => ({
+  '--asst-left': `${assistantLeftWidth.value}px`,
+  '--asst-right': `${assistantRightWidth.value}px`,
+}));
 
 // 空状态建议提问：优先取能力自带 ai.examples（完整自然语言问法），
 // 缺失时退回「检查 {domain} 状态」——与 slash 指令同一数据源，不写死组件。
@@ -831,7 +837,7 @@ onUnmounted(() => {
           @go-to-management="activeView = 'management'"
         />
 
-        <section class="assistant-workspace">
+        <section class="assistant-workspace" :style="assistantColumnsStyle">
           <ConversationSidebar
             :conversations="filteredConversations"
             :activeConversationID="activeConversationID"
@@ -842,6 +848,14 @@ onUnmounted(() => {
             @select="selectConversation"
             @archive="handleArchiveConversation"
             @new="startNewConversation"
+          />
+
+          <SplitHandle
+            v-model="assistantLeftWidth"
+            :min="160"
+            :max="360"
+            label="会话历史宽度"
+            hide-below="768px"
           />
 
           <section class="assistant-chat" aria-label="AI 运维对话">
@@ -1014,6 +1028,15 @@ onUnmounted(() => {
               </div>
             </div>
           </section>
+
+          <SplitHandle
+            v-model="assistantRightWidth"
+            :min="200"
+            :max="520"
+            label="本次能力调用宽度"
+            anchor="right"
+            hide-below="1100px"
+          />
 
           <aside class="assistant-detail" aria-label="本次能力调用">
             <div class="group-title">

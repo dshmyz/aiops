@@ -98,7 +98,7 @@ function formatTime(iso: string): string {
     >
       <SfSymbol
         :name="streaming && currentStage ? iconFor(currentStage.stage) : 'checkmark-circle'"
-        :size="14"
+        :size="16"
         :class="streaming ? 'progress-toggle-icon-active' : 'progress-toggle-icon-done'"
       />
       <span class="progress-summary">
@@ -111,7 +111,7 @@ function formatTime(iso: string): string {
       </span>
       <span v-if="streaming" class="progress-pulse" aria-hidden="true"></span>
       <span class="progress-chevron" :class="{ expanded }">
-        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
           <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
         </svg>
       </span>
@@ -125,7 +125,7 @@ function formatTime(iso: string): string {
         :data-test="`progress-item-${isDone(idx) ? 'done' : 'active'}`"
       >
         <span class="progress-item-icon">
-          <SfSymbol :name="isDone(idx) ? 'checkmark-circle' : iconFor(s.stage)" :size="14" />
+          <SfSymbol :name="isDone(idx) ? 'checkmark-circle' : iconFor(s.stage)" :size="16" />
         </span>
         <span class="progress-item-label">{{ labelFor(s.stage, isDone(idx)) }}</span>
         <span class="progress-item-time">{{ formatTime(s.received_at) }}</span>
@@ -147,13 +147,13 @@ function formatTime(iso: string): string {
 .progress-toggle {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   width: 100%;
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 1rem;
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.95rem;
   color: #20242a;
   text-align: left;
 }
@@ -172,7 +172,7 @@ function formatTime(iso: string): string {
 
 .progress-summary {
   flex: 1;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .progress-pulse {
@@ -200,24 +200,24 @@ function formatTime(iso: string): string {
 
 .progress-list {
   margin: 0;
-  padding: 0.35rem 0.75rem 0.6rem;
+  padding: 0.45rem 1rem 0.75rem;
   list-style: none;
   border-top: 1px solid rgba(32, 36, 42, 0.06);
 }
 
 /*
  * 两行网格：第一行 图标 + 标签 + 时间，第二行 detail 说明文字（与标签左对齐缩进）。
- * 图标列固定 18px，detail 从第 2 列开始，形成"标题 + 缩进描述"的清单观感。
+ * 图标列固定 22px，detail 从第 2 列开始，形成"标题 + 缩进描述"的清单观感。
  */
 .progress-item {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   grid-template-rows: auto auto;
-  column-gap: 0.4rem;
-  row-gap: 0.15rem;
+  column-gap: 0.5rem;
+  row-gap: 0.2rem;
   align-items: center;
-  padding: 0.35rem 0;
-  font-size: 0.75rem;
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
   color: #68717a;
 }
 
@@ -244,14 +244,14 @@ function formatTime(iso: string): string {
   grid-column: 3;
   color: #a0a8b0;
   font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 0.68rem;
+  font-size: 0.76rem;
 }
 
 .progress-item-detail {
   grid-row: 2;
   grid-column: 2 / -1;
   color: #68717a;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   line-height: 1.45;
   word-break: break-word;
 }

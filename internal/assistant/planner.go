@@ -187,10 +187,11 @@ type DeterministicPlanner struct{}
 //     提供，extractDomain 走 MatchDomainBounded 有边界匹配），或 pageContext
 //     声明已注册域 → 路由到该域诊断。kafka/minio/glusterfs 等域名只存在于注册表
 //     （中间件来自 YAML 能力注册），不写死任何组件关键词。
-//   - 平台意图（告警/态势/事件/任务/集群状态）**不在此路由**：由 LLM 路径
-//     planIntent 语义分类 + function calling 解析（见 agent_executor.go）。
-//     确定性模式没有 LLM，也没有关键词表，无法区分"告警"与"天气"这类同信号
-//     消息，一律澄清。这正是"零硬编码关键词"的取舍：宁可澄清，也不写死选择。
+//   - 平台意图（告警/态势/事件/任务/集群状态）**不在此路由**：由 LLM 路径的
+//     agent 循环按语义判断是否调工具（全量工具集、function calling，见
+//     agent_executor.go）。确定性模式没有 LLM，也没有关键词表，无法区分"告警"
+//     与"天气"这类同信号消息，一律澄清。这正是"零硬编码关键词"的取舍：宁可
+//     澄清，也不写死选择。
 func (DeterministicPlanner) Plan(_ context.Context, _ identity.CurrentUser, message string, _ []Turn, pageContext PageContext) (Intent, error) {
 	userMessage := message
 	text := strings.ToLower(strings.TrimSpace(userMessage))

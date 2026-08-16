@@ -210,10 +210,10 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
           :aria-expanded="thinkingExpanded"
           @click="thinkingExpanded = !thinkingExpanded"
         >
-          <SfSymbol name="sparkles" :size="14" />
+          <SfSymbol name="sparkles" :size="16" />
           <span>思考过程</span>
           <span class="thinking-chevron" :class="{ expanded: thinkingExpanded }">
-            <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
               <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
             </svg>
           </span>
@@ -235,12 +235,12 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
           :aria-expanded="toolCallsExpanded"
           @click="toolCallsExpanded = !toolCallsExpanded"
         >
-          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
           </svg>
           <span>已调用 {{ turn.tool_calls?.length || 0 }} 个受控工具获取平台事实</span>
           <span class="tool-calls-chevron" :class="{ expanded: toolCallsExpanded }">
-            <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
               <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
             </svg>
           </span>
@@ -448,10 +448,6 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
   font-size: 0.82em;
 }
 
-.badge.tag-success { color: #1a7f37; }
-.badge.tag-error { color: #cf222e; }
-.badge.tag-info { color: #0969da; }
-
 .conversation-turn-item {
   display: flex;
   gap: var(--space-3);
@@ -472,6 +468,27 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
 
 .conversation-turn-item.assistant {
   margin-right: auto;
+  /* 助手轮封顶 800px（略宽于正文气泡 720px，但不再铺满整列 882px——满宽太冲）。
+     width:100% 必须显式写死：transcript 的 align-items:normal(stretch) 会被本轮的
+     margin-right:auto（交叉轴 auto 外边距）禁用，届时整轮退化为随内容收缩的
+     fit-content，流式初期内容少时步骤/时间线块会窄成一列。width:100% + max-width
+     封顶 = 流式全程恒定 800px，不收缩也不铺满。 */
+  max-width: min(800px, 100%);
+  width: 100%;
+}
+
+/* 助手轮的"宽数据"执行块（步骤清单、已调用工具、结构化答案/诊断卡、推荐落地、
+   Runbook 块）撑满整轮宽度；正文气泡由 .conversation-turn-content 单独封顶
+   min(720px, 100%) 保持可读，不受此限。 */
+.conversation-turn-item.assistant .assistant-steps,
+.conversation-turn-item.assistant .tool-calls-section,
+.conversation-turn-item.assistant .thinking-section,
+.conversation-turn-item.assistant .conversation-turn-blocks,
+.conversation-turn-item.assistant .tool-answer-view,
+.conversation-turn-item.assistant .diagnostic-view,
+.conversation-turn-item.assistant .progress-timeline,
+.conversation-turn-item.assistant .recommendation-status {
+  align-self: stretch;
 }
 
 .conversation-turn-avatar {
@@ -508,6 +525,10 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
 
 .conversation-turn-item.assistant .conversation-turn-body {
   align-items: flex-start;
+  /* 填满整轮宽度：turn 已 width:100%，若 body 仍按内容收缩（flex 默认
+     basis:auto），步骤/时间线块 align-self:stretch 只能撑到 body 的内容宽，
+     依旧窄一列。flex:1 让 body 吃掉整轮剩余宽度，执行块才有稳定全宽舞台。 */
+  flex: 1 1 auto;
 }
 
 .conversation-turn-header {
@@ -541,14 +562,17 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
 }
 
 .conversation-turn-badge {
+  display: inline-flex;
+  align-items: center;
   padding: 2px 8px;
   border-radius: var(--radius-pill);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   font-weight: 600;
   background: var(--color-bg-elevated);
   color: var(--color-text-secondary);
   border: none;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .conversation-turn-badge.variant-answer {
@@ -597,7 +621,8 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
   transition: transform 0.15s var(--ease-out);
   /* 防止代码块/长行把气泡撑出容器，导致整页出现横向滚动条 */
   min-width: 0;
-  max-width: 100%;
+  /* 正文封顶 ~720px，保证大屏下长句不拉过宽；步骤/工具执行块不受此限 */
+  max-width: min(720px, 100%);
 }
 
 /* markdown 代码块：超宽时块内横向滚动，而不是撑开消息气泡 */
@@ -769,14 +794,14 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
 .tool-calls-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 0.5rem 1rem;
   background: transparent;
   border: none;
   color: var(--color-text-secondary);
-  font-size: var(--font-sm);
-  font-weight: 500;
+  font-size: var(--font-base);
+  font-weight: 600;
   cursor: pointer;
   transition: color 0.15s var(--ease-out);
 }
@@ -803,7 +828,7 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
 }
 
 .tool-call-item {
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: var(--color-bg-elevated);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
@@ -824,12 +849,12 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
 .tool-call-name {
   font-weight: 600;
   color: var(--color-text-primary);
-  font-size: var(--font-sm);
+  font-size: var(--font-base);
 }
 
 .tool-call-status {
-  font-size: var(--font-xs);
-  padding: 2px 8px;
+  font-size: var(--font-sm);
+  padding: 2px 10px;
   border-radius: var(--radius-pill);
   font-weight: 500;
 }
@@ -856,17 +881,17 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
 }
 
 .tool-call-label {
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   color: var(--color-text-tertiary);
   margin-bottom: 4px;
   font-weight: 500;
 }
 
 .tool-call-json {
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   color: var(--color-text-secondary);
   background: var(--color-bg);
-  padding: 8px;
+  padding: 10px 12px;
   border-radius: var(--radius-sm);
   overflow-x: auto;
   white-space: pre-wrap;
@@ -888,14 +913,14 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
 .thinking-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 0.5rem 1rem;
   background: transparent;
   border: none;
   color: var(--color-text-secondary);
-  font-size: var(--font-sm);
-  font-weight: 500;
+  font-size: var(--font-base);
+  font-weight: 600;
   cursor: pointer;
   transition: color 0.15s var(--ease-out);
 }
@@ -915,8 +940,8 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
 }
 
 .thinking-content {
-  padding: 0 12px 12px;
-  font-size: var(--font-sm);
+  padding: 0 1rem 1rem;
+  font-size: var(--font-base);
   color: var(--color-text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
