@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
@@ -65,11 +67,11 @@ func (g *recordingWriteGate) gate(_ context.Context, _ identity.CurrentUser, _ s
 // 用裸子串扫描会把正常召回误判成失败，导致报告声称"该维度无数据"。
 func TestClassifyToolResult_DataContentNotFailure(t *testing.T) {
 	cases := []struct {
-		name            string
-		tc              ToolCallLog
-		wantSuccess     bool
-		wantFailed      bool
-		wantEmpty       bool
+		name        string
+		tc          ToolCallLog
+		wantSuccess bool
+		wantFailed  bool
+		wantEmpty   bool
 	}{
 		{name: "error 是数据内容", tc: ToolCallLog{Tool: "log.read", Output: map[string]any{"summary": "发现 3 条 error 日志"}}, wantSuccess: true},
 		{name: "errors 记录是数据内容", tc: ToolCallLog{Tool: "log.read", Output: map[string]any{"summary": "采集到 5 条 errors 记录"}}, wantSuccess: true},
@@ -363,5 +365,67 @@ func TestExecutorWriteGateDeniesWithoutPermission(t *testing.T) {
 	}
 	if out.Reason == "" {
 		t.Fatal("Reason = empty, want the deny reason surfaced to the LLM")
+	}
+}
+
+// blankReasoner 返回空内容的分析模型替身：让非流式终轮的 analyze 拿到 Content==""（跳
+// 过深度报告）而不从主 chat 队列再消费一条预设响应，测试能精确断言 LLM 调用次数。
+type blankReasoner struct{}
+
+func (blankReasoner) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	return &schema.Message{Content: ""}, nil
+}
+func (blankReasoner) Stream(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return schema.StreamReaderFromArray([]*schema.Message{{Content: ""}}), nil
+}
+
+// TestAgentExecutorWriteResultNotCached 钉住"写请求结果不进 LLM 响应缓存"的修复：
+// 含写工具调用的执行即使走到终轮也绝不缓存——重复的同一写请求必须每次都重新过写门
+// （重新评估 policy / E2 自治开关 / 每日上限），而不是命中第一次的过期结论。修复前
+// 自动执行后的终轮结果会 cache.Set，第二次同文请求直接缓存命中、绕过写门（不真正再
+// 执行、E2 计数不重记、被收回的权限仍播出"已执行"）。
+func TestAgentExecutorWriteResultNotCached(t *testing.T) {
+	registerTestRetentionWriteTool(t)
+	ctx := context.Background()
+	user := identity.CurrentUser{Subject: "alice", Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}}
+	toolCtx := WithToolUser(ctx, user)
+	const message = "把 kafka retention 调低到 48 小时"
+
+	gate := &recordingWriteGate{out: &agentWriteOutcome{
+		AutoExec: true, ExecutionID: "exec-1", Status: "completed", PlanID: "plan-1", Summary: "已自动执行",
+	}}
+	chat := &queuedChat{responses: []*schema.Message{
+		{ToolCalls: []schema.ToolCall{{ID: "c1", Type: "function", Function: schema.FunctionCall{Name: testRetentionWriteToolName, Arguments: `{"environment":"prod","retention_hours":48}`}}}},
+		{Content: "已自动执行完成。"},
+		{ToolCalls: []schema.ToolCall{{ID: "c2", Type: "function", Function: schema.FunctionCall{Name: testRetentionWriteToolName, Arguments: `{"environment":"prod","retention_hours":48}`}}}},
+		{Content: "已自动执行完成。"},
+	}}
+	exec := &AgentExecutor{chat: chat, reasoningChat: blankReasoner{}, writeGate: gate.gate, maxSteps: 5, cache: NewResponseCache(10, time.Minute)}
+
+	first := exec.Run(toolCtx, message, nil)
+	if first.Error != nil {
+		t.Fatalf("first Run error: %v", first.Error)
+	}
+	if first.Handoff != nil {
+		t.Fatal("Handoff = non-nil, want autoexec to complete inline")
+	}
+	if got := exec.cache.Get(toolCtx, message); got != nil {
+		t.Fatal("write run result must not be cached (repeated request must re-evaluate the write gate)")
+	}
+
+	second := exec.Run(toolCtx, message, nil)
+	if second.Error != nil {
+		t.Fatalf("second Run error: %v", second.Error)
+	}
+	if second.Answer != first.Answer {
+		t.Fatalf("second answer = %q, want %q", second.Answer, first.Answer)
+	}
+	// 关键断言：两次 Run 各自走完整循环（每轮各 2 次 LLM），而不是第二次缓存命中
+	//（命中则第二次零 LLM 调用、全程只 2 次）。
+	if chat.calls != 4 {
+		t.Fatalf("LLM calls over two runs = %d, want 4 (each repeated write request must re-execute, not cache-hit)", chat.calls)
+	}
+	if gate.calls != 2 {
+		t.Fatalf("write gate calls over two runs = %d, want 2 (policy/E2 must be re-evaluated per request)", gate.calls)
 	}
 }

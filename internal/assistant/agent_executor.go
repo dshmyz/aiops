@@ -127,7 +127,7 @@ func (e *AgentExecutor) WithSequenceFor(seqFor func(context.Context, string) []s
 
 // agentWriteOutcome 是一次写工具调用的处置结果，三态对应 policy.Evaluate
 // （拒绝 / E2 自动执行 / 待人工确认交接）。Version/ExpiresAt 与 plan/Response 对齐
-//（uint / time.Time），便于 executorWriteHandoff 与 confirmationResponseFromOutcome
+// （uint / time.Time），便于 executorWriteHandoff 与 confirmationResponseFromOutcome
 // 直接透传。
 type agentWriteOutcome struct {
 	Denied            bool   // policy 拒绝写入（reason 携带原因）
@@ -490,7 +490,9 @@ loop:
 					Reasoning: reasoningTrail,
 					TurnCount: step + 1,
 				}
-				if e.cache != nil {
+				// 涉及写调用的执行结果不入缓存（见 cacheableResult）：重复写请求必须
+				// 每次都重新过写门。
+				if e.cache != nil && cacheableResult(allToolCalls) {
 					e.cache.Set(ctx, message, result)
 				}
 				return result
@@ -539,7 +541,9 @@ loop:
 				Reasoning: reasoningTrail,
 				TurnCount: step + 1,
 			}
-			if e.cache != nil && result.Answer != "" {
+			// 涉及写调用的执行结果不入缓存（见 cacheableResult）：缓存会让重复写请求
+			// 跳过写门重评估，拿到已随政策/自治状态而失效的过期结论。
+			if e.cache != nil && result.Answer != "" && cacheableResult(allToolCalls) {
 				e.cache.Set(ctx, message, result)
 			}
 			return result
@@ -670,7 +674,8 @@ loop:
 				Reasoning: reasoningTrail,
 				TurnCount: lastStep + 1,
 			}
-			if e.cache != nil {
+			// 涉及写调用的执行结果不入缓存（见 cacheableResult）。
+			if e.cache != nil && cacheableResult(allToolCalls) {
 				e.cache.Set(ctx, message, result)
 			}
 			return result
@@ -693,8 +698,9 @@ loop:
 	}
 	// 知识积累：保存诊断记录
 	e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
-	// 缓存：存入响应缓存
-	if e.cache != nil && result.Answer != "" {
+	// 缓存：存入响应缓存（涉及写调用的执行不入缓存，见 cacheableResult——重复写请求
+	// 必须重新过写门，不能命中会随政策/自治状态失效的过期结论）。
+	if e.cache != nil && result.Answer != "" && cacheableResult(allToolCalls) {
 		e.cache.Set(ctx, message, result)
 	}
 	return result
@@ -913,6 +919,21 @@ func allToolsFailed(toolCalls []ToolCallLog) bool {
 	}
 	for _, tc := range toolCalls {
 		if tc.Error == "" && tc.Output != nil && len(tc.Output) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// cacheableResult 判定一次执行结果是否可写进 LLM 响应缓存。
+//
+// 涉及写工具调用的结果依赖 policy / E2 自治开关 / 每日上限等**运行时状态**：如果把它
+// 缓存起来，重复的同一个写请求会直接命中旧结论、跳过写门重评估——自动执行不真正再
+// 跑、E2 计数不重记、被收回的权限仍播出"已执行"，是误导性的。因此含写调用（无论
+// 结果是被拒还是被放行自动执行）的执行一律不入缓存；纯读执行照常缓存。
+func cacheableResult(toolCalls []ToolCallLog) bool {
+	for _, tc := range toolCalls {
+		if t, ok := tools.Lookup(tc.Tool); ok && t.Operation == tools.Write {
 			return false
 		}
 	}
