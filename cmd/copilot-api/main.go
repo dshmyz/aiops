@@ -561,6 +561,9 @@ func main() {
 			SessionTTL:          casSessionTTL(logger),
 			DefaultRoles:        casJSONList("COPILOT_CAS_DEFAULT_ROLES", logger),
 			DefaultEnvironments: casJSONList("COPILOT_CAS_DEFAULT_ENVIRONMENTS", logger),
+			// COPILOT_CAS_INSECURE_SKIP_VERIFY=1 时，CAS ticket 校验请求跳过 TLS
+			// 证书校验（对接自签/内网 HTTPS 的 CAS 服务器）。默认关闭（校验证书）。
+			InsecureSkipVerify: os.Getenv("COPILOT_CAS_INSECURE_SKIP_VERIFY") == "1",
 		}
 		var err error
 		casAuth, err = httpapi.NewCASAuthenticator(casCfg)
@@ -575,6 +578,9 @@ func main() {
 			zap.Strings("default_roles", casCfg.DefaultRoles),
 			zap.Strings("default_environments", casCfg.DefaultEnvironments),
 		)
+		if casCfg.InsecureSkipVerify {
+			logger.Warn("CAS TLS certificate verification disabled (COPILOT_CAS_INSECURE_SKIP_VERIFY=1)")
+		}
 	}
 	multiAuth := httpapi.NewMultiAuthenticator(authMode, authenticator, casAuth)
 

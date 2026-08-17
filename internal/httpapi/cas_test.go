@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/httpapi"
@@ -87,8 +88,10 @@ func TestCASValidateTicketInvalid(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid ticket")
 	}
-	if got := err.Error(); got == "" {
-		t.Error("error message should not be empty")
+	// 失败响应的 code 是属性（<cas:authenticationFailure code="...">），必须用
+	// xml:"code,attr" 才能读到；报错应带上错误码而非笼统的 missing username。
+	if got := err.Error(); !strings.Contains(got, "INVALID_TICKET") || strings.Contains(got, "missing username") {
+		t.Errorf("error = %q, want CAS failure with code INVALID_TICKET", got)
 	}
 }
 
@@ -353,4 +356,46 @@ func containsSubstr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestCASInsecureSkipVerify 钉住 CAS ticket 校验的 TLS 证书校验开关：默认校验证书，
+// 对接自签 HTTPS 的 CAS 服务器会 TLS 握手失败；InsecureSkipVerify=true 时跳过
+// 证书校验、可正常完成校验流程（走到 CAS 业务判定而非握手错误）。
+func TestCASInsecureSkipVerify(t *testing.T) {
+	// httptest.NewTLSServer 使用自签证书：默认客户端校验证书必然失败。
+	casServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `<cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+  <cas:authenticationFailure code="INVALID_TICKET">Ticket not recognized</cas:authenticationFailure>
+</cas:serviceResponse>`)
+	}))
+	defer casServer.Close()
+
+	// 默认：校验证书 → TLS 握手报 x509 自签错误。
+	auth, err := httpapi.NewCASAuthenticator(httpapi.CASConfig{
+		ServerURL:     casServer.URL,
+		ServiceURL:    "http://localhost:5173",
+		SessionSecret: []byte("test-secret"),
+	})
+	if err != nil {
+		t.Fatalf("NewCASAuthenticator: %v", err)
+	}
+	if _, _, err := auth.ValidateTicket("ST-x"); err == nil || !strings.Contains(err.Error(), "x509") {
+		t.Fatalf("default client: err = %v, want x509 certificate error", err)
+	}
+
+	// InsecureSkipVerify=true：跳过证书校验 → 握手成功，请求到达 CAS 服务器并得到
+	// CAS 层判定（拒绝票据），不再是 TLS 握手/x509 错误。
+	insecure, err := httpapi.NewCASAuthenticator(httpapi.CASConfig{
+		ServerURL:          casServer.URL,
+		ServiceURL:         "http://localhost:5173",
+		SessionSecret:      []byte("test-secret"),
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("NewCASAuthenticator(insecure): %v", err)
+	}
+	if _, _, err := insecure.ValidateTicket("ST-x"); err == nil || strings.Contains(err.Error(), "x509") {
+		t.Fatalf("insecure client: err = %v, want CAS-level rejection (no TLS certificate error)", err)
+	}
 }

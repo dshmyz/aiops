@@ -3,6 +3,7 @@ package httpapi
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
@@ -39,6 +40,10 @@ type CASConfig struct {
 	DefaultEnvironments []string
 	// HTTPClient is used for ticket validation calls. Defaults to http.DefaultClient.
 	HTTPClient *http.Client
+	// InsecureSkipVerify 为 true 时，CAS ticket 校验请求跳过 TLS 证书校验，用于
+	// 对接自签/内网 HTTPS 的 CAS 服务器。默认关闭（校验证书）；开启即信任该端点，
+	// 须自行评估风险。
+	InsecureSkipVerify bool
 }
 
 const (
@@ -79,6 +84,20 @@ func NewCASAuthenticator(config CASConfig) (*CASAuthenticator, error) {
 	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	if config.InsecureSkipVerify {
+		// 跳过 TLS 证书校验：CAS ticket 校验请求不验证服务器证书，用于对接自签/
+		// 内网 HTTPS 的 CAS 服务器。生产默认关闭；开启即信任该端点，须自行评估风险。
+		transport, _ := config.HTTPClient.Transport.(*http.Transport)
+		if transport == nil {
+			transport = &http.Transport{}
+		}
+		tr := transport.Clone()
+		if tr.TLSClientConfig == nil {
+			tr.TLSClientConfig = &tls.Config{}
+		}
+		tr.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec // explicit opt-in via env
+		config.HTTPClient.Transport = tr
 	}
 	return &CASAuthenticator{config: config}, nil
 }
@@ -220,7 +239,7 @@ type casServiceResponse struct {
 		} `xml:"attributes"`
 	} `xml:"authenticationSuccess"`
 	Failure struct {
-		Code    string `xml:"code"`
+		Code    string `xml:"code,attr"`
 		Message string `xml:",chardata"`
 	} `xml:"authenticationFailure"`
 }
