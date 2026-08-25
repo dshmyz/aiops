@@ -431,7 +431,7 @@ export async function setAgentEnabled(enabled: boolean): Promise<{ agent_enabled
   return request(`/v1/system/agent/${enabled ? 'enable' : 'disable'}`, { method: 'POST' });
 }
 
-export async function setAgentTrustLevel(level: 'readonly' | 'confirm' | 'auto'): Promise<{ trust_level: string }> {
+export async function setAgentTrustLevel(level: 'readonly' | 'confirm'): Promise<{ trust_level: string }> {
   return request('/v1/system/agent/trust-level', {
     method: 'POST',
     body: JSON.stringify({ level }),

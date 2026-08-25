@@ -15,15 +15,6 @@ func envWith(overrides map[string]string) map[string]string {
 	return base
 }
 
-func loadRegistry(t *testing.T, env map[string]string) *ModelsConfig {
-	t.Helper()
-	reg, err := LoadModelRegistry(env)
-	if err != nil {
-		t.Fatalf("LoadModelRegistry: %v", err)
-	}
-	return reg
-}
-
 // 仅配置主模型：planner 生效，其余可回退角色（intent/tool/formatter/compactor）
 // 都回退到 planner，reasoning/fallback 未配置返回不可用。
 func TestLoadModelRegistry_PlannerOnly(t *testing.T) {

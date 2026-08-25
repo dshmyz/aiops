@@ -3203,7 +3203,7 @@ func (r *Router) serveAgentMetrics(writer http.ResponseWriter, request *http.Req
 }
 
 // serveAgentTrustLevel 处理 POST /v1/system/agent/trust-level。
-// body: {"level": "readonly"|"confirm"|"auto"}，仅 admin。
+// body: {"level": "readonly"|"confirm"}，仅 admin。
 func (r *Router) serveAgentTrustLevel(writer http.ResponseWriter, request *http.Request) {
 	user, _, ok := r.authenticate(writer, request)
 	if !ok {
@@ -3223,9 +3223,9 @@ func (r *Router) serveAgentTrustLevel(writer http.ResponseWriter, request *http.
 	}
 	level := assistant.TrustLevel(strings.ToLower(strings.TrimSpace(body.Level)))
 	switch level {
-	case assistant.TrustReadonly, assistant.TrustConfirm, assistant.TrustAuto:
+	case assistant.TrustReadonly, assistant.TrustConfirm:
 	default:
-		writeError(writer, http.StatusBadRequest, "level must be readonly, confirm, or auto")
+		writeError(writer, http.StatusBadRequest, "level must be readonly or confirm")
 		return
 	}
 	assistant.SetTrustLevel(level)

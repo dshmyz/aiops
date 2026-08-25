@@ -29,7 +29,7 @@ type EinoPlanner struct {
 	capabilityCatalog string            // 动态能力目录，追加到 system prompt
 }
 
-// ChatModel 返回底层的 chat model，用于创建 LLMParamExtractor 等。
+// ChatModel 返回底层的 chat model，供外部复用同一模型实例（如能力导入增强器）。
 func (p *EinoPlanner) ChatModel() model.BaseChatModel {
 	return p.chat
 }
@@ -64,18 +64,6 @@ func NewEinoPlannerWithIntent(chat, intentChat model.BaseChatModel) *EinoPlanner
 		chat:       chat,
 		intentChat: intentChat,
 		parser:     schema.NewMessageJSONParser[einoIntent](nil),
-	}
-}
-
-// NewEinoPlannerWithPromptSource creates an EinoPlanner whose system prompt is
-// dynamically resolved via the provided function. This enables hot-reload from
-// a prompt.Registry: each Plan/PlanStream call invokes promptFn() to get the
-// latest prompt text without restarting the service.
-func NewEinoPlannerWithPromptSource(chat model.BaseChatModel, promptFn func() string) *EinoPlanner {
-	return &EinoPlanner{
-		chat:         chat,
-		parser:       schema.NewMessageJSONParser[einoIntent](nil),
-		systemPrompt: promptFn,
 	}
 }
 

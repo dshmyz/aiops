@@ -35,13 +35,6 @@ type Verifier interface {
 	Verify(ctx context.Context, plan store.PlanRecord, input map[string]any) (*VerificationResult, error)
 }
 
-// VerifyFunc adapts a function to the Verifier interface for tests.
-type VerifyFunc func(ctx context.Context, plan store.PlanRecord, input map[string]any) (*VerificationResult, error)
-
-func (f VerifyFunc) Verify(ctx context.Context, plan store.PlanRecord, input map[string]any) (*VerificationResult, error) {
-	return f(ctx, plan, input)
-}
-
 // runVerifier invokes the verifier with a timeout derived from the capability
 // verify spec. A verifier error or timeout does not fail the execution; the
 // failure is recorded on the returned VerificationResult instead.

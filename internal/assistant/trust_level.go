@@ -14,8 +14,6 @@ const (
 	TrustReadonly TrustLevel = "readonly"
 	// TrustConfirm：可写但必须人工确认（默认）。
 	TrustConfirm TrustLevel = "confirm"
-	// TrustAuto：低风险写操作自动执行。
-	TrustAuto TrustLevel = "auto"
 )
 
 // trustLevel 当前信任等级（原子读写，支持运行时调整）。
@@ -29,10 +27,10 @@ func init() {
 	}
 }
 
-// SetTrustLevel 设置信任等级（readonly/confirm/auto）。
+// SetTrustLevel 设置信任等级（readonly/confirm）。未知值回落 confirm。
 func SetTrustLevel(level TrustLevel) {
 	switch level {
-	case TrustReadonly, TrustConfirm, TrustAuto:
+	case TrustReadonly, TrustConfirm:
 		trustLevel.Store(level)
 	default:
 		trustLevel.Store(TrustConfirm)
@@ -47,9 +45,4 @@ func GetTrustLevel() TrustLevel {
 // AllowWrite 判断当前信任等级是否允许写操作。
 func AllowWrite() bool {
 	return GetTrustLevel() != TrustReadonly
-}
-
-// AllowAutoWrite 判断是否允许低风险写自动执行。
-func AllowAutoWrite() bool {
-	return GetTrustLevel() == TrustAuto
 }

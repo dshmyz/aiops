@@ -16,12 +16,6 @@ var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sq
 
 const defaultSQLiteDSN = "file:copilot-local.db?cache=shared&_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL"
 
-// Open creates a MySQL database handle. Callers own the returned handle and
-// must close it when the service stops.
-func Open(dsn string) (*sql.DB, error) {
-	return OpenWithDriver("mysql", dsn)
-}
-
 // OpenWithDriver creates a SQL database handle for the configured runtime
 // store. The default remains MySQL; SQLite is intended for local development
 // and deterministic tests.

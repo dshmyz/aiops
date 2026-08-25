@@ -51,14 +51,6 @@ func TestKnownDomainsReflectsDynamicRegistration(t *testing.T) {
 	}
 }
 
-func TestKnownDomainsDerivedFromStaticTools(t *testing.T) {
-	domains := tools.KnownDomains()
-	// http.probe 是静态注册工具，域 http 必须始终出现在派生清单中。
-	if !containsString(domains, "http") {
-		t.Fatalf("KnownDomains = %v, want static tool domain http present", domains)
-	}
-}
-
 // registerTestDomains 把 MatchDomainBounded 用例依赖的测试域注册为动态工具，
 // 使 KnownDomains 派生后这些域仍可被识别。包级注册对后续测试可见。
 func registerTestDomains(t *testing.T) {

@@ -117,8 +117,3 @@ func (h *HealthChecker) recordResult(ctx context.Context, ep HealthEndpoint, sta
 	}
 	_ = h.store.Save(ctx, fmt.Sprintf("巡检: %s", ep.Name), ep.Domain, []string{"http.probe"}, findings, "")
 }
-
-// GetEndpoints 返回所有注册的端点。
-func (h *HealthChecker) GetEndpoints() []HealthEndpoint {
-	return h.endpoints
-}

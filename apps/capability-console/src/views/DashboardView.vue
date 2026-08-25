@@ -36,7 +36,7 @@ const agentMetrics = ref<AgentMetrics | null>(null);
 const agentMetricsError = ref('');
 const agentActionLoading = ref(false);
 const agentNotice = ref('');
-const trustLevel = ref<'readonly' | 'confirm' | 'auto'>('confirm');
+const trustLevel = ref<'readonly' | 'confirm'>('confirm');
 
 // 统计卡片 → 目标视图映射，供模板绑定（@click 时 emit navigate）。
 const statTargets: Record<string, string> = {
@@ -81,7 +81,7 @@ async function handleToggleAgent() {
   }
 }
 
-async function handleTrustLevel(level: 'readonly' | 'confirm' | 'auto') {
+async function handleTrustLevel(level: 'readonly' | 'confirm') {
   agentActionLoading.value = true;
   agentNotice.value = '';
   try {
@@ -211,7 +211,7 @@ onMounted(() => {
           <div class="trust-level-group" role="radiogroup" aria-label="信任等级">
             <span class="agent-status-label">信任等级</span>
             <button
-              v-for="level in (['readonly', 'confirm', 'auto'] as const)"
+              v-for="level in (['readonly', 'confirm'] as const)"
               :key="level"
               type="button"
               class="mini-button trust-button"
@@ -219,7 +219,7 @@ onMounted(() => {
               :disabled="agentActionLoading"
               @click="handleTrustLevel(level)"
             >
-              {{ { readonly: '只读', confirm: '需确认', auto: '自动' }[level] }}
+              {{ { readonly: '只读', confirm: '需确认' }[level] }}
             </button>
           </div>
         </div>

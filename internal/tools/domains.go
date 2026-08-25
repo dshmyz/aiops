@@ -55,20 +55,6 @@ func FindDomainReadTool(domain string) (Tool, bool) {
 	return Tool{}, false
 }
 
-// FindDomainWriteTool 返回某域已注册的写工具，未注册该域时 ok=false。
-// 用于推荐逻辑：把一个域的读诊断结果映射为可执行的修复工具。
-func FindDomainWriteTool(domain string) (Tool, bool) {
-	if strings.TrimSpace(domain) == "" {
-		return Tool{}, false
-	}
-	for _, tool := range All() {
-		if tool.Domain == domain && tool.Operation == Write {
-			return tool, true
-		}
-	}
-	return Tool{}, false
-}
-
 // ResourceTypeForDomain 返回某域已注册工具的资源类型。同一域可能注册多个
 // 工具，取第一个读工具的资源类型；未注册该域时返回空字符串。
 func ResourceTypeForDomain(domain string) string {

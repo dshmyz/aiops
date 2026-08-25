@@ -1,7 +1,7 @@
 // Package observability wires OpenTelemetry tracing for the copilot backend.
 // It exposes a single InitTracer entry point (stdout by default, OTLP when
 // configured) and an HTTP server middleware that creates a root span per
-// request. Business-layer instrumentation uses the package-level Tracer().
+// request.
 package observability
 
 import (
@@ -16,7 +16,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // noopSpanExporter 丢弃所有 span（OTLP 未配置时的默认行为，避免 stdout 被 span JSON 刷屏）。
@@ -89,10 +88,4 @@ func buildExporter(ctx context.Context, cfg Config) (sdktrace.SpanExporter, erro
 	default:
 		return nil, fmt.Errorf("unknown exporter: %s", cfg.Exporter)
 	}
-}
-
-// Tracer returns the shared application tracer. Business layers call this to
-// create child spans (e.g. assistant.HandleMessage, execution.ExecuteRead).
-func Tracer() trace.Tracer {
-	return otel.Tracer(tracerName)
 }

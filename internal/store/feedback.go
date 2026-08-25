@@ -141,53 +141,6 @@ func normalizePagination(limit, offset int) (int, int) {
 	return limit, offset
 }
 
-// NewMemoryFeedbackStore returns an in-memory FeedbackStore for tests.
-func NewMemoryFeedbackStore() *MemoryFeedbackStore {
-	return &MemoryFeedbackStore{}
-}
-
-// MemoryFeedbackStore is a thread-unsafe in-memory implementation of
-// FeedbackStore intended for unit tests.
-type MemoryFeedbackStore struct {
-	feedback []Feedback
-}
-
-func (m *MemoryFeedbackStore) CreateFeedback(_ context.Context, feedback Feedback) (Feedback, error) {
-	if feedback.ID == "" {
-		feedback.ID = uuid.New().String()
-	}
-	if feedback.CreatedAt.IsZero() {
-		feedback.CreatedAt = time.Now().UTC()
-	}
-	m.feedback = append(m.feedback, feedback)
-	return feedback, nil
-}
-
-func (m *MemoryFeedbackStore) ListFeedback(_ context.Context, filter FeedbackFilter) (FeedbackPage, error) {
-	page := FeedbackPage{Limit: filter.Limit, Offset: filter.Offset}
-	limit, offset := normalizePagination(filter.Limit, filter.Offset)
-	for _, f := range m.feedback {
-		if filter.Subject != "" && f.Subject != filter.Subject {
-			continue
-		}
-		if filter.ConversationID != "" && f.ConversationID != filter.ConversationID {
-			continue
-		}
-		page.Items = append(page.Items, f)
-	}
-	page.Total = len(page.Items)
-	if offset > page.Total {
-		return FeedbackPage{Limit: limit, Offset: offset, Total: page.Total}, nil
-	}
-	end := offset + limit
-	if end > page.Total {
-		end = page.Total
-	}
-	page.Items = page.Items[offset:end]
-	return page, nil
-}
-
 var (
-	_ FeedbackStore = (*MemoryFeedbackStore)(nil)
 	_ FeedbackStore = (*SQLFeedbackStore)(nil)
 )
