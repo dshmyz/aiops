@@ -1,8 +1,14 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { ElButton, ElMessage, ElMessageBox } from 'element-plus';
 import type { UseCapabilities } from '../../composables/useCapabilities';
 
 const props = defineProps<{ capabilities: UseCapabilities }>();
+
+// 当前过滤结果中可发布的数量（用于批量按钮的禁用态与数量提示）。
+const publishableCount = computed(
+  () => props.capabilities.filteredCapabilities.value.filter((c) => props.capabilities.isPublishable(c)).length,
+);
 
 async function handlePublishAll() {
   const result = await props.capabilities.publishAll();
@@ -114,9 +120,9 @@ function escapeHtml(value: string): string {
 
       <!-- 批量操作栏 -->
       <div class="batch-actions">
-        <span>已选 {{ capabilities.filteredCapabilities.value.filter(c => capabilities.isPublishable(c)).length }} 个可发布</span>
-        <el-button size="small" type="primary" :disabled="capabilities.filteredCapabilities.value.filter(c => capabilities.isPublishable(c)).length === 0" @click="handlePublishAll">
-          一键发布全部可发布
+        <span>已选 {{ publishableCount }} 个可发布</span>
+        <el-button size="small" type="primary" :disabled="publishableCount === 0" @click="handlePublishAll">
+          一键发布全部可发布{{ publishableCount > 0 ? `（${publishableCount} 个）` : '' }}
         </el-button>
       </div>
 

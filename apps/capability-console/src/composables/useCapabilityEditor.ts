@@ -12,7 +12,7 @@ import type {
   NormalizedResult,
   ValidationResult,
 } from '../types';
-import { toCapability, upsert } from '../capabilityFormat';
+import { capabilityKey, toCapability, upsert } from '../capabilityFormat';
 import { hasStaticToolConflict as hasStaticToolConflictName } from '../capability';
 import type { ManagementPhase } from './useCapabilities';
 
@@ -239,6 +239,12 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
   }
 
   function selectCapability(capability: ManagedCapability) {
+    // 能力切换的唯一入口（列表点击 / 导入 / 发布 / 下架 / 刷新自动选中都经过这里）。
+    // 切到另一个能力时重置测试参数，避免上一个能力的参数残留导致误测；
+    // 同一能力重新选中（如保存后重选）则保留用户已填的测试输入。
+    if (capabilityKey(capability) !== capabilityKey(selected.value)) {
+      testInputText.value = '{"environment":"prod"}';
+    }
     selected.value = normalizeCapability(JSON.parse(JSON.stringify(capability)) as Partial<ManagedCapability>);
     validation.value = selected.value.validation;
     preview.value = null;

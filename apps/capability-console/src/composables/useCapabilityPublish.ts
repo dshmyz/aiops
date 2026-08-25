@@ -177,16 +177,25 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
       return undefined;
     }
     let success = 0;
+    let firstPublished: ManagedCapability | undefined;
     const failures: { name: string; reason: string }[] = [];
     for (const item of publishable) {
       try {
-        await publishCapability(item.name);
+        const published = await publishCapability(item.name);
         success++;
+        firstPublished = firstPublished ?? published;
       } catch (err) {
         failures.push({ name: item.name, reason: err instanceof Error ? err.message : '发布失败' });
       }
     }
     await onRefresh();
+    // 与单条发布一致：有成功项时选中第一个发布的能力并切到 AI 试问阶段，
+    // 让用户立刻验证；全部失败则留在当前页便于查看明细。
+    if (success > 0 && firstPublished) {
+      const fresh = capabilities.value.find((item) => item.source === 'published' && item.name === firstPublished!.name) ?? firstPublished;
+      onSelect(fresh);
+      managementPhase.value = 'ai';
+    }
     return { success, failed: failures.length, total: publishable.length, failures };
   }
 
