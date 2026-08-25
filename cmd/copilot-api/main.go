@@ -415,6 +415,17 @@ func main() {
 	// concurrent sub-diagnostics and merged into a single package. The
 	// assistant service injects the user message into the diagnostic context;
 	// the orchestrator reads it to decide whether to orchestrate or delegate.
+	// runbooks.yaml 增量注册诊断模板：显式指定 COPILOT_RUNBOOKS_CONFIG 时读取，
+	// 同名覆盖内建项、新名追加（"不改代码加模板"）。文件缺失/损坏返回错误，
+	// 不静默吞掉——与 models.yaml 的显式失败原则一致。
+	if rbPath := strings.TrimSpace(os.Getenv("COPILOT_RUNBOOKS_CONFIG")); rbPath != "" {
+		if names, err := diagnostics.RegisterRunbooksFromYAML(rbPath); err != nil {
+			logger.Error("load runbooks config", zap.Error(err))
+			os.Exit(1)
+		} else if len(names) > 0 {
+			logger.Info("runbooks.yaml registered", zap.Strings("runbooks", names))
+		}
+	}
 	diagService := diagnostics.NewService(readService, nil).WithCapabilityResolver(diagnostics.NewCapabilityResolver(loadedCapabilities))
         // LLM 可用时诊断建议走 Hybrid 生成器（LLM 撰写 summary/rationale，失败回退
         // 确定性模板）；未配置 LLM 时维持模板生成。候选修复工具始终由注册表派生。
