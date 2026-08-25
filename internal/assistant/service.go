@@ -405,6 +405,9 @@ func (s *Service) HandleMessage(ctx context.Context, user identity.CurrentUser, 
 	}
 	response, err := s.handleStatelessWithHistory(ctx, user, message, history, pageContext)
 	if err != nil {
+		// 把失败的工具调用落进时间线（用户消息 + 错误 turn），刷新/换会话后
+		// 仍能看到"调用了什么、为何失败"，而不是只有一条无历史的会话。
+		s.persistFailedTurn(ctx, conv.ID, message, err)
 		return Response{}, err
 	}
 	assistantTurnID, err := s.persistTurns(ctx, conv.ID, message, response)
@@ -1528,6 +1531,26 @@ func (s *Service) persistTurns(ctx context.Context, conversationID, userMessage 
 		return "", err
 	}
 	return assistantTurn.ID, nil
+}
+
+// persistFailedTurn 把一次失败的工具调用落进会话时间线（用户消息 + 错误助手 turn），
+// 让"调用了什么、为何失败"在回放/刷新后仍可见。客户端校验（ErrInvalidRequest）与
+// 跨会话归属（ErrForeignConversation）不属于工具调用失败，跳过不记。
+func (s *Service) persistFailedTurn(ctx context.Context, conversationID, userMessage string, err error) {
+	if s.conversations == nil || !shouldPersistFailure(err) {
+		return
+	}
+	failed := Response{Type: "error", Message: err.Error(), Summary: err.Error()}
+	_, perr := s.persistTurns(ctx, conversationID, userMessage, failed)
+	if perr != nil {
+		return
+	}
+}
+
+func shouldPersistFailure(err error) bool {
+	return !errors.Is(err, diagnostics.ErrInvalidRequest) &&
+		!errors.Is(err, ErrForeignConversation) &&
+		!errors.Is(err, ErrClarificationNeeded)
 }
 
 func (s *Service) now() time.Time {

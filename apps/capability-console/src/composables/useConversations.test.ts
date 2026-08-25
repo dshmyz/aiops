@@ -190,4 +190,38 @@ describe('useConversations refreshTurns 保留瞬时过程内容', () => {
     expect(assistantTurn.thinking).toBeUndefined();
     expect(assistantTurn.steps).toBeUndefined();
   });
+
+  test('持久化的 error turn（response_type=error）回放时还原为错误气泡', async () => {
+    const { getConversation } = await import('../api');
+    const viGet = vi.mocked(getConversation);
+
+    const { conversationTurns, refreshTurns } = useConversations();
+
+    viGet.mockResolvedValueOnce({
+      id: 'conv-1',
+      subject: 't',
+      title: 't',
+      last_message_preview: '',
+      created_at: '2026-08-16T00:00:00Z',
+      last_active_at: '2026-08-16T00:00:00Z',
+      turns: [
+        // 后端持久化的失败 turn：response_type=error，content 是错误文案。
+        Object.assign(turn('a-err', 'assistant', 'Get http://x: connection refused'), {
+          response_type: 'error',
+          response_payload: { type: 'error', message: 'Get http://x: connection refused' },
+        }),
+        turn('u1', 'user', '查一下'),
+      ],
+      next_turn_cursor: null,
+    });
+
+    await refreshTurns('conv-1');
+
+    const [userTurn, errTurn] = conversationTurns.value;
+    expect(userTurn.id).toBe('u1');
+    expect(userTurn.error).toBeFalsy();
+    expect(errTurn.id).toBe('a-err');
+    expect(errTurn.error).toBe(true);
+    expect(errTurn.content).toContain('connection refused');
+  });
 });

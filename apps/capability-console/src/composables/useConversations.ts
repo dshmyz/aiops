@@ -92,8 +92,15 @@ function hydrateProcess(turn: ConversationTurn): ConversationTurn {
   return next;
 }
 
+// hydrateError 把后端持久化的失败 turn（response_type="error"）还原为错误气泡，
+// 保证刷新/换会话后失败的调用仍以错误样式出现在时间线里。
+function hydrateError(turn: ConversationTurn): ConversationTurn {
+  if (turn.error || turn.response_type !== 'error') return turn;
+  return { ...turn, error: true };
+}
+
 function hydrateTurns(turns: ConversationTurn[]): ConversationTurn[] {
-  return turns.map(hydrateProcess);
+  return turns.map((t) => hydrateError(hydrateProcess(t)));
 }
 
 export type ArchivedView = 'active' | 'archived';

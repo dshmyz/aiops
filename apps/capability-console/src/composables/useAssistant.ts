@@ -231,8 +231,9 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     // 发送新消息时清除未决审批（旧计划卡片不应横在新请求之上）
     assistantInlinePlan.value = null;
     assistantInlineError.value = '';
-    // 清理历史错误 turn，保持对话干净（用户可去审计记录回看历史错误）
-    conversationTurns.value = conversationTurns.value.filter((t) => !t.error);
+    // 发送新消息时只清理本次会话的瞬时错误气泡（local-* id），保留后端已持久化的
+    // 失败 turn——它们是会话历史，刷新后仍应可见（用户无需再翻审计记录）。
+    conversationTurns.value = conversationTurns.value.filter((t) => !t.error || t.id.startsWith('local-'));
     assistantMessages.value.push({ role: 'user', text: message });
     const conversationID = activeConversationID.value ?? undefined;
     // Optimistically append a user turn to the transcript so the UI feels

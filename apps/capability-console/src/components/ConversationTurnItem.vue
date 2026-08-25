@@ -601,6 +601,11 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
   color: var(--color-accent);
 }
 
+.conversation-turn-badge.variant-error {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
 .conversation-turn-badge.variant-default {
   background: var(--color-bg-hover);
   color: var(--color-text-secondary);
