@@ -163,9 +163,46 @@ func TestFailureFeedbackUsesControlBudget(t *testing.T) {
 	if run.Reason != TerminalControlExhausted {
 		t.Fatalf("Reason = %v, want TerminalControlExhausted (2 failures used 2 control steps)", run.Reason)
 	}
-	// 0 exec steps executed — failures burned the control budget first.
-	if len(run.Steps) != 0 {
-		t.Fatalf("Steps = %d, want 0", len(run.Steps))
+	// 失败的尝试也被记录为 step（tool.a、tool.b），tool.c 未执行即因控制预算耗尽终止。
+	if len(run.Steps) != 2 {
+		t.Fatalf("Steps = %d, want 2 (failed attempts recorded)", len(run.Steps))
+	}
+	for _, step := range run.Steps {
+		if step.Err == "" {
+			t.Fatalf("failed step %q has empty Err", step.Tool)
+		}
+	}
+}
+
+// TestFailedStepRecordedAndRetryAllowed 验证失败步进 run.Steps（带 Err）但不标
+// seen——同一工具失败后可被再次调用并成功。
+func TestFailedStepRecordedAndRetryAllowed(t *testing.T) {
+	t.Parallel()
+	p := &fakePlanner{intents: []Intent{
+		{ToolName: "tool.a", Input: map[string]any{"k": "1"}},
+		{ToolName: "tool.a", Input: map[string]any{"k": "1"}},
+	}}
+	e := &fakeExecutor{
+		errs:     []error{errors.New("transient failure")},
+		outcomes: []StepOutcome{{Tool: "tool.a", Summary: "ok"}},
+	}
+	loop := newFakeLoop(p, e, 8, 6)
+
+	run := loop.Run(context.Background(), identity.CurrentUser{}, "test", nil, PageContext{})
+	if len(run.Steps) != 2 {
+		t.Fatalf("Steps = %d, want 2 (failed attempt + retry success)", len(run.Steps))
+	}
+	if run.Steps[0].Err == "" {
+		t.Fatal("first step Err empty, want the transient failure")
+	}
+	if run.Steps[0].Kind != StepAdvisory || run.Steps[0].StepIndex != 0 {
+		t.Fatalf("failed step = %+v, want advisory at step_index 0", run.Steps[0])
+	}
+	if run.Steps[1].Err != "" {
+		t.Fatalf("second step Err = %q, want success after retry", run.Steps[1].Err)
+	}
+	if run.Steps[1].Summary != "ok" {
+		t.Fatalf("second step Summary = %q, want ok", run.Steps[1].Summary)
 	}
 }
 

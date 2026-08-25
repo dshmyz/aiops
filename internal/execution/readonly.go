@@ -35,7 +35,8 @@ func WithAgentStep(ctx context.Context, step AgentStep) context.Context {
 	return context.WithValue(ctx, agentStepCtxKey{}, step)
 }
 
-func agentStepFromContext(ctx context.Context) (AgentStep, bool) {
+// AgentStepFromContext returns the agent-loop step identity carried by ctx.
+func AgentStepFromContext(ctx context.Context) (AgentStep, bool) {
 	step, ok := ctx.Value(agentStepCtxKey{}).(AgentStep)
 	return step, ok
 }
@@ -183,7 +184,7 @@ func (s *ReadOnlyService) record(ctx context.Context, user identity.CurrentUser,
 		metadata = map[string]any{}
 	}
 	// Attribute in-loop tool invocations to their agent step for audit.
-	if step, ok := agentStepFromContext(ctx); ok {
+	if step, ok := AgentStepFromContext(ctx); ok {
 		if step.Conversation != "" {
 			metadata["conversation_turn_id"] = step.Conversation
 		}

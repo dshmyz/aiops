@@ -57,6 +57,11 @@ type StepOutcome struct {
 	// the assistant Turn fed back to the LLM so it can decide the next step.
 	Summary string `json:"summary,omitempty"`
 
+	// Err holds the raw failure text when the step was denied or failed. Empty
+	// for successful steps. Persisted into the tool_step payload so denied and
+	// failed tool calls stay visible in the frontend timeline and audit.
+	Err string `json:"error,omitempty"`
+
 	// Executive (handoff) fields — mirrors a confirmation_required Response so
 	// the wiring can emit it directly to the operator.
 	PlanID            string          `json:"plan_id,omitempty"`
@@ -377,6 +382,23 @@ func (l *AgentLoop) executeAndEvaluate(run *AgentRun, intent Intent, budget *ste
 	step := budget.exec
 	out, execErr := l.execute(intent, step)
 	if execErr != nil {
+		// Persist the failed attempt as an advisory step so denied/failed tool
+		// calls stay visible in the timeline; it carries the raw error and input.
+		// It does not consume the exec budget, mark `seen`, or feed feedbackTurn
+		// — retry and dedup semantics are unchanged from before.
+		failed := StepOutcome{
+			Intent:    intent,
+			Kind:      StepAdvisory,
+			StepIndex: step,
+			Tool:      intent.ToolName,
+			Input:     intent.Input,
+			Err:       execErr.Error(),
+			Summary:   "工具执行失败：" + execErr.Error(),
+		}
+		if intent.Diagnostic != nil {
+			failed.Tool = intent.Diagnostic.Domain
+		}
+		run.Steps = append(run.Steps, failed)
 		(*consecutiveFailures)++
 		if *consecutiveFailures >= maxAgentFailures {
 			run.Reason = TerminalMaxSteps

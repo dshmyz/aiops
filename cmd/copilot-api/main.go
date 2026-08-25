@@ -257,6 +257,7 @@ func main() {
 	logger.Info("assistant planner mode", zap.String("mode", plannerMode))
 	conversationStore := store.NewSQLAssistantConversationStore(db)
 	assistantService := assistant.NewServiceWithCompactor(planner, readService, planService, conversationStore, compactor)
+	assistantService = assistantService.WithAuditService(auditService)
 	// 知识库：存储诊断经验，支持历史案例检索
 	var diagKnowledgeStore *assistant.KnowledgeStore
 	if db != nil {

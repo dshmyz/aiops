@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/autonomy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/execution"
@@ -70,6 +71,9 @@ type Service struct {
 	conversations store.AssistantConversationStore
 	compactor     Compactor
 	clock         func() time.Time
+	// audit 记录 agent 循环内策略拒绝事件（读/写路径提前 return 时，走不到
+	// ReadOnlyService 内部审计）。为 nil 时跳过记录，不阻塞调用。
+	audit *audit.Service
 	// toolCallEmitter is called before and after each tool invocation during
 	// executeFromIntent. It is nil for non-streaming callers (HandleMessage)
 	// and wired by HandleMessageStream to forward events to the SSE channel.
@@ -212,6 +216,13 @@ func (s *Service) WithRunbookRouter(r *RunbookRouter) *Service {
 // Runbook 退化为 confirmation_required。
 func (s *Service) WithExecutionRunner(e ExecutionRunner) *Service {
 	s.execution = e
+	return s
+}
+
+// WithAuditService wires 审计服务，用于记录 agent 循环内策略拒绝事件。为 nil
+// 时跳过审计，不阻塞调用。
+func (s *Service) WithAuditService(a *audit.Service) *Service {
+	s.audit = a
 	return s
 }
 
@@ -925,18 +936,26 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 			return Response{}, errors.New("diagnostic service is required")
 		}
 		toolName := resolveDiagnosticToolName(s.diagnostics, *intent.Diagnostic)
+		diagRequest := *intent.Diagnostic
+		// 参数卫生防线：先对用户原始输入做长度/必填校验，再应用默认环境规约。
+		// 顺序必须如此——DefaultEnvironmentValue 会把不被允许甚至超长的环境值
+		// 规约为允许值中的第一个，提前调用会让 validateRequest 永远收不到原值。
+		if verr := diagnostics.ValidateRequestFields(diagRequest); verr != nil {
+			return Response{}, verr
+		}
+		diagRequest.Environment = policy.DefaultEnvironmentValue(user, diagRequest.Environment)
 		// Emit progress: tool_executing stage with the resolved tool name.
 		s.emitProgress(ProgressToolExecuting, toolName)
 		// Emit tool call start event for real-time SSE display
 		if s.toolCallEmitter != nil {
 			s.toolCallEmitter(ToolCallEvent{
 				Tool:  toolName,
-				Input: map[string]any{"domain": intent.Diagnostic.Domain, "environment": intent.Diagnostic.Environment},
+				Input: map[string]any{"domain": diagRequest.Domain, "environment": diagRequest.Environment},
 				Done:  false,
 			})
 		}
 		diagCtx, diagSpan := tracer().Start(ctx, "diagnostics.Run")
-		pkg, err := s.diagnostics.Run(diagCtx, user, *intent.Diagnostic)
+		pkg, err := s.diagnostics.Run(diagCtx, user, diagRequest)
 		diagSpan.End()
 		if err != nil {
 			if errors.Is(err, execution.ErrReadToolDenied) || errors.Is(err, execution.ErrWriteTool) {
@@ -948,7 +967,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		if s.toolCallEmitter != nil {
 			s.toolCallEmitter(ToolCallEvent{
 				Tool:  toolName,
-				Input: map[string]any{"domain": intent.Diagnostic.Domain, "environment": intent.Diagnostic.Environment},
+				Input: map[string]any{"domain": diagRequest.Domain, "environment": diagRequest.Environment},
 				Done:  true,
 			})
 		}
@@ -988,7 +1007,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		// 使 Summary 聚合时体现诊断结论而非只显示推荐读结果。
 		diagFact := ToolFact{
 			Tool:  toolName,
-			Input: map[string]any{"domain": intent.Diagnostic.Domain, "environment": intent.Diagnostic.Environment},
+			Input: map[string]any{"domain": diagRequest.Domain, "environment": diagRequest.Environment},
 			Result: map[string]any{
 				"summary":         diagSummary,
 				"environment":     pkg.Environment,
@@ -1002,10 +1021,18 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 	}
 	tool, ok := tools.Lookup(intent.ToolName)
 	if !ok {
+		s.recordDenied(ctx, user, intent.ToolName, policy.ToolNotRegistered)
 		return Response{}, fmt.Errorf("%w: %s", ErrPolicyDenied, policy.ToolNotRegistered)
 	}
-	decision := policy.Evaluate(user, tool, intent.Input)
+	// 读路径对 LLM 生成的 environment 兜底到用户首个允许环境，避免误伤；
+	// 写路径保持严格（environment 限定写身份）。
+	input := intent.Input
+	if tool.Operation == tools.Read {
+		input = policy.DefaultEnvironment(user, intent.Input)
+	}
+	decision := policy.Evaluate(user, tool, input)
 	if !decision.Allowed {
+		s.recordDenied(ctx, user, tool.Name, decision.Reason)
 		return Response{}, fmt.Errorf("%w: %s", ErrPolicyDenied, decision.Reason)
 	}
 	if tool.Operation == tools.Read {
@@ -1018,13 +1045,13 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		if s.toolCallEmitter != nil {
 			s.toolCallEmitter(ToolCallEvent{
 				Tool:  tool.Name,
-				Input: intent.Input,
+				Input: input,
 				Done:  false,
 			})
 		}
 		readCtx, readSpan := tracer().Start(ctx, "execute_read",
 			trace.WithAttributes(attribute.String("tool.name", tool.Name)))
-		answer, err := s.reads.ExecuteRead(readCtx, user, tool.Name, intent.Input)
+		answer, err := s.reads.ExecuteRead(readCtx, user, tool.Name, input)
 		readSpan.End()
 		if err != nil {
 			return Response{}, err
@@ -1033,7 +1060,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		if s.toolCallEmitter != nil {
 			s.toolCallEmitter(ToolCallEvent{
 				Tool:        tool.Name,
-				Input:       intent.Input,
+				Input:       input,
 				RawResponse: answer,
 				Done:        true,
 			})
@@ -1042,7 +1069,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 			Type:   "answer",
 			Tool:   tool.Name,
 			Answer: answer,
-			Trace:  buildAssistantTrace(intent, tool.Name, intent.Input, answer),
+			Trace:  buildAssistantTrace(intent, tool.Name, input, answer),
 		}, intent, formatDelta), nil
 	}
 	if s.plans == nil {

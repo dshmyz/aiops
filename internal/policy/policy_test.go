@@ -284,3 +284,46 @@ func validRetentionInput(environment string, hours int) map[string]any {
 		"retention_hours": hours,
 	}
 }
+
+func TestDefaultEnvironmentValue(t *testing.T) {
+	u := identity.CurrentUser{AllowedEnvironments: []string{"prod", "staging", "dev"}}
+	for _, test := range []struct {
+		name string
+		env  string
+		want string
+	}{
+		{name: "allowed kept", env: "staging", want: "staging"},
+		{name: "empty defaults to first", env: "", want: "prod"},
+		{name: "variant defaults to first", env: "production", want: "prod"},
+		{name: "unrelated defaults to first", env: "default", want: "prod"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := DefaultEnvironmentValue(u, test.env); got != test.want {
+				t.Fatalf("DefaultEnvironmentValue(%q) = %q, want %q", test.env, got, test.want)
+			}
+		})
+	}
+	empty := identity.CurrentUser{}
+	if got := DefaultEnvironmentValue(empty, "anything"); got != "anything" {
+		t.Fatalf("empty allowed list: got %q, want unchanged", got)
+	}
+}
+
+func TestDefaultEnvironment(t *testing.T) {
+	u := identity.CurrentUser{AllowedEnvironments: []string{"prod", "staging", "dev"}}
+	original := map[string]any{"environment": "production", "bucket": "archive"}
+	out := DefaultEnvironment(u, original)
+	if out["environment"] != "prod" {
+		t.Fatalf("defaulted environment = %v, want prod", out["environment"])
+	}
+	if out["bucket"] != "archive" {
+		t.Fatalf("other fields dropped: %v", out)
+	}
+	if original["environment"] != "production" {
+		t.Fatalf("original mutated: %v", original)
+	}
+	out2 := DefaultEnvironment(u, map[string]any{"environment": "staging"})
+	if out2["environment"] != "staging" {
+		t.Fatalf("allowed env not preserved: %v", out2["environment"])
+	}
+}

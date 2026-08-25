@@ -217,6 +217,20 @@ func (s *Service) validateRequest(request Request) (validatedRequest, error) {
 	}, nil
 }
 
+// ValidateRequestFields 校验诊断请求的字段卫生（环境必填 + 环境/资源名长度限制）。
+// 它的定位是"参数卫生防线"：执行编排器应在对环境做默认允许值规约之前、对用户
+// 原始输入调用它，避免降权逻辑（DefaultEnvironmentValue）把超长等非法值静默抹平。
+// 与 validateRequest 不同，它不解析 runbook/能力，只做纯字段检查。
+func ValidateRequestFields(request Request) error {
+	if _, err := validateRequestString("environment", request.Environment, true); err != nil {
+		return err
+	}
+	if _, err := validateRequestString("resource name", request.ResourceName, false); err != nil {
+		return err
+	}
+	return nil
+}
+
 func validateRequestString(field, value string, required bool) (string, error) {
 	value = strings.TrimSpace(value)
 	if required && value == "" {
@@ -319,12 +333,11 @@ func resolveRunbook(domain string) (string, string, error) {
 // 其他域按需选择 health/capacity。Each runbook still resolves to the domain's
 // read tool via resolveRunbookCapability/resolveRunbook.
 func validRunbook(runbook string) bool {
-	switch runbook {
-	case "", "health", "capacity", "consumer_lag":
+	if runbook == "" {
 		return true
-	default:
-		return false
 	}
+	_, ok := lookupRunbook(runbook)
+	return ok
 }
 
 // resolveRunbookCapability tries the capability resolver first. If it finds a

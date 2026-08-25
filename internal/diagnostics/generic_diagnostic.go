@@ -77,29 +77,12 @@ func (s *Service) genericDiagnostic(v validatedRequest, request Request) (Packag
 }
 
 // genericCheckpoints 返回某 runbook 的通用 SOP 检查维度清单（域无关）。
+// 维度由 runbook 注册表维护，缺失的 runbook 兜底为 health。
 // 域接入能力后，这些维度由真实工具覆盖；未接入时先按框架人工排查。
 func genericCheckpoints(runbook, domain string) []string {
-	switch runbook {
-	case "capacity":
-		return []string{
-			"当前用量与已用容量（按资源类型统计）",
-			"使用趋势（近 30 天，判断持续增长或偶发波动）",
-			"扩容阈值与触发条件（预留量是否足够）",
-			"闲置与浪费资源识别",
-		}
-	case "consumer_lag":
-		return []string{
-			"消费者组/副本滞后量（积压消息数）",
-			"消费速率 vs 生产速率（是否持续追不上）",
-			"滞后趋势（随时间收敛还是发散）",
-			"消费者实例健康与并发度",
-		}
-	default: // health
-		return []string{
-			"服务可达性与进程状态",
-			"核心资源指标（CPU/内存/磁盘/网络）",
-			"错误率与慢请求占比",
-			"近期变更与关联事件（发布/配置/扩容）",
-		}
+	t, ok := lookupRunbook(runbook)
+	if !ok {
+		t, _ = lookupRunbook("health")
 	}
+	return t.Checkpoints
 }

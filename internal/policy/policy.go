@@ -149,6 +149,38 @@ func deny(reason Reason) Decision {
 	return Decision{Reason: reason}
 }
 
+// DefaultEnvironmentValue returns env when it is non-empty and allowed for the
+// user; otherwise it returns the user's first allowed environment (or env
+// unchanged when the user has no allowed environments). It defaults LLM-generated
+// environment values on read paths so a stray variant cannot cause a spurious
+// EnvironmentDenied. Writes never pass through here — their environment is part
+// of a human-confirmed plan and stays strict.
+func DefaultEnvironmentValue(user identity.CurrentUser, env string) string {
+	if env != "" {
+		for _, allowed := range user.AllowedEnvironments {
+			if env == allowed {
+				return env
+			}
+		}
+	}
+	if len(user.AllowedEnvironments) == 0 {
+		return env
+	}
+	return user.AllowedEnvironments[0]
+}
+
+// DefaultEnvironment returns a copy of input with environment defaulted via
+// DefaultEnvironmentValue. The original map is never mutated.
+func DefaultEnvironment(user identity.CurrentUser, input map[string]any) map[string]any {
+	copied := make(map[string]any, len(input)+1)
+	for key, value := range input {
+		copied[key] = value
+	}
+	env, _ := input["environment"].(string)
+	copied["environment"] = DefaultEnvironmentValue(user, env)
+	return copied
+}
+
 func hasToolPermission(roles []string, toolName string) bool {
 	dynamicRolePermissionsMu.RLock()
 	defer dynamicRolePermissionsMu.RUnlock()
