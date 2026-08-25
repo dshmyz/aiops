@@ -72,12 +72,13 @@ describe('ReviewStage', () => {
   });
 
   test('渲染能力编辑器表单字段', () => {
-    const cap = makeCapability();
+    const cap = makeCapability({ ai: { description: '读取 MinIO bucket 容量', examples: [] } });
     const { wrapper } = mountReview({
       selected: ref(cap),
     } as never);
     expect(wrapper.find('[data-test="capability-name"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="backend-path"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="ai-description"]').exists()).toBe(true);
   });
 
   test('渲染测试与预览区块', () => {

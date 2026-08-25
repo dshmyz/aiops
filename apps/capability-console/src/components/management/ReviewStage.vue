@@ -176,6 +176,7 @@ async function handlePublishAll() {
             <label>资源类型<el-input v-model="capabilities.selected.value.resource_type" placeholder="bucket" /></label>
             <label>操作类型<el-select v-model="capabilities.selected.value.operation"><el-option label="读取" value="read" /><el-option label="写入" value="write" /></el-select></label>
             <label>风险等级<el-select v-model="capabilities.selected.value.risk"><el-option label="低" value="low" /><el-option label="中" value="medium" /><el-option label="高" value="high" /></el-select></label>
+            <label class="wide">AI 描述<el-input data-test="ai-description" v-model="capabilities.selected.value.ai.description" type="textarea" :rows="2" placeholder="描述该能力的作用，供 AI 判断何时调用" /></label>
           </div>
         </section>
         <section class="editor-group">
