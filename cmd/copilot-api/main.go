@@ -416,6 +416,11 @@ func main() {
 	// assistant service injects the user message into the diagnostic context;
 	// the orchestrator reads it to decide whether to orchestrate or delegate.
 	diagService := diagnostics.NewService(readService, nil).WithCapabilityResolver(diagnostics.NewCapabilityResolver(loadedCapabilities))
+        // LLM 可用时诊断建议走 Hybrid 生成器（LLM 撰写 summary/rationale，失败回退
+        // 确定性模板）；未配置 LLM 时维持模板生成。候选修复工具始终由注册表派生。
+        if chatModel != nil {
+                diagService = diagService.WithRecommendationGenerator(diagnostics.NewHybridRecommendationGenerator(chatModel))
+        }
 	assistantService = assistantService.WithDiagnostics(orchestrator.New(diagService, 3, nil))
 	notifier := buildNotifier()
 	// 构造能力存储：DB 可用时用 SQLCapabilityStore（多节点一致），否则退化为
