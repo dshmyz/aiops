@@ -23,6 +23,7 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/execution"
 	"github.com/gracegaoya/ai-operations-copilot/internal/httpapi"
+	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
 	"github.com/gracegaoya/ai-operations-copilot/internal/plans"
 	"github.com/gracegaoya/ai-operations-copilot/internal/policy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/store"
@@ -152,10 +153,8 @@ func TestAssistantFormatterProducesBlocks(t *testing.T) {
 func TestAssistantWriteMessageStoresPendingPlanInSQLite(t *testing.T) {
 	// 该契约（管理员写请求 → pending plan 落库 → 不暴露 token）原由
 	// CapabilityAwarePlanner 把 topic.retention.set 动态能力路由为写意图。
-	// 该 planner 已在 LLM function calling 重构中移除；当前写意图路由由
-	// AgentExecutor + LLM function calling 承担，e2e 无真实 LLM 无法驱动。
-	// 待接入真实 LLM 的契约测试后恢复，此处跳过避免 CI 红。
-	t.Skip("依赖已删除的 CapabilityAwarePlanner；写-落库契约改由 AgentExecutor 承担，需真实 LLM 驱动")
+	// 该 planner 已在 LLM function calling 重构中移除；writePlanner 直接产出
+	// 写意图，聚焦 HTTP + SQLite 落库链路本身（与 httpapi 层 writePlanner 同理）。
 	ensureMiddlewareTools(t)
 	db := openAssistantSQLite(t)
 	repository := store.NewSQLActionPlanStore(db)
@@ -167,7 +166,7 @@ func TestAssistantWriteMessageStoresPendingPlanInSQLite(t *testing.T) {
 	router := httpapi.NewRouter(
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		readService,
-		httpapi.WithAssistant(assistant.NewService(assistant.DeterministicPlanner{}, readService, planService, nil)),
+		httpapi.WithAssistant(assistant.NewService(writePlanner{}, readService, planService, nil)),
 		httpapi.WithActionPlans(repository),
 	)
 	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"把 prod 的 orders topic retention 改成 72 小时"}`))
@@ -317,6 +316,19 @@ func signToken(header, claims string) string {
 	mac := hmac.New(sha256.New, []byte("test-secret"))
 	_, _ = mac.Write([]byte(unsigned))
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// writePlanner 返回一个固定写意图（topic.retention.set），用于端到端验证
+// 管理员写请求 → pending plan 落库 → 响应不暴露 token 的持久化契约。确定性
+// planner 已不路由平台写意图（改由 LLM agent 循环承担），fake planner 直接
+// 产出写意图，绕开 planner 路由、聚焦 HTTP + SQLite 落库链路本身。
+type writePlanner struct{}
+
+func (writePlanner) Plan(context.Context, identity.CurrentUser, string, []assistant.Turn, assistant.PageContext) (assistant.Intent, error) {
+	return assistant.Intent{
+		ToolName: "topic.retention.set",
+		Input:    map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72},
+	}, nil
 }
 
 // einoMockChatModel is a minimal model.BaseChatModel implementation for E2E

@@ -613,19 +613,21 @@ func TestAssistantMessagesIncludesTraceForReadAnswer(t *testing.T) {
 	}
 }
 
-func SKIP_TestAssistantMessagesPreservesTraceInDevTokenResponse(t *testing.T) {
+func TestAssistantMessagesPreservesTraceInDevTokenResponse(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareTools(t)
 	repository := store.NewMemoryActionPlanStore()
 	auditService := audit.NewService(repository)
 	readService := execution.NewReadOnlyService(&readRunner{}, auditService)
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
 		return time.Date(2026, time.July, 21, 11, 0, 0, 0, time.UTC)
 	}))
-	assistantService := assistant.NewService(assistant.DeterministicPlanner{}, readService, planService, nil)
+	assistantService := assistant.NewService(writePlanner{}, readService, planService, nil)
 	router := httpapi.NewRouter(
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		readService,
 		httpapi.WithAssistant(assistantService),
+		httpapi.WithActionPlans(repository),
 		httpapi.WithDevelopmentConfirmationTokens(),
 	)
 	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"}, []string{"prod"})
@@ -761,9 +763,22 @@ func TestAssistantMessagesRejectsInvalidDiagnosticCandidatesBeforeRead(t *testin
 	}
 }
 
-func SKIP_TestAssistantMessagesViewerWriteDenied(t *testing.T) {
+func TestAssistantMessagesViewerWriteDenied(t *testing.T) {
 	t.Parallel()
-	router, _ := capabilityTestRouter(t, &readRunner{})
+	ensureMiddlewareTools(t)
+	repository := store.NewMemoryActionPlanStore()
+	auditService := audit.NewService(repository)
+	readService := execution.NewReadOnlyService(&readRunner{}, auditService)
+	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
+		return time.Date(2026, time.July, 21, 11, 0, 0, 0, time.UTC)
+	}))
+	assistantService := assistant.NewService(writePlanner{}, readService, planService, nil)
+	router := httpapi.NewRouter(
+		httpapi.NewHMACAuthenticator([]byte("test-secret")),
+		readService,
+		httpapi.WithAssistant(assistantService),
+		httpapi.WithActionPlans(repository),
+	)
 	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
 	res := httptest.NewRecorder()
 
@@ -774,9 +789,22 @@ func SKIP_TestAssistantMessagesViewerWriteDenied(t *testing.T) {
 	}
 }
 
-func SKIP_TestAssistantMessagesAdminWriteReturnsConfirmationWithoutToken(t *testing.T) {
+func TestAssistantMessagesAdminWriteReturnsConfirmationWithoutToken(t *testing.T) {
 	t.Parallel()
-	router, _ := capabilityTestRouter(t, &readRunner{})
+	ensureMiddlewareTools(t)
+	repository := store.NewMemoryActionPlanStore()
+	auditService := audit.NewService(repository)
+	readService := execution.NewReadOnlyService(&readRunner{}, auditService)
+	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
+		return time.Date(2026, time.July, 21, 11, 0, 0, 0, time.UTC)
+	}))
+	assistantService := assistant.NewService(writePlanner{}, readService, planService, nil)
+	router := httpapi.NewRouter(
+		httpapi.NewHMACAuthenticator([]byte("test-secret")),
+		readService,
+		httpapi.WithAssistant(assistantService),
+		httpapi.WithActionPlans(repository),
+	)
 	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"}, []string{"prod"})
 	res := httptest.NewRecorder()
 
@@ -794,19 +822,21 @@ func SKIP_TestAssistantMessagesAdminWriteReturnsConfirmationWithoutToken(t *test
 	}
 }
 
-func SKIP_TestAssistantMessagesCanExposeConfirmationTokenForDevelopment(t *testing.T) {
+func TestAssistantMessagesCanExposeConfirmationTokenForDevelopment(t *testing.T) {
 	t.Parallel()
+	ensureMiddlewareTools(t)
 	repository := store.NewMemoryActionPlanStore()
 	auditService := audit.NewService(repository)
 	readService := execution.NewReadOnlyService(&readRunner{}, auditService)
 	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
 		return time.Date(2026, time.July, 21, 11, 0, 0, 0, time.UTC)
 	}))
-	assistantService := assistant.NewService(assistant.DeterministicPlanner{}, readService, planService, nil)
+	assistantService := assistant.NewService(writePlanner{}, readService, planService, nil)
 	router := httpapi.NewRouter(
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		readService,
 		httpapi.WithAssistant(assistantService),
+		httpapi.WithActionPlans(repository),
 		httpapi.WithDevelopmentConfirmationTokens(),
 	)
 	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"}, []string{"prod"})
@@ -2955,6 +2985,24 @@ func (tracePlanner) Plan(context.Context, identity.CurrentUser, string, []assist
 			Selected:   tools.ClusterStatusRead,
 			Confidence: 0.9,
 			Reason:     "fixed planner for trace test",
+		},
+	}, nil
+}
+
+// writePlanner 返回一个固定写意图（topic.retention.set），用于验证写路径的
+// HTTP 响应契约（viewer 拒绝 / admin confirmation / dev token 暴露）。确定性
+// planner 已不路由平台写意图（改由 LLM agent 循环承担），fake planner 直接
+// 产出写意图，绕开 planner 路由、聚焦 HTTP 层安全契约本身。
+type writePlanner struct{}
+
+func (writePlanner) Plan(context.Context, identity.CurrentUser, string, []assistant.Turn, assistant.PageContext) (assistant.Intent, error) {
+	return assistant.Intent{
+		ToolName: "topic.retention.set",
+		Input:    retentionInput(),
+		Selection: &assistant.CapabilitySelection{
+			Selected:   "topic.retention.set",
+			Confidence: 0.95,
+			Reason:     "fixed planner for write contract test",
 		},
 	}, nil
 }
