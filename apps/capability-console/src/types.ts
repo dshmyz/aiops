@@ -385,7 +385,7 @@ export interface AssistantStep {
   tool: string;
   /** 零基步骤序号，用于消歧同一工具的多步调用 */
   step_index: number;
-  /** 状态：done（当前仅支持完成态，进行中态预留） */
+  /** 状态：done / running / failed（denied 归入 failed 展示），执行器路径可能传其他值 */
   status: string;
   /** 人类可读的结果摘要 */
   summary?: string;
@@ -393,6 +393,8 @@ export interface AssistantStep {
   input?: Record<string, unknown>;
   /** 工具原始返回结果 */
   output?: Record<string, unknown>;
+  /** 失败/被拒时的原始错误或策略拒绝原因 */
+  error?: string;
 }
 
 export interface ConversationTurn {
@@ -711,12 +713,14 @@ export interface MarketplaceDownload {
   yaml_hash: string;
 }
 
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
 export interface QuickPublishPayload {
   name: string;
   domain: string;
   resource_type: string;
   backend_base_url: string;
-  method: 'GET';
+  method: HttpMethod;
   path: string;
   description: string;
   summary_template?: string;

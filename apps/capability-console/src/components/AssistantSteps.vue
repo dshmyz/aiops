@@ -60,7 +60,7 @@ function toolLabel(step: AssistantStep, index: number): string {
 function stepStatusText(step: AssistantStep): string {
   if (step.status === 'done') return '已完成';
   if (step.status === 'running') return '执行中';
-  if (step.status === 'failed') return '失败';
+  if (step.status === 'failed') return isDenied(step) ? '已拒绝' : '失败';
   return step.status;
 }
 
@@ -68,6 +68,18 @@ function stepStatusVariant(step: AssistantStep): string {
   if (step.status === 'done') return 'done';
   if (step.status === 'failed') return 'failed';
   return 'running';
+}
+
+/** 被策略拒绝的失败步（status=failed 且错误/摘要含 denied）显示为"已拒绝" */
+function isDenied(step: AssistantStep): boolean {
+  const text = `${step.error ?? ''} ${step.summary ?? ''}`.toLowerCase();
+  return step.status === 'failed' && text.includes('denied');
+}
+
+function stepIconName(step: AssistantStep): string {
+  if (step.status === 'running') return 'waveform';
+  if (step.status === 'failed') return 'exclamationmark-triangle';
+  return 'checkmark-circle';
 }
 </script>
 
@@ -100,14 +112,14 @@ function stepStatusVariant(step: AssistantStep): string {
         :data-test="`assistant-step-item-${index}`"
       >
         <span class="step-item-icon">
-          <SfSymbol name="checkmark-circle" :size="16" />
+          <SfSymbol :name="stepIconName(step)" :size="16" />
         </span>
         <span class="step-item-body">
           <span class="step-item-head">
             <span class="step-item-tool">{{ toolLabel(step, index) }}</span>
             <span class="step-item-status">{{ stepStatusText(step) }}</span>
           </span>
-          <span v-if="step.summary" class="step-item-summary">{{ step.summary }}</span>
+          <span v-if="step.summary || step.error" class="step-item-summary">{{ step.error || step.summary }}</span>
           <span v-if="step.input && Object.keys(step.input).length" class="step-item-toggleable">
             <button type="button" class="step-detail-toggle" @click="toggleDetails(step.step_index, 'input')">
               <svg viewBox="0 0 24 24" width="10" height="10" class="step-detail-chevron" :class="{ open: isDetailsExpanded(step.step_index, 'input') }">

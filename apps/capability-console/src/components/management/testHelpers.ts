@@ -105,6 +105,7 @@ export function makeCapabilities(overrides: Partial<UseCapabilities> = {}): UseC
     loadCapabilities: () => Promise.resolve(),
     selectCapability: () => {},
     newDraft: () => {},
+    openManualCapability: () => {},
     saveSelectedDraft: () => Promise.resolve(),
     validateSelected: () => Promise.resolve(),
     testSelected: () => Promise.resolve(),

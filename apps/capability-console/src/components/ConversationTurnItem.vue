@@ -72,10 +72,11 @@ const persistedStep = computed<AssistantStep | null>(() => {
   return {
     tool: typeof payload.tool === 'string' ? payload.tool : '',
     step_index: typeof payload.step_index === 'number' ? payload.step_index : 0,
-    status: 'done',
+    status: typeof payload.status === 'string' ? payload.status : 'done',
     summary: typeof payload.summary === 'string' ? payload.summary : undefined,
     input: isRecord(payload.input) ? payload.input as Record<string, unknown> : undefined,
     output: isRecord(payload.result) ? payload.result as Record<string, unknown> : undefined,
+    error: typeof payload.error === 'string' ? payload.error : undefined,
   };
 });
 const hasSteps = computed(() =>

@@ -18,6 +18,7 @@ import {
   normalizeCapability,
   pathVariables,
 } from '../capability';
+import { buildAIPrompt, parseTestInput } from '../capabilityPrompt';
 import { createImportBatch, filterImportBatchItems, setImportItemIgnored } from '../importBatch';
 import {
   buildCommitSelections,
@@ -131,6 +132,8 @@ export interface UseCapabilities {
   loadCapabilities: () => Promise<void>;
   selectCapability: (capability: ManagedCapability) => void;
   newDraft: () => void;
+  /** 打开一个由手动构造（JSON/表单）生成的 Capability 草稿，进入评审发布阶段。 */
+  openManualCapability: (capability: Capability) => void;
   saveSelectedDraft: () => Promise<void>;
   validateSelected: () => Promise<void>;
   testSelected: () => Promise<void>;
@@ -496,6 +499,8 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
   async function loadCapabilities() {
     loading.value = true;
     error.value = '';
+    // 零能力（首次/未配置）时，把进入管理页默认落在「接入 API」引导用户，而不是空评审清单。
+    const wasEmpty = capabilities.value.length === 0;
     try {
       const result = await listCapabilities();
       capabilities.value = result.capabilities;
@@ -503,6 +508,8 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
       configured.value = result.configured;
       if (capabilities.value.length > 0) {
         selectCapability(capabilities.value[0]);
+      } else if (wasEmpty && managementPhase.value === 'review') {
+        managementPhase.value = 'source';
       }
     } catch (err) {
       error.value = err instanceof Error ? err.message : '加载 Capability 失败';
@@ -520,6 +527,15 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
 
   function newDraft() {
     selected.value = normalizeCapability({ ...emptyCapability(), source: 'discovered', validation: { valid: false } });
+    validation.value = { valid: false, error: '未校验' };
+    preview.value = null;
+    testInputText.value = '{"environment":"prod"}';
+    resetAIPreflight();
+    managementPhase.value = 'review';
+  }
+
+  function openManualCapability(capability: Capability) {
+    selected.value = normalizeCapability({ ...capability, source: 'discovered', validation: { valid: false } });
     validation.value = { valid: false, error: '未校验' };
     preview.value = null;
     testInputText.value = '{"environment":"prod"}';
@@ -964,58 +980,6 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     resetAIPreflight();
   }
 
-  function parseTestInput(text: string): Record<string, unknown> {
-    try {
-      const input = JSON.parse(text) as unknown;
-      if (input && typeof input === 'object' && !Array.isArray(input)) {
-        return input as Record<string, unknown>;
-      }
-    } catch (_err) {
-      return {};
-    }
-    return {};
-  }
-
-  function buildAIPrompt(capability: ManagedCapability, input: Record<string, unknown>): string {
-    const environment = stringValue(input.environment) || 'prod';
-    const values = Object.entries(input)
-      .filter(([name]) => name !== 'environment')
-      .map(([_name, value]) => stringValue(value))
-      .filter((value) => value !== '');
-    const resource = capability.resource_type || 'resource';
-    const domain = capability.domain || 'middleware';
-    const keyword = operationKeyword(capability.name);
-    return ['查询', environment, ...values, resource, '的', domain, keyword].filter(Boolean).join(' ');
-  }
-
-  function stringValue(value: unknown): string {
-    if (typeof value === 'string') {
-      return value.trim();
-    }
-    if (typeof value === 'number' || typeof value === 'boolean') {
-      return String(value);
-    }
-    return '';
-  }
-
-  function operationKeyword(name: string): string {
-    const aliases: Record<string, string> = {
-      capacity: '容量',
-      health: '健康',
-      lag: '延迟',
-      lifecycle: '生命周期',
-      quota: '配额',
-      retention: '保留',
-      status: '状态',
-    };
-    for (const token of name.split('.')) {
-      if (aliases[token]) {
-        return aliases[token];
-      }
-    }
-    return '状态';
-  }
-
   return {
     capabilities,
     selected,
@@ -1077,6 +1041,7 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     loadCapabilities,
     selectCapability,
     newDraft,
+    openManualCapability,
     saveSelectedDraft,
     validateSelected,
     testSelected,

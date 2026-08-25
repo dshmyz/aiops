@@ -368,6 +368,18 @@ export async function quickPublishCapability(payload: QuickPublishPayload): Prom
   return normalizeCapability(body);
 }
 
+// 智能推断快速发布配置
+export interface QuickPublishInferResult {
+  inferred: QuickPublishPayload;
+}
+
+export async function inferQuickPublish(payload: QuickPublishPayload): Promise<QuickPublishInferResult> {
+  return request<QuickPublishInferResult>('/v1/capabilities/quick-publish/infer', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function listPendingPlans(): Promise<PendingPlanSummary[]> {
   const body = await request<{ plans: PendingPlanSummary[] }>('/v1/action-plans?status=pending_confirmation');
   return body.plans ?? [];

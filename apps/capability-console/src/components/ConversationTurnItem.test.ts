@@ -325,6 +325,35 @@ describe('ConversationTurnItem', () => {
     expect(wrapper.find('[data-test="conversation-turn-content"]').exists()).toBe(false);
   });
 
+  test('renders a denied persisted tool_step turn with error and failed status', () => {
+    const turn: ConversationTurn = {
+      ...baseTurn,
+      id: 'turn-toolstep-denied',
+      role: 'assistant',
+      response_type: 'tool_step',
+      content: '工具执行失败：policy denied: environment_denied',
+      response_payload: {
+        type: 'tool_step',
+        tool: 'minio.bucket.health.read',
+        step_index: 0,
+        status: 'failed',
+        error: 'policy denied: environment_denied',
+        summary: '工具执行失败：policy denied: environment_denied',
+        input: { environment: 'production', bucket: 'archive' },
+      },
+    };
+
+    const wrapper = mount(ConversationTurnItem, { props: { turn } });
+
+    const item = wrapper.find('[data-test="assistant-step-item-0"]');
+    expect(item.exists()).toBe(true);
+    expect(item.classes()).toContain('status-failed');
+    expect(item.text()).toContain('minio.bucket.health.read');
+    // denied 归入 failed 展示，文案为"已拒绝"并显示原始错误
+    expect(item.text()).toContain('已拒绝');
+    expect(item.text()).toContain('policy denied: environment_denied');
+  });
+
   test('user turn never renders steps block', () => {
     const turn: ConversationTurn = {
       ...baseTurn,

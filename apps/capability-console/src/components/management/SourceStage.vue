@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ElButton } from 'element-plus';
 import QuickPublishForm from '../QuickPublishForm.vue';
+import ManualCreatePanel from '../manual/ManualCreatePanel.vue';
 import StatsGrid from './StatsGrid.vue';
 import SwaggerSourceStrip from './SwaggerSourceStrip.vue';
 import type { UseCapabilities } from '../../composables/useCapabilities';
@@ -45,11 +46,20 @@ defineProps<{ capabilities: UseCapabilities }>();
       <details data-test="quick-publish-panel" class="quick-publish-panel">
         <summary>
           <span class="quick-publish-panel__plus" aria-hidden="true">+</span>
-          没有 Swagger？快速发布单个读能力
+          没有 Swagger？快速发布单个能力
         </summary>
         <QuickPublishForm
           @published="capabilities.handleQuickPublished"
           @error="capabilities.handleQuickPublishError"
+        />
+      </details>
+      <details data-test="manual-create-panel" class="quick-publish-panel">
+        <summary>
+          <span class="quick-publish-panel__plus" aria-hidden="true">+</span>
+          手写 Capability 草稿（表单 / 粘贴 JSON）
+        </summary>
+        <ManualCreatePanel
+          @created="capabilities.openManualCapability"
         />
       </details>
     </div>
@@ -61,7 +71,7 @@ defineProps<{ capabilities: UseCapabilities }>();
         { label: '校验失败', value: capabilities.stats.value.invalid, testId: 'stat-invalid' },
         { label: '可发布', value: capabilities.stats.value.publishable, testId: 'stat-publishable' },
       ]" />
-      <button class="secondary-wide" @click="capabilities.managementPhase.value = 'review'">查看已有能力</button>
+      <button data-test="view-existing-capabilities" class="secondary-wide" @click="capabilities.managementPhase.value = 'review'">查看已有能力</button>
     </aside>
   </section>
 </template>

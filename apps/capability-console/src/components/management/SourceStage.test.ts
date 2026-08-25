@@ -55,7 +55,7 @@ describe('SourceStage', () => {
 
   test('点击查看已有能力跳转 review 阶段', async () => {
     const { wrapper, capabilities } = mountSource();
-    await wrapper.find('.secondary-wide').trigger('click');
+    await wrapper.find('[data-test="view-existing-capabilities"]').trigger('click');
     expect(capabilities.managementPhase.value).toBe('review');
   });
 });
