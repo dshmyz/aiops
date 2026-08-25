@@ -2,8 +2,9 @@
 import { computed, ref } from 'vue';
 import { ElTag, ElButton } from 'element-plus';
 import type { TagProps } from 'element-plus';
-import { quickPublishCapability, inferQuickPublish } from '../api';
-import type { HttpMethod, ManagedCapability, QuickPublishPayload } from '../types';
+import { quickPublishCapability } from '../api';
+import { useQuickPublishInfer } from '../composables/useQuickPublishInfer';
+import type { HttpMethod, ManagedCapability } from '../types';
 
 const emit = defineEmits<{
   published: [capability: ManagedCapability];
@@ -24,10 +25,8 @@ const summaryTemplate = ref('');
 
 // 状态
 const submitting = ref(false);
-const inferring = ref(false);
 const validationError = ref('');
 const showAdvanced = ref(false);
-const hasInferred = ref(false);
 
 const methodOptions: { value: HttpMethod; label: string }[] = [
   { value: 'GET', label: 'GET（查询）' },
@@ -37,6 +36,18 @@ const methodOptions: { value: HttpMethod; label: string }[] = [
   { value: 'DELETE', label: 'DELETE（删除）' },
 ];
 
+// AI 补全：只覆盖用户未手动编辑过的字段；推断后可重新补全。
+const infer = useQuickPublishInfer({
+  baseURL: backendBaseURL,
+  path,
+  description,
+  method,
+  name,
+  domain,
+  resourceType,
+  summaryTemplate,
+});
+
 const pathVariablePreview = computed(() => {
   const matches = path.value.match(/\{([a-zA-Z0-9_]+)\}/g) ?? [];
   return matches.map((match) => match.slice(1, -1));
@@ -45,15 +56,6 @@ const pathVariablePreview = computed(() => {
 const canSubmit = computed(() => {
   return (
     !submitting.value &&
-    backendBaseURL.value.trim() !== '' &&
-    path.value.trim() !== '' &&
-    description.value.trim() !== ''
-  );
-});
-
-const canInfer = computed(() => {
-  return (
-    !inferring.value &&
     backendBaseURL.value.trim() !== '' &&
     path.value.trim() !== '' &&
     description.value.trim() !== ''
@@ -84,8 +86,8 @@ const riskTagType = computed<TagProps['type']>(() => {
   return map[riskLevel.value] || 'info';
 });
 
-function buildPayload(): QuickPublishPayload {
-  const payload: QuickPublishPayload = {
+function buildPayload() {
+  return {
     name: name.value.trim(),
     domain: domain.value.trim(),
     resource_type: resourceType.value.trim(),
@@ -93,42 +95,8 @@ function buildPayload(): QuickPublishPayload {
     method: method.value,
     path: path.value.trim(),
     description: description.value.trim(),
+    ...(summaryTemplate.value.trim() !== '' ? { summary_template: summaryTemplate.value.trim() } : {}),
   };
-  if (summaryTemplate.value.trim() !== '') {
-    payload.summary_template = summaryTemplate.value.trim();
-  }
-  return payload;
-}
-
-// 智能推断：调用后端 API 自动补全字段
-async function doInfer() {
-  if (!canInfer.value) return;
-  inferring.value = true;
-  validationError.value = '';
-  try {
-    const result = await inferQuickPublish(buildPayload());
-    const inferred = result.inferred;
-    // 只在用户没有手动填写时才用推断值覆盖
-    if (name.value.trim() === '' || hasInferred.value) {
-      name.value = inferred.name || '';
-    }
-    if (domain.value.trim() === '' || hasInferred.value) {
-      domain.value = inferred.domain || '';
-    }
-    if (resourceType.value.trim() === '' || hasInferred.value) {
-      resourceType.value = inferred.resource_type || '';
-    }
-    if (summaryTemplate.value.trim() === '' || hasInferred.value) {
-      summaryTemplate.value = inferred.summary_template || '';
-    }
-    hasInferred.value = true;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '智能推断失败';
-    console.warn('infer failed:', message);
-    // 推断失败不影响发布，静默降级
-  } finally {
-    inferring.value = false;
-  }
 }
 
 async function submit() {
@@ -140,15 +108,15 @@ async function submit() {
   try {
     const published = await quickPublishCapability(buildPayload());
     emit('published', published);
-    // 重置表单
+    // 重置表单与推断状态
     path.value = '';
     description.value = '';
     name.value = '';
     domain.value = '';
     resourceType.value = '';
     summaryTemplate.value = '';
-    hasInferred.value = false;
     showAdvanced.value = false;
+    infer.reset();
   } catch (err) {
     const message = err instanceof Error ? err.message : '快速发布失败';
     validationError.value = message;
@@ -175,7 +143,6 @@ async function submit() {
           v-model="backendBaseURL"
           class="filter-input"
           placeholder="https://middleware.example.com"
-          @blur="doInfer"
         />
       </label>
 
@@ -195,7 +162,6 @@ async function submit() {
           v-model="path"
           class="filter-input"
           placeholder="/api/redis/clusters/{cluster}/info"
-          @blur="doInfer"
         />
       </label>
 
@@ -206,7 +172,6 @@ async function submit() {
           v-model="description"
           class="filter-input"
           placeholder="用一句话描述这个接口的作用，如：查询 Redis 集群信息"
-          @blur="doInfer"
         />
       </label>
     </div>
@@ -218,9 +183,14 @@ async function submit() {
     </div>
 
     <!-- 智能推断状态 -->
-    <div v-if="inferring" class="quick-publish-inferring">
+    <div v-if="infer.inferring.value" class="quick-publish-inferring">
       <span class="inferring-spinner"></span>
       <span>AI 正在自动推断配置...</span>
+    </div>
+    <!-- 已补全提示 -->
+    <div v-else-if="infer.hasInferred.value" data-test="quick-publish-inferred" class="quick-publish-inferred">
+      <span v-if="infer.inferredCount.value > 0">已补全 {{ infer.inferredCount.value }} 个字段</span>
+      <span v-else>字段已由手动填写，AI 未覆盖</span>
     </div>
 
     <!-- 风险等级提示 -->
@@ -240,30 +210,33 @@ async function submit() {
       <div v-show="showAdvanced" class="advanced-fields">
         <div class="quick-publish-grid">
           <label>
-            <span>能力名称 {{ hasInferred ? '（自动推断）' : '' }}</span>
+            <span>能力名称 {{ infer.hasInferred.value ? '（自动推断）' : '' }}</span>
             <input
               data-test="quick-publish-name"
               v-model="name"
               class="filter-input"
-              :placeholder="hasInferred ? name : '自动推断'"
+              :placeholder="infer.hasInferred.value ? name : '自动推断'"
+              @input="infer.markUserEdited('name')"
             />
           </label>
           <label>
-            <span>领域 {{ hasInferred ? '（自动推断）' : '' }}</span>
+            <span>领域 {{ infer.hasInferred.value ? '（自动推断）' : '' }}</span>
             <input
               data-test="quick-publish-domain"
               v-model="domain"
               class="filter-input"
-              :placeholder="hasInferred ? domain : '自动推断'"
+              :placeholder="infer.hasInferred.value ? domain : '自动推断'"
+              @input="infer.markUserEdited('domain')"
             />
           </label>
           <label>
-            <span>资源类型 {{ hasInferred ? '（自动推断）' : '' }}</span>
+            <span>资源类型 {{ infer.hasInferred.value ? '（自动推断）' : '' }}</span>
             <input
               data-test="quick-publish-resource"
               v-model="resourceType"
               class="filter-input"
-              :placeholder="hasInferred ? resourceType : '自动推断'"
+              :placeholder="infer.hasInferred.value ? resourceType : '自动推断'"
+              @input="infer.markUserEdited('resource_type')"
             />
           </label>
           <label class="wide">
@@ -272,22 +245,23 @@ async function submit() {
               data-test="quick-publish-summary"
               v-model="summaryTemplate"
               class="filter-input"
-              :placeholder="hasInferred ? summaryTemplate : '自动生成'"
+              :placeholder="infer.hasInferred.value ? summaryTemplate : '自动生成'"
+              @input="infer.markUserEdited('summary_template')"
             />
           </label>
         </div>
       </div>
     </div>
 
-    <!-- 一键补全按钮 -->
+    <!-- AI 补全按钮：未推断显示"一键补全"，已推断显示"重新补全" -->
     <div class="quick-publish-actions">
       <el-button
-        v-if="canInfer && !hasInferred"
-        :loading="inferring"
+        v-if="infer.canInfer.value"
+        :loading="infer.inferring.value"
         size="small"
-        @click="doInfer"
+        @click="infer.doInfer()"
       >
-        AI 一键补全
+        {{ infer.hasInferred.value ? 'AI 重新补全' : 'AI 一键补全' }}
       </el-button>
     </div>
 
@@ -316,6 +290,12 @@ async function submit() {
   gap: 8px;
   padding: 8px 0;
   color: var(--color-text-secondary, #909399);
+  font-size: 13px;
+}
+
+.quick-publish-inferred {
+  padding: 8px 0;
+  color: var(--color-success, #67c23a);
   font-size: 13px;
 }
 
