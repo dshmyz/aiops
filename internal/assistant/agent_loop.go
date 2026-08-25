@@ -114,6 +114,10 @@ type AgentRun struct {
 	Reason      TerminalReason
 	FinalAnswer string // planner's final_answer summary (TerminalDone)
 	Clarified   string // clarification message (TerminalClarification)
+	// ClarifiedFields 是缺参澄清的结构化表单字段（TerminalClarification），
+	// 由 planner 的 ClarificationError.Fields 透传，终态映射据此渲染
+	// approval_form block；为空时仅有自然语言消息。
+	ClarifiedFields []PreflightField
 	Handoff     *StepOutcome
 	// Fallback is set when the loop concluded WITHOUT the planner emitting a
 	// final_answer — it ran out of steps (TerminalMaxSteps) or hit a repeated-read
@@ -344,6 +348,7 @@ func (l *AgentLoop) classify(intent Intent, planErr error, seen map[string]struc
 				msg = clarification.Error()
 			}
 			run.Clarified = clarifyWithCheckedSteps(run, msg)
+			run.ClarifiedFields = clarification.Fields
 			return StateClarify
 		}
 		if errors.Is(planErr, ErrClarificationNeeded) {

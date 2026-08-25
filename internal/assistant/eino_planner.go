@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
+	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 type EinoPlanner struct {
@@ -278,6 +280,12 @@ func (p *EinoPlanner) parseIntent(ctx context.Context, response *schema.Message)
 	if parsed.Input == nil {
 		parsed.Input = map[string]any{}
 	}
+	// 缺参澄清：LLM 已选定工具但必填参数缺失时，从工具 schema 生成结构化
+	// 表单字段（ClarificationError.Fields），前端渲染 approval_form 而非
+	// 纯文本追问；参数齐全时放行，由策略层做完整校验。
+	if fields := missingClarificationFields(parsed.ToolName, parsed.Input); len(fields) > 0 {
+		return Intent{}, NewClarificationWithFields(clarificationMessage, fields)
+	}
 	return Intent{
 		ToolName:        strings.TrimSpace(parsed.ToolName),
 		Input:           parsed.Input,
@@ -285,6 +293,61 @@ func (p *EinoPlanner) parseIntent(ctx context.Context, response *schema.Message)
 		Explanation:     strings.TrimSpace(parsed.Explanation),
 		SuggestedSteps:  parsed.SuggestedSteps,
 	}, nil
+}
+
+// missingClarificationFields 对比动态工具的 input schema 与 LLM 产出参数，
+// 返回缺失必填字段的结构化表单字段。静态工具（无声明式 schema）返回 nil，
+// 维持原有"放行后由策略层 ValidateInput 报错"的行为。environment 仅在
+// 写工具上算缺参：读路径由 policy.DefaultEnvironment 统一兜底，写路径的
+// environment 是人工确认计划的一部分，保持严格。
+func missingClarificationFields(toolName string, input map[string]any) []PreflightField {
+	schema, ok := tools.DynamicInputSchema(toolName)
+	if !ok {
+		return nil
+	}
+	tool, ok := tools.Lookup(toolName)
+	if !ok {
+		return nil
+	}
+	skipEnvironment := tool.Operation == tools.Read
+	names := make([]string, 0, len(schema))
+	for name := range schema {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var fields []PreflightField
+	for _, name := range names {
+		field := schema[name]
+		if !field.Required {
+			continue
+		}
+		if name == "environment" && skipEnvironment {
+			continue
+		}
+		if v, present := input[name]; present && !isEmptyInputValue(v) {
+			continue
+		}
+		fields = append(fields, PreflightField{
+			Name:        name,
+			Type:        field.Type,
+			Required:    true,
+			Description: field.Description,
+			Options:     field.Enum,
+		})
+	}
+	return fields
+}
+
+// isEmptyInputValue 判定 LLM 产出的参数值是否等价于缺失（nil / 空串），
+// 空串占位不构成有效参数。
+func isEmptyInputValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s) == ""
+	}
+	return false
 }
 
 // PlanStream is the streaming variant of Plan. It calls chat.Stream and

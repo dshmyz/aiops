@@ -297,7 +297,9 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
       } else {
         assistantDiagnostic.value = null;
       }
-      if (isObjectRecord(response) && (response.type === 'answer' || response.type === 'execution_result') && Array.isArray(response.blocks)) {
+      // clarification_needed 也可能携带 blocks（缺参澄清的 approval_form 表单），
+      // 实时渲染可点选表单而非等刷新后从持久化 payload 读取。
+      if (isObjectRecord(response) && (response.type === 'answer' || response.type === 'execution_result' || response.type === 'clarification_needed') && Array.isArray(response.blocks)) {
         assistantBlocks.value = response.blocks as Block[];
       } else {
         assistantBlocks.value = [];

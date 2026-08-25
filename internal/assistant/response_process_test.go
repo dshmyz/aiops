@@ -79,3 +79,60 @@ func TestResponsePayloadIncludesProcess(t *testing.T) {
 		}
 	}
 }
+
+// TestResponsePayloadIncludesBlocks 钉住持久化契约：带 Blocks 的 Response
+// （如缺参澄清的 approval_form）序列化进 response_payload.blocks，回放时
+// ConversationTurnItem 能复原表单渲染；不带 Blocks 时 payload 不含该键。
+func TestResponsePayloadIncludesBlocks(t *testing.T) {
+	resp := Response{
+		Type:    "clarification_needed",
+		Message: "请确认或补齐参数",
+		Blocks: []Block{
+			{
+				Type:  BlockApprovalForm,
+				Title: "请确认或补齐参数",
+				Payload: map[string]any{
+					"action_code": "",
+					"fields":      []PreflightField{{Name: "topic", Type: "string", Required: true}},
+				},
+			},
+		},
+	}
+	payload := responsePayload(resp)
+	if payload == nil {
+		t.Fatal("responsePayload = nil, want payload with blocks")
+	}
+	blocksRaw, ok := payload["blocks"]
+	if !ok {
+		t.Fatalf("payload = %v, want blocks key", payload)
+	}
+	bytes, err := json.Marshal(blocksRaw)
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	var blocks []struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Fields []struct {
+				Name     string `json:"name"`
+				Type     string `json:"type"`
+				Required bool   `json:"required"`
+			} `json:"fields"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(bytes, &blocks); err != nil {
+		t.Fatalf("unmarshal blocks: %v", err)
+	}
+	if len(blocks) != 1 || blocks[0].Type != "approval_form" {
+		t.Fatalf("blocks = %+v, want one approval_form", blocks)
+	}
+	if len(blocks[0].Payload.Fields) != 1 || blocks[0].Payload.Fields[0].Name != "topic" || !blocks[0].Payload.Fields[0].Required {
+		t.Fatalf("form fields = %+v, want required topic field", blocks[0].Payload.Fields)
+	}
+
+	if got := responsePayload(Response{Type: "answer", Message: "x"}); got != nil {
+		if _, has := got["blocks"]; has {
+			t.Fatalf("payload = %v, must not contain blocks when Blocks is nil", got)
+		}
+	}
+}

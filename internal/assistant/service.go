@@ -559,6 +559,35 @@ func (s *Service) agentLoopSequence(ctx context.Context, message string) []strin
 	return s.runbookRouter.SequenceForMessage(ctx, message)
 }
 
+// agentRunResponse maps an agent loop's terminal outcome to the operator-facing
+// Response. TerminalClarification carries ClarifiedFields as an approval_form
+// block so the frontend renders a clickable form instead of plain text;
+// every other terminal reason maps 1:1 to the previous inline switch.
+func agentRunResponse(run *AgentRun) Response {
+	switch run.Reason {
+	case TerminalDone:
+		// A genuine model final_answer is only TerminalDone without Fallback; the
+		// repeated-read convergence backstop also lands on TerminalDone but sets
+		// Fallback, so it routes to the distinct fallback marker below.
+		if run.Fallback {
+			answer := stepsAnswer(run)
+			return Response{Type: responseTypeFallbackAnswer, Message: answer, Answer: map[string]any{"message": answer}}
+		}
+		return Response{Type: "answer", Answer: map[string]any{"message": run.FinalAnswer}, Message: run.FinalAnswer}
+	case TerminalClarification:
+		resp := BuildClarificationResponse(ClarificationError{Message: run.Clarified, Fields: run.ClarifiedFields})
+		if strings.TrimSpace(resp.Message) == "" {
+			resp.Message = clarificationMessage
+		}
+		return resp
+	case TerminalHandoff:
+		return handoffResponse(run.Handoff)
+	default: // TerminalMaxSteps
+		answer := stepsAnswer(run)
+		return Response{Type: responseTypeFallbackAnswer, Message: answer, Answer: map[string]any{"message": answer}}
+	}
+}
+
 // runAgentLoopInStream drives the autonomous agent loop inside the streaming
 // goroutine (used when the planner is agent-capable). It forwards live LLM
 // deltas/thinking via the loop's streaming hook, emits one StepEvent per
@@ -597,26 +626,7 @@ func (s *Service) runAgentLoopInStream(ctx context.Context, events chan<- Stream
 		forward(StreamEvent{Err: run.Err, Done: true})
 		return
 	}
-	var resp Response
-	switch run.Reason {
-	case TerminalDone:
-		// A genuine model final_answer is only TerminalDone without Fallback; the
-		// repeated-read convergence backstop also lands on TerminalDone but sets
-		// Fallback, so it routes to the distinct fallback marker below.
-		if run.Fallback {
-			answer := stepsAnswer(run)
-			resp = Response{Type: responseTypeFallbackAnswer, Message: answer, Answer: map[string]any{"message": answer}}
-		} else {
-			resp = Response{Type: "answer", Answer: map[string]any{"message": run.FinalAnswer}, Message: run.FinalAnswer}
-		}
-	case TerminalClarification:
-		resp = Response{Type: "clarification_needed", Message: run.Clarified}
-	case TerminalHandoff:
-		resp = handoffResponse(run.Handoff)
-	default: // TerminalMaxSteps
-		answer := stepsAnswer(run)
-		resp = Response{Type: responseTypeFallbackAnswer, Message: answer, Answer: map[string]any{"message": answer}}
-	}
+	var resp Response = agentRunResponse(run)
 	if hasConversation {
 		// Persist the full step-level audit trail: each tool step as a chained
 		// tool_step turn plus the terminal response, so intermediate results are
@@ -1609,7 +1619,7 @@ func assistantTurnContent(response Response) string {
 // nil when the response has no type (e.g. zero value), which the store treats
 // as a NULL payload.
 func responsePayload(response Response) map[string]any {
-	if response.Type == "" && response.Tool == "" && response.PlanID == "" && response.Message == "" && response.Summary == "" && response.Answer == nil && response.Diagnostic == nil && response.RecommendationPlan == nil && response.Trace == nil {
+	if response.Type == "" && response.Tool == "" && response.PlanID == "" && response.Message == "" && response.Summary == "" && response.Answer == nil && response.Diagnostic == nil && response.RecommendationPlan == nil && response.Trace == nil && len(response.Blocks) == 0 {
 		return nil
 	}
 	payload := map[string]any{
@@ -1647,6 +1657,9 @@ func responsePayload(response Response) map[string]any {
 	}
 	if response.Trace != nil {
 		payload["trace"] = response.Trace
+	}
+	if len(response.Blocks) > 0 {
+		payload["blocks"] = response.Blocks
 	}
 	if response.Process != nil {
 		payload["process"] = response.Process
