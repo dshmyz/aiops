@@ -96,6 +96,12 @@ type Intent struct {
 	Confidence  float64
 	Explanation string
 	Selection   *CapabilitySelection
+	// SuggestedSteps is the planner's self-assessed number of tool calls the
+	// question needs (0 = not provided). The agent loop consumes it once — on
+	// the first execution intent, raise-only, clamped — to size the exec
+	// budget. Unlike keyword-guessing complexity heuristics, this is the
+	// model's own structured judgment.
+	SuggestedSteps int
 	// Done marks a terminal intent that carries no further tool call: the
 	// agent loop should emit a final answer and stop. Answer is the
 	// human-facing completion summary (from the planner's final_answer).

@@ -279,8 +279,9 @@ func (p *EinoPlanner) parseIntent(ctx context.Context, response *schema.Message)
 				ResourceName: strings.TrimSpace(parsed.Diagnostic.ResourceName),
 				Runbook:      strings.TrimSpace(parsed.Diagnostic.Runbook),
 			},
-			Confidence:  parsed.Confidence,
-			Explanation: strings.TrimSpace(parsed.Explanation),
+			Confidence:      parsed.Confidence,
+			Explanation:     strings.TrimSpace(parsed.Explanation),
+			SuggestedSteps:  parsed.SuggestedSteps,
 		}, nil
 	}
 	if strings.TrimSpace(parsed.ToolName) == "" {
@@ -290,10 +291,11 @@ func (p *EinoPlanner) parseIntent(ctx context.Context, response *schema.Message)
 		parsed.Input = map[string]any{}
 	}
 	return Intent{
-		ToolName:    strings.TrimSpace(parsed.ToolName),
-		Input:       parsed.Input,
-		Confidence:  parsed.Confidence,
-		Explanation: strings.TrimSpace(parsed.Explanation),
+		ToolName:        strings.TrimSpace(parsed.ToolName),
+		Input:           parsed.Input,
+		Confidence:      parsed.Confidence,
+		Explanation:     strings.TrimSpace(parsed.Explanation),
+		SuggestedSteps:  parsed.SuggestedSteps,
 	}, nil
 }
 
@@ -566,12 +568,12 @@ type einoIntent struct {
 	Diagnostic  *einoDiagnostic `json:"diagnostic"`
 	Confidence  float64         `json:"confidence"`
 	Explanation string          `json:"explanation"`
-	// FinalAnswer marks a terminal intent: the planner has finished answering
-	// the user's question with the tools already used and outputs a human-facing
-	// Summary. The agent loop should stop and emit this summary rather than
-	// plan another step.
-	FinalAnswer bool   `json:"final_answer"`
-	Summary     string `json:"summary"`
+	// SuggestedSteps is the model's self-assessed number of tool calls the
+	// question needs (0 = not provided). The agent loop uses it — once, at the
+	// first execution intent — to size the exec budget (raise-only, clamped).
+	SuggestedSteps int    `json:"suggested_steps"`
+	FinalAnswer    bool   `json:"final_answer"`
+	Summary        string `json:"summary"`
 }
 
 type einoDiagnostic struct {
@@ -602,6 +604,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
   "diagnostic": object | null,     // 诊断请求对象，仅用于健康/容量/延迟检查
   "confidence": number,            // 置信度，0.0-1.0
   "explanation": string,           // 简短的中文解释
+  "suggested_steps": number,       // 你预计回答该问题总共需要的工具调用次数（1-16），不确定时给 0
   "final_answer": boolean,         // 是否已完成回答，true 时给出 summary
   "summary": string | null         // 完成时的最终答复（human-facing），final_answer=true 时必填
 }
@@ -649,6 +652,12 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 - 简短的中文字符串
 - 解释为什么做出这个意图判断
 - 示例："用户想查看生产集群状态"
+
+### suggested_steps（预计步数）
+- 整数，范围 1-16；无法判断时给 0
+- 你预计从现在到 final_answer 总共需要多少次工具调用（含本次）
+- 单次查询给 1-2；多资源对比或根因排查按实际取证链路评估
+- 系统用它调整执行步数预算：深链排查不会被过早截断
 
 ### final_answer（完成标记）
 - 布尔值，默认 false

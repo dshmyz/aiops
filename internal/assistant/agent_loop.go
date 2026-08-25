@@ -21,6 +21,17 @@ const defaultAgentMaxSteps = 8
 // execution steps. Overridable via COPILOT_AGENT_MAX_CONTROL_STEPS.
 const defaultMaxControlSteps = 6
 
+// maxAgentStepsHardCap bounds intent-driven exec-budget raises: no matter how
+// many steps the planner suggests, the loop never runs more tool calls than
+// this. Product-declared runbook sequences are exempt (their floor is an
+// explicit contract, not a model estimate).
+const maxAgentStepsHardCap = 16
+
+// runbookSequenceStepMargin is added on top of a declared runbook sequence's
+// length when computing the exec-budget floor: the model legitimately inserts
+// extra steps (re-reads, related resource checks) beyond the declared order.
+const runbookSequenceStepMargin = 3
+
 // maxAgentFailures bounds how many consecutive read failures the loop tolerates
 // while feeding errors back for fallback replanning, so a planner that keeps
 // selecting a broken tool cannot spin forever.
@@ -221,6 +232,39 @@ func (l *AgentLoop) WithRunbookSequence(sequence []string) *AgentLoop {
 	return l
 }
 
+// initialExecLimit computes the exec budget at loop start. A declared runbook
+// sequence is a structural floor: its members MUST be touched before a
+// final_answer is honored, so the budget must at least cover the sequence plus
+// a margin for steps the model inserts beyond the declared order.
+func (l *AgentLoop) initialExecLimit() int {
+	limit := l.maxSteps
+	if n := len(l.sequence); n > 0 {
+		if floor := n + runbookSequenceStepMargin; floor > limit {
+			limit = floor
+		}
+	}
+	return limit
+}
+
+// applyIntentBudget lets the planner's first execution intent raise the exec
+// budget: the model self-assesses SuggestedSteps tool calls for the question.
+// Raise-only — a lower self-assessment never shrinks the budget (convergence
+// already ends simple questions early; underestimating must not truncate a
+// deep investigation). Applied exactly once, before the first exec step is
+// consumed, and clamped to maxAgentStepsHardCap.
+func (l *AgentLoop) applyIntentBudget(budget *stepBudget, intent Intent) {
+	if budget.exec != 0 || intent.SuggestedSteps <= 0 {
+		return
+	}
+	s := intent.SuggestedSteps
+	if s > maxAgentStepsHardCap {
+		s = maxAgentStepsHardCap
+	}
+	if s > budget.execLimit {
+		budget.execLimit = s
+	}
+}
+
 // Run executes the loop. history is the conversation's prior turns (may be
 // nil) that seed the agent history. The caller routes the returned AgentRun:
 // each Advisory step is emitted to the UI and accumulated; Handoff / Clarified
@@ -230,7 +274,7 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 	consecutiveFailures := 0
 	seen := map[string]struct{}{}
 	sequenceTouched := map[string]bool{}
-	budget := stepBudget{execLimit: l.maxSteps, controlLimit: l.maxControlSteps}
+	budget := stepBudget{execLimit: l.initialExecLimit(), controlLimit: l.maxControlSteps}
 
 	_ = consecutiveFailures // used in executeAndEvaluate
 	for budget.canExec() || budget.canControl() {
@@ -241,6 +285,9 @@ func (l *AgentLoop) Run(ctx context.Context, user identity.CurrentUser, message 
 		}
 		intent, planErr := l.planOnce(ctx, user, message, run.History, pageContext)
 		state := l.classify(intent, planErr, seen, sequenceTouched, run)
+		if state == StateExec {
+			l.applyIntentBudget(&budget, intent)
+		}
 		if state != StateExec {
 			if l.handleNonExec(run, state, intent, planErr, &budget, sequenceTouched) {
 				return run
