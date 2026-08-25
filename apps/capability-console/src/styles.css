@@ -1298,6 +1298,15 @@ nav button:focus-visible {
   color: var(--color-text-secondary);
   line-height: 1.6;
 }
+.stage-hero p code {
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  background: var(--color-bg-hover);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
 
 .stage-side {
   display: flex;
