@@ -337,7 +337,16 @@ export type AssistantConsoleResponse =
       conversation_id?: string;
       turn_id?: string;
     }
-  | { type: 'clarification_needed'; message: string; trace?: AssistantTrace; conversation_id?: string; turn_id?: string }
+  | {
+      /** 缺参澄清：可能需要补充参数（message 面向操作员的追问），当 LLM 已选定工具
+       *  但必填参数缺失时携带 approval_form 等结构化 blocks，前端据此渲染可点选表单。 */
+      type: 'clarification_needed';
+      message: string;
+      trace?: AssistantTrace;
+      blocks?: Block[];
+      conversation_id?: string;
+      turn_id?: string;
+    }
   | {
       type: 'execution_result';
       plan_id: string;

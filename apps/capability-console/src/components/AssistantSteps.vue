@@ -76,7 +76,7 @@ function isDenied(step: AssistantStep): boolean {
   return step.status === 'failed' && text.includes('denied');
 }
 
-function stepIconName(step: AssistantStep): string {
+function stepIconName(step: AssistantStep): 'waveform' | 'exclamationmark-triangle' | 'checkmark-circle' {
   if (step.status === 'running') return 'waveform';
   if (step.status === 'failed') return 'exclamationmark-triangle';
   return 'checkmark-circle';
