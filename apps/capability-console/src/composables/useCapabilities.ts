@@ -1,40 +1,25 @@
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import type { ComputedRef, Ref, WritableComputedRef } from 'vue';
-import { ElMessage } from 'element-plus';
+import { listCapabilities } from '../api';
+import { canPublish } from '../capability';
 import {
-  commitOpenAPIURLImport,
-  listCapabilities,
-  previewOpenAPIURL,
-  publishCapability,
-  saveDraft,
-  testCapability,
-  unpublishCapability,
-  validateCapability,
-} from '../api';
-import {
-  canPublish,
-  emptyCapability,
-  hasStaticToolConflict as isStaticToolName,
-  normalizeCapability,
-  pathVariables,
-} from '../capability';
-import { buildAIPrompt, parseTestInput } from '../capabilityPrompt';
-import { createImportBatch, filterImportBatchItems, setImportItemIgnored } from '../importBatch';
-import {
-  buildCommitSelections,
-  createCandidateOverrides,
-  createCandidateSelections,
-  filterImportCandidates,
-  importPreviewDomains,
-  selectedCandidates,
-} from '../importWizard';
+  candidateReasonText,
+  candidateVerdictText,
+  operationLabel,
+  recommendationLabel,
+  riskLabel,
+  sourceLabel,
+} from '../capabilityFormat';
+import { filterImportBatchItems } from '../importBatch';
 import type { ImportBatch } from '../importBatch';
-import type { ImportCandidateFilters } from '../importWizard';
+import { filterImportCandidates, selectedCandidates } from '../importWizard';
+import { useCapabilityEditor } from './useCapabilityEditor';
+import { useCapabilityImport } from './useCapabilityImport';
+import { useCapabilityPublish } from './useCapabilityPublish';
+import type { PublishAllResult } from './useCapabilityPublish';
 import type {
   AssistantConsoleResponse,
   Capability,
-  CapabilityOperation,
-  CapabilityRisk,
   ImportCandidate,
   ImportCandidateOverride,
   ImportPreview,
@@ -44,7 +29,6 @@ import type {
   NormalizedResult,
   ValidationResult,
 } from '../types';
-import { sendAssistantMessage } from '../api';
 
 export type ManagementPhase = 'source' | 'candidates' | 'review' | 'ai';
 export type ImportWizardStep = 'source' | 'candidates' | 'adjust' | 'commit';
@@ -82,7 +66,7 @@ export interface UseCapabilities {
   importCommitLoading: Ref<boolean>;
   candidateSelections: Ref<Record<string, boolean>>;
   candidateOverrides: Ref<Record<string, ImportCandidateOverride>>;
-  candidateFilters: Ref<ImportCandidateFilters>;
+  candidateFilters: Ref<{ recommendation: ImportRecommendation | 'all'; domain: string; search: string }>;
   importBatch: Ref<ImportBatch | null>;
   importDomainFilter: Ref<string>;
   aiPromptOverride: Ref<string | null>;
@@ -126,7 +110,7 @@ export interface UseCapabilities {
   currentPage: Ref<number>;
   totalPages: ComputedRef<number>;
   groupedStats: ComputedRef<Record<string, number>>;
-  publishAll: () => Promise<{ success: number; failed: number; total: number } | undefined>;
+  publishAll: () => Promise<PublishAllResult | undefined>;
 
   // Functions
   loadCapabilities: () => Promise<void>;
@@ -175,327 +159,57 @@ export interface UseCapabilities {
   resetAIPreflight: () => void;
 }
 
+/**
+ * useCapabilities 是能力管理模块的组合根：组装 editor（编辑/校验/测试/AI 预检）、
+ * import（Swagger 导入向导）、publish（清单/分页/发布动作）三个子 composable，
+ * 并补充列表加载、展示标签与发布决策文案。公开接口对调用方保持稳定。
+ */
 export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabilities {
   const { onViewChange } = options;
 
-  // State
+  // 共享状态
   const capabilities = ref<ManagedCapability[]>([]);
-  const selected = ref<ManagedCapability>(normalizeCapability({}));
-  const validation = ref<ValidationResult>({ valid: false, error: '未校验' });
-  const preview = ref<NormalizedResult | null>(null);
   const error = ref('');
   const loading = ref(false);
   // 能力存储是否已配置（后端 /v1/capabilities 的 configured 字段）。未配置时
   // 列表为空是"未启用"，前端据此展示配置提示而非"零能力"。
   const configured = ref(true);
-  const testInputText = ref('{"environment":"prod"}');
-  const searchText = ref('');
-  const statusFilter = ref('all');
-  const domainFilter = ref('all');
-  const importOpenAPIURLText = ref('http://你的后台/v3/api-docs');
-  const importBackendBaseURL = ref('https://middleware.example.com');
-  const importMessage = ref('');
-  const importWizardStep = ref<ImportWizardStep>('source');
   // 落地默认落在「能力清单（评审发布）」而非导入向导：返回用户想先看到已接入的
   // 能力库，而不是每次都从 Swagger 收件箱开始。需要导入时点向导第 1 步即可。
   const managementPhase = ref<ManagementPhase>('review');
-  const importPreview = ref<ImportPreview | null>(null);
-  const importPreviewLoading = ref(false);
-  const importPreviewGeneration = ref(0);
-  const importCommitLoading = ref(false);
-  const candidateSelections = ref<Record<string, boolean>>({});
-  const candidateOverrides = ref<Record<string, ImportCandidateOverride>>({});
-  const candidateFilters = ref<ImportCandidateFilters>({
-    recommendation: 'all',
-    domain: 'all',
-    search: '',
-  });
-  const importBatch = ref<ImportBatch | null>(null);
-  const importDomainFilter = ref('all');
-  const aiPromptOverride = ref<string | null>(null);
-  const aiResponse = ref<AssistantConsoleResponse | null>(null);
-  const aiError = ref('');
-  const aiLoading = ref(false);
 
-  // Computed
-  const derivedVariables = computed(() => pathVariables(selected.value.backend.path));
-  const validationLabel = computed(() => (validation.value.valid ? '校验通过' : validation.value.error ?? '未校验'));
-  const previewText = computed(() => (preview.value ? JSON.stringify(preview.value, null, 2) : '暂无预览'));
-  const requestPreviewText = computed(() => `${selected.value.backend.method || 'GET'} ${selected.value.backend.path || '/'}`);
-  const responsePreviewText = computed(() => (preview.value ? JSON.stringify(preview.value.data, null, 2) : '暂无测试响应'));
-  const defaultAIPrompt = computed(() => buildAIPrompt(selected.value, parseTestInput(testInputText.value)));
-  const aiPromptText = computed({
-    get: () => aiPromptOverride.value ?? defaultAIPrompt.value,
-    set: (value: string) => {
-      aiPromptOverride.value = value;
+  // 子 composable
+  const editor = useCapabilityEditor({
+    capabilities,
+    error,
+    managementPhase,
+    onSelect: (capability) => selectCapability(capability),
+    onViewChange,
+  });
+  const importWizard = useCapabilityImport({
+    capabilities,
+    error,
+    managementPhase,
+    onSelect: (capability) => selectCapability(capability),
+  });
+  const publish = useCapabilityPublish({
+    capabilities,
+    error,
+    managementPhase,
+    selected: editor.selected,
+    publishReady: editor.publishReady,
+    isPublishable: (capability) => isPublishable(capability),
+    onSelect: (capability) => selectCapability(capability),
+    onQuickPublished: (message) => {
+      importWizard.importMessage.value = message;
     },
-  });
-  const aiPreflightReady = computed(() => selected.value.source === 'published' || hasPublishedTwin(selected.value));
-  const aiPreflightState = computed(() => {
-    if (!aiPreflightReady.value) {
-      return '发布后可运行';
-    }
-    if (aiLoading.value) {
-      return '正在请求';
-    }
-    if (aiError.value) {
-      return '请求失败';
-    }
-    if (aiResponse.value?.type === 'answer') {
-      return '已返回答案';
-    }
-    if (aiResponse.value?.type === 'clarification_needed') {
-      return '需要补充参数';
-    }
-    if (aiResponse.value?.type === 'confirmation_required') {
-      return '需要审批';
-    }
-    if (aiResponse.value?.type === 'execution_result') {
-      return '执行结果';
-    }
-    return '等待预检';
-  });
-  const aiPreflightResultText = computed(() => {
-    if (aiError.value) {
-      return aiError.value;
-    }
-    if (!aiResponse.value) {
-      return '暂无 AI 响应';
-    }
-    return JSON.stringify(aiResponse.value, null, 2);
-  });
-  const availableDomains = computed(() => {
-    const domains = new Set(capabilities.value.map((item) => item.domain).filter(Boolean));
-    return Array.from(domains).sort();
-  });
-  const visibleImportBatchItems = computed(() => {
-    if (!importBatch.value) {
-      return [];
-    }
-    return filterImportBatchItems(importBatch.value, importDomainFilter.value);
-  });
-  const ignoredImportCapabilityKeys = computed(() =>
-    new Set(
-      importBatch.value?.items
-        .filter((item) => item.ignored)
-        .map((item) => capabilityKey(item.capability)) ?? [],
-    ),
-  );
-  const visibleImportCandidates = computed(() => (importPreview.value ? filterImportCandidates(importPreview.value, candidateFilters.value) : []));
-  const importCandidateDomains = computed(() => (importPreview.value ? importPreviewDomains(importPreview.value) : []));
-  const selectedImportCandidates = computed(() => (importPreview.value ? selectedCandidates(importPreview.value, candidateSelections.value) : []));
-  const canCommitImportPreview = computed(() => selectedImportCandidates.value.length > 0 && !importCommitLoading.value);
-  const importCommitSummary = computed(() => {
-    const candidates = selectedImportCandidates.value;
-    const effectiveCandidates = candidates.map((candidate) => candidateOverrides.value[candidate.id] ?? candidate.summary ?? candidate.capability);
-    const reads = effectiveCandidates.filter((candidate) => candidate.operation === 'read').length;
-    const writes = candidates.length - reads;
-    const highRisk = effectiveCandidates.filter((candidate) => candidate.risk === 'high').length;
-    return { selected: candidates.length, reads, writes, highRisk };
-  });
-  const publishedCapabilityNames = computed(() => new Set(capabilities.value.filter((item) => item.source === 'published').map((item) => item.name)));
-  const stats = computed(() => {
-    const published = capabilities.value.filter((item) => item.source === 'published').length;
-    const review = capabilities.value.filter((item) => item.status === 'needs_review' || item.source === 'discovered').length;
-    const invalid = capabilities.value.filter((item) => !item.validation.valid).length;
-    const publishable = capabilities.value.filter((item) => isPublishable(item)).length;
-    return { published, review, invalid, publishable };
-  });
-  const filteredCapabilities = computed(() => {
-    const query = searchText.value.trim().toLowerCase();
-    return capabilities.value.filter((item) => {
-      if (ignoredImportCapabilityKeys.value.has(capabilityKey(item))) {
-        return false;
-      }
-      const matchesQuery =
-        query === '' ||
-        [item.name, item.domain, item.resource_type, item.backend.method, item.backend.path]
-          .join(' ')
-          .toLowerCase()
-          .includes(query);
-      const matchesStatus = statusFilter.value === 'all' || item.source === statusFilter.value || item.status === statusFilter.value;
-      const matchesDomain = domainFilter.value === 'all' || item.domain === domainFilter.value;
-      return matchesQuery && matchesStatus && matchesDomain;
-    });
+    onRefresh: () => loadCapabilities(),
+    ignoredKeys: importWizard.ignoredImportCapabilityKeys,
   });
 
-  // 分页：每页显示的数量
-  const pageSize = ref(20);
-  const currentPage = ref(1);
+  // 列表加载
+  const selectCapability = editor.selectCapability;
 
-  // 过滤条件变化时重置页码
-  watch([searchText, statusFilter, domainFilter], () => {
-    currentPage.value = 1;
-  });
-
-  const paginatedCapabilities = computed(() => {
-    const start = (currentPage.value - 1) * pageSize.value;
-    return filteredCapabilities.value.slice(start, start + pageSize.value);
-  });
-  const totalPages = computed(() => Math.ceil(filteredCapabilities.value.length / pageSize.value));
-
-  // 状态分组统计
-  const groupedStats = computed(() => {
-    const groups: Record<string, number> = { draft: 0, review: 0, published: 0, other: 0 };
-    for (const item of capabilities.value) {
-      if (item.source === 'published') groups.published++;
-      else if (item.status === 'needs_review' || item.source === 'discovered') groups.review++;
-      else groups.draft++;
-    }
-    return groups;
-  });
-
-  // 批量发布：一键发布所有可发布的草稿
-  async function publishAll() {
-    const publishable = filteredCapabilities.value.filter((item) => isPublishable(item));
-    if (publishable.length === 0) return;
-    let success = 0;
-    let failed = 0;
-    for (const item of publishable) {
-      try {
-        await publishCapability(item.name);
-        success++;
-      } catch {
-        failed++;
-      }
-    }
-    await loadCapabilities();
-    return { success, failed, total: publishable.length };
-  }
-  const inputRows = computed(() =>
-    Object.entries(selected.value.input_schema).map(([name, field]) => ({
-      name,
-      type: field.type,
-      required: field.required,
-    })),
-  );
-  const testInputRows = computed(() => {
-    const rows = new Map<string, { name: string; type: InputField['type']; required: boolean; source: string; description?: string; examples?: string[]; enum?: string[] }>();
-    for (const [name, field] of Object.entries(selected.value.input_schema)) {
-      rows.set(name, { name, type: field.type, required: field.required, source: 'schema', description: field.description, examples: field.examples, enum: field.enum });
-    }
-    for (const name of derivedVariables.value) {
-      if (!rows.has(name)) {
-        rows.set(name, { name, type: 'string', required: true, source: 'path' });
-      }
-    }
-    if (!rows.has('environment')) {
-      rows.set('environment', { name: 'environment', type: 'string', required: true, source: 'schema', description: '目标环境（prod/staging/dev）', examples: ['prod'] });
-    }
-    return Array.from(rows.values());
-  });
-  const outputRows = computed(() =>
-    Object.entries(selected.value.output.fields).map(([name, path]) => ({
-      name,
-      path,
-    })),
-  );
-  const publishTargetPath = computed(() =>
-    selected.value.name.trim() ? `capabilities/published/${selected.value.name.trim()}.yaml` : 'capabilities/published/<name>.yaml',
-  );
-  const governanceSummary = computed(() => {
-    const capability = selected.value;
-    if (capability.operation === 'read') {
-      return '读取能力：发布后可被 AI 直接调用';
-    }
-    const governance = capability.governance;
-    if (!governance) {
-      return '写入能力：需补齐 governance（执行计划 / 审批 / 预检 / 回滚）';
-    }
-    const parts: string[] = [];
-    parts.push(governance.requires_action_plan ? '需执行计划' : '无需执行计划');
-    parts.push(governance.requires_approval ? '需审批' : '无需审批');
-    parts.push(governance.precheck_tools.length > 0 ? `预检 ${governance.precheck_tools.length} 项` : '未配预检');
-    parts.push(governance.rollback.strategy ? `回滚策略：${governance.rollback.strategy}` : '未配回滚');
-    return `写入能力治理：${parts.join(' / ')}`;
-  });
-  const publishChecks = computed(() => {
-    const baseURL = selected.value.backend.base_url?.trim() ?? '';
-    const operation = selected.value.operation;
-    const method = selected.value.backend.method;
-    const operationMatchesMethod =
-      (operation === 'read' && method === 'GET') ||
-      (operation === 'write' && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method));
-    return [
-      {
-        label: operation === 'read' ? '读取类能力' : '写入类能力',
-        ok: operationMatchesMethod,
-        detail: operationMatchesMethod
-          ? `operation = ${operation} / method = ${method}`
-          : operation === 'read'
-          ? '读取能力要求 backend.method = GET'
-          : '写入能力要求 backend.method ∈ POST/PUT/PATCH/DELETE',
-      },
-      {
-        label: method === 'GET' ? 'GET 请求' : `${method} 请求`,
-        ok: operationMatchesMethod,
-        detail: `backend.method = ${method}`,
-      },
-      {
-        label: '后端地址',
-        ok: /^https?:\/\/[^/]+/.test(baseURL),
-        detail: baseURL || '发布前必须配置 http/https Base URL',
-      },
-      {
-        label: '校验通过',
-        ok: validation.value.valid,
-        detail: validation.value.valid ? 'Capability schema 已通过校验' : validation.value.error ?? '请先运行校验',
-      },
-      ...(operation === 'write'
-        ? [
-            {
-              label: '需执行计划',
-              ok: Boolean(selected.value.governance?.requires_action_plan),
-              detail: selected.value.governance?.requires_action_plan
-                ? 'governance.requires_action_plan = true'
-                : '写入能力必须声明 governance.requires_action_plan',
-            },
-            {
-              label: '需审批',
-              ok: Boolean(selected.value.governance?.requires_approval),
-              detail: selected.value.governance?.requires_approval
-                ? 'governance.requires_approval = true'
-                : '写入能力必须声明 governance.requires_approval',
-            },
-            {
-              label: '预检能力',
-              ok: (selected.value.governance?.precheck_tools?.length ?? 0) > 0,
-              detail:
-                (selected.value.governance?.precheck_tools?.length ?? 0) > 0
-                  ? `预检能力：${selected.value.governance!.precheck_tools.join(', ')}`
-                  : '写入能力必须声明 governance.precheck_tools',
-            },
-            {
-              label: '回滚策略',
-              ok: Boolean(selected.value.governance?.rollback?.strategy),
-              detail: selected.value.governance?.rollback?.strategy
-                ? `governance.rollback.strategy = ${selected.value.governance.rollback.strategy}`
-                : '写入能力必须声明 governance.rollback.strategy',
-            },
-          ]
-        : []),
-      {
-        label: '同名发布',
-        ok: !hasPublishedTwin(selected.value),
-        detail: hasPublishedTwin(selected.value) ? '已有同名发布能力，请先下线旧版本' : '没有同名已发布能力',
-      },
-      {
-        label: '内置工具冲突',
-        ok: !hasStaticToolConflict(selected.value),
-        detail: hasStaticToolConflict(selected.value)
-          ? `名称「${selected.value.name}」与内置工具冲突，请改名后重试`
-          : '名称不与内置工具冲突',
-      },
-      {
-        label: '发布来源',
-        ok: selected.value.source === 'discovered',
-        detail: selected.value.source === 'discovered' ? '当前是草稿，可以发布' : '已发布能力不能重复发布',
-      },
-    ];
-  });
-  const publishReady = computed(() => publishChecks.value.every((check) => check.ok));
-
-  // Functions
   async function loadCapabilities() {
     loading.value = true;
     error.value = '';
@@ -518,382 +232,27 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     }
   }
 
-  function selectCapability(capability: ManagedCapability) {
-    selected.value = normalizeCapability(JSON.parse(JSON.stringify(capability)) as Partial<ManagedCapability>);
-    validation.value = selected.value.validation;
-    preview.value = null;
-    resetAIPreflight();
-  }
+  // 展示标签（纯函数）
+  const sourceLabelFn = sourceLabel;
+  const operationLabelFn = operationLabel;
+  const riskLabelFn = riskLabel;
+  const recommendationLabelFn = recommendationLabel;
+  const candidateReasonTextFn = candidateReasonText;
+  const candidateVerdictTextFn = candidateVerdictText;
 
-  function newDraft() {
-    selected.value = normalizeCapability({ ...emptyCapability(), source: 'discovered', validation: { valid: false } });
-    validation.value = { valid: false, error: '未校验' };
-    preview.value = null;
-    testInputText.value = '{"environment":"prod"}';
-    resetAIPreflight();
-    managementPhase.value = 'review';
-  }
-
-  function openManualCapability(capability: Capability) {
-    selected.value = normalizeCapability({ ...capability, source: 'discovered', validation: { valid: false } });
-    validation.value = { valid: false, error: '未校验' };
-    preview.value = null;
-    testInputText.value = '{"environment":"prod"}';
-    resetAIPreflight();
-    managementPhase.value = 'review';
-  }
-
-  async function saveSelectedDraft() {
-    error.value = '';
-    try {
-      const saved = await saveDraft(toCapability(selected.value));
-      upsert(saved);
-      selectCapability(saved);
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '保存草稿失败';
-    }
-  }
-
-  async function validateSelected() {
-    error.value = '';
-    try {
-      validation.value = await validateCapability(toCapability(selected.value));
-      selected.value.validation = validation.value;
-      if (validation.value.valid) {
-        ElMessage.success('校验通过');
-      } else {
-        ElMessage.error(validation.value.error ?? '校验失败');
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '校验 Capability 失败';
-      error.value = msg;
-      ElMessage.error(msg);
-    }
-  }
-
-  async function testSelected() {
-    error.value = '';
-    try {
-      const input = JSON.parse(testInputText.value) as Record<string, unknown>;
-      preview.value = await testCapability(toCapability(selected.value), input);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '测试 Capability 失败';
-      error.value = msg;
-      ElMessage.error(msg);
-    }
-  }
-
-  async function previewSwaggerURL() {
-    error.value = '';
-    importMessage.value = '';
-    clearImportPreview();
-    const generation = importPreviewGeneration.value;
-    importPreviewLoading.value = true;
-    try {
-      const previewResult = await previewOpenAPIURL({
-        openapi_url: importOpenAPIURLText.value,
-        backend_base_url: importBackendBaseURL.value,
-      });
-      if (generation !== importPreviewGeneration.value) {
-        return;
-      }
-      importPreview.value = previewResult;
-      candidateSelections.value = createCandidateSelections(previewResult);
-      candidateOverrides.value = createCandidateOverrides(previewResult);
-      candidateFilters.value = { recommendation: 'all', domain: 'all', search: '' };
-      importWizardStep.value = previewResult.candidates.length === 0 ? 'source' : 'candidates';
-      managementPhase.value = previewResult.candidates.length === 0 ? 'source' : 'candidates';
-      importMessage.value = previewResult.candidates.length === 0 ? '没有识别到可接入 API' : `已预览 ${previewResult.candidates.length} 个候选 API`;
-    } catch (err) {
-      if (generation !== importPreviewGeneration.value) {
-        return;
-      }
-      error.value = err instanceof Error ? err.message : '预览 Swagger URL 失败';
-    } finally {
-      if (generation === importPreviewGeneration.value) {
-        importPreviewLoading.value = false;
-      }
-    }
-  }
-
-  function clearImportPreview() {
-    importPreviewGeneration.value += 1;
-    importPreview.value = null;
-    candidateSelections.value = {};
-    candidateOverrides.value = {};
-    candidateFilters.value = { recommendation: 'all', domain: 'all', search: '' };
-    importWizardStep.value = 'source';
-    managementPhase.value = 'source';
-  }
-
-  async function commitSwaggerImport() {
-    if (!importPreview.value || !canCommitImportPreview.value) {
-      return;
-    }
-    error.value = '';
-    importCommitLoading.value = true;
-    try {
-      const result = await commitOpenAPIURLImport({
-        openapi_url: importPreview.value.source.openapi_url || importOpenAPIURLText.value,
-        backend_base_url: importPreview.value.source.backend_base_url || importBackendBaseURL.value,
-        fingerprint: importPreview.value.source.fingerprint,
-        selections: buildCommitSelections(importPreview.value, candidateSelections.value, candidateOverrides.value),
-      });
-      importBatch.value = createImportBatch(result.capabilities, capabilities.value);
-      importDomainFilter.value = 'all';
-      for (const item of result.capabilities) {
-        upsert(item);
-      }
-      if (result.capabilities.length > 0) {
-        selectCapability(result.capabilities[0]);
-      }
-      importWizardStep.value = 'commit';
-      managementPhase.value = 'review';
-      importMessage.value = result.capabilities.length === 0 ? '没有生成草稿' : `已生成 ${result.capabilities.length} 个待评审草稿`;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '生成 Capability 草稿失败';
-    } finally {
-      importCommitLoading.value = false;
-    }
-  }
-
-  function updateCandidateOverride(id: string, patch: Partial<ImportCandidateOverride>) {
-    candidateOverrides.value = {
-      ...candidateOverrides.value,
-      [id]: { ...candidateOverrides.value[id], ...patch },
-    };
-  }
-
-  function toggleImportIgnored(name: string, ignored: boolean) {
-    if (!importBatch.value) {
-      return;
-    }
-    importBatch.value = setImportItemIgnored(importBatch.value, name, ignored);
-  }
-
-  function openImportedCapability(item: ImportBatch['items'][number]) {
-    const target = item.verdict === 'duplicate'
-      ? capabilities.value.find((capability) => capability.name === item.name && capability.source === 'published')
-      : capabilities.value.find((capability) => capabilityKey(capability) === capabilityKey(item.capability));
-    if (target) {
-      selectCapability(target);
-    }
-  }
-
-  async function publishSelected(capability: ManagedCapability) {
-    if (capability.name === selected.value.name && !publishReady.value) {
-      return;
-    }
-    if (capability.name !== selected.value.name && !isPublishable(capability)) {
-      return;
-    }
-    error.value = '';
-    try {
-      const published = await publishCapability(capability.name);
-      capabilities.value = capabilities.value.filter((item) => item.name !== capability.name);
-      capabilities.value.push(published);
-      selectCapability(published);
-      managementPhase.value = 'ai';
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '发布 Capability 失败';
-    }
-  }
-
-  async function publishCurrent() {
-    await publishSelected(selected.value);
-  }
-
-  async function unpublishSelected(capability: ManagedCapability) {
-    error.value = '';
-    try {
-      const unpublished = await unpublishCapability(capability.name);
-      capabilities.value = capabilities.value.filter((item) => item.name !== capability.name);
-      capabilities.value.push(unpublished);
-      selectCapability(unpublished);
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '下线 Capability 失败';
-    }
-  }
-
-  function handleQuickPublished(capability: ManagedCapability) {
-    upsert(capability);
-    selectCapability(capability);
-    managementPhase.value = 'ai';
-    importMessage.value = `快速发布成功：${capability.name}`;
-  }
-
-  function handleQuickPublishError(message: string) {
-    error.value = message;
-  }
-
-  function upsert(capability: ManagedCapability) {
-    const index = capabilities.value.findIndex((item) => capabilityKey(item) === capabilityKey(capability));
-    if (index >= 0) {
-      capabilities.value[index] = capability;
-      return;
-    }
-    capabilities.value.push(capability);
-  }
-
-  function capabilityKey(capability: Pick<ManagedCapability, 'source' | 'name'>): string {
-    return `${capability.source}:${capability.name}`;
-  }
-
-  function toCapability(value: ManagedCapability): Capability {
-    const { source: _source, path: _path, modified_at: _modifiedAt, validation: _validation, ...capability } = value;
-    return capability;
-  }
-
-  async function runAIPreflight() {
-    if (!aiPreflightReady.value) {
-      return;
-    }
-    aiLoading.value = true;
-    aiError.value = '';
-    aiResponse.value = null;
-    try {
-      aiResponse.value = await sendAssistantMessage(aiPromptText.value.trim());
-      // Jump to assistant view so the user can see the response in context.
-      onViewChange?.('assistant');
-    } catch (err) {
-      aiError.value = err instanceof Error ? err.message : 'AI 调用预检失败';
-    } finally {
-      aiLoading.value = false;
-    }
-  }
-
-  function addInputField() {
-    const base = 'param';
-    let index = 1;
-    let name = base;
-    while (selected.value.input_schema[name]) {
-      index += 1;
-      name = `${base}_${index}`;
-    }
-    selected.value.input_schema[name] = { type: 'string', required: true };
-  }
-
-  function removeInputField(name: string) {
-    if (name === 'environment') {
-      return;
-    }
-    const next = { ...selected.value.input_schema };
-    delete next[name];
-    selected.value.input_schema = next;
-  }
-
-  function renameInputField(previousName: string, nextName: string) {
-    nextName = nextName.trim();
-    if (nextName === '' || nextName === previousName) {
-      return;
-    }
-    const next = { ...selected.value.input_schema };
-    const value = next[previousName];
-    delete next[previousName];
-    next[nextName] = value;
-    selected.value.input_schema = next;
-  }
-
-  function setInputType(name: string, type: InputField['type']) {
-    selected.value.input_schema[name] = { ...selected.value.input_schema[name], type };
-  }
-
-  function setInputRequired(name: string, required: boolean) {
-    selected.value.input_schema[name] = { ...selected.value.input_schema[name], required };
-  }
-
-  function addOutputField() {
-    const base = 'field';
-    let index = 1;
-    let name = base;
-    while (selected.value.output.fields[name]) {
-      index += 1;
-      name = `${base}_${index}`;
-    }
-    selected.value.output.fields[name] = '$.data.value';
-  }
-
-  function removeOutputField(name: string) {
-    const next = { ...selected.value.output.fields };
-    delete next[name];
-    selected.value.output.fields = next;
-  }
-
-  function renameOutputField(previousName: string, nextName: string) {
-    nextName = nextName.trim();
-    if (nextName === '' || nextName === previousName) {
-      return;
-    }
-    const next = { ...selected.value.output.fields };
-    const value = next[previousName];
-    delete next[previousName];
-    next[nextName] = value;
-    selected.value.output.fields = next;
-  }
-
-  function setOutputPath(name: string, path: string) {
-    selected.value.output.fields[name] = path;
-  }
-
-  function sourceLabel(source: string): string {
-    return source === 'published' ? '已发布' : '草稿';
-  }
-
-  function operationLabel(operation: string): string {
-    return operation === 'write' ? '写入' : '读取';
-  }
-
-  function riskLabel(risk: string): string {
-    switch (risk) {
-      case 'medium':
-        return '中';
-      case 'high':
-        return '高';
-      default:
-        return '低';
-    }
-  }
-
-  function recommendationLabel(value: ImportRecommendation): string {
-    if (value === 'recommended') {
-      return '推荐接入';
-    }
-    if (value === 'needs_adjustment') {
-      return '需要调整';
-    }
-    return '暂不接入';
-  }
-
-  function candidateReasonText(candidate: ImportCandidate): string {
-    return (candidate.reasons ?? []).join(' / ');
-  }
-
-  function candidateVerdictText(candidate: ImportCandidate): string {
-    return (candidate.warnings ?? []).join(' / ') || candidateReasonText(candidate);
-  }
-
-  function hasPublishedTwin(capability: ManagedCapability): boolean {
-    return capability.source !== 'published' && publishedCapabilityNames.value.has(capability.name);
-  }
-
-  function hasStaticToolConflict(capability: ManagedCapability): boolean {
-    // 与后端 internal/tools/registry.go 中的静态工具名单对齐；发布时这些名字会被
-    // tools.Lookup 命中并返回 409，前端在发布前先做预检给出友好提示。
-    return isStaticToolName(capability.name);
-  }
-
+  // 发布决策标签：依赖 editor 的预检（hasPublishedTwin/hasStaticToolConflict 等）
   function isPublishable(capability: ManagedCapability): boolean {
-    return canPublish(capability) && !hasPublishedTwin(capability) && !hasStaticToolConflict(capability);
+    return canPublish(capability) && !editor.hasPublishedTwin(capability) && !editor.hasStaticToolConflict(capability);
   }
 
   function publishActionLabel(capability: ManagedCapability): string {
     if (capability.source === 'published') {
       return '已发布';
     }
-    if (hasPublishedTwin(capability)) {
+    if (editor.hasPublishedTwin(capability)) {
       return '已有已发布版本';
     }
-    if (hasStaticToolConflict(capability)) {
+    if (editor.hasStaticToolConflict(capability)) {
       return '改名后发布';
     }
     if (!canPublish(capability)) {
@@ -906,18 +265,18 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
   }
 
   function currentPublishLabel(): string {
-    if (selected.value.source === 'published') {
+    if (editor.selected.value.source === 'published') {
       return '已发布，无需重复发布';
     }
-    if (hasPublishedTwin(selected.value)) {
+    if (editor.hasPublishedTwin(editor.selected.value)) {
       return '已有已发布版本';
     }
-    if (hasStaticToolConflict(selected.value)) {
+    if (editor.hasStaticToolConflict(editor.selected.value)) {
       return `名称与内置工具冲突，请改名后重试`;
     }
-    if (!canPublish(selected.value)) {
-      if (selected.value.operation === 'write') {
-        return selected.value.governance ? '先校验当前 Capability' : '补齐 governance';
+    if (!canPublish(editor.selected.value)) {
+      if (editor.selected.value.operation === 'write') {
+        return editor.selected.value.governance ? '先校验当前 Capability' : '补齐 governance';
       }
       return '不可发布';
     }
@@ -928,7 +287,7 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     if (capability.source === 'published') {
       return '用 AI 试问一次';
     }
-    if (hasPublishedTwin(capability)) {
+    if (editor.hasPublishedTwin(capability)) {
       return '已有 AI 可用版本';
     }
     if (!canPublish(capability)) {
@@ -943,150 +302,119 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     return '继续评审';
   }
 
-  function resetAIPreflight() {
-    aiPromptOverride.value = null;
-    aiResponse.value = null;
-    aiError.value = '';
-  }
-
-  function testInputFieldValue(name: string): string | boolean | number {
-    const value = parseTestInput(testInputText.value)[name];
-    if (typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number') {
-      return value;
-    }
-    return '';
-  }
-
-  function setTestInputField(name: string, rawValue: string | boolean, type: InputField['type']) {
-    const next = parseTestInput(testInputText.value);
-    if (rawValue === '') {
-      delete next[name];
-    } else if (type === 'boolean') {
-      next[name] = Boolean(rawValue);
-    } else if (type === 'integer') {
-      const parsed = Number.parseInt(String(rawValue), 10);
-      if (Number.isFinite(parsed)) {
-        next[name] = parsed;
-      }
-    } else if (type === 'number') {
-      const parsed = Number.parseFloat(String(rawValue));
-      if (Number.isFinite(parsed)) {
-        next[name] = parsed;
-      }
-    } else {
-      next[name] = String(rawValue);
-    }
-    testInputText.value = JSON.stringify(next);
-    resetAIPreflight();
-  }
-
   return {
+    // State
     capabilities,
-    selected,
-    validation,
-    preview,
+    selected: editor.selected,
+    validation: editor.validation,
+    preview: editor.preview,
     error,
     loading,
     configured,
-    testInputText,
-    searchText,
-    statusFilter,
-    domainFilter,
-    importOpenAPIURLText,
-    importBackendBaseURL,
-    importMessage,
-    importWizardStep,
+    testInputText: editor.testInputText,
+    searchText: publish.searchText,
+    statusFilter: publish.statusFilter,
+    domainFilter: publish.domainFilter,
+    importOpenAPIURLText: importWizard.importOpenAPIURLText,
+    importBackendBaseURL: importWizard.importBackendBaseURL,
+    importMessage: importWizard.importMessage,
+    importWizardStep: importWizard.importWizardStep,
     managementPhase,
-    importPreview,
-    importPreviewLoading,
-    importPreviewGeneration,
-    importCommitLoading,
-    candidateSelections,
-    candidateOverrides,
-    candidateFilters,
-    importBatch,
-    importDomainFilter,
-    aiPromptOverride,
-    aiResponse,
-    aiError,
-    aiLoading,
-    derivedVariables,
-    validationLabel,
-    previewText,
-    requestPreviewText,
-    responsePreviewText,
-    defaultAIPrompt,
-    aiPromptText,
-    aiPreflightReady,
-    aiPreflightState,
-    aiPreflightResultText,
-    availableDomains,
-    visibleImportBatchItems,
-    ignoredImportCapabilityKeys,
-    visibleImportCandidates,
-    importCandidateDomains,
-    selectedImportCandidates,
-    canCommitImportPreview,
-    importCommitSummary,
-    publishedCapabilityNames,
-    stats,
-    filteredCapabilities,
-    inputRows,
-    testInputRows,
-    outputRows,
-    publishTargetPath,
-    governanceSummary,
-    publishChecks,
-    publishReady,
+    importPreview: importWizard.importPreview,
+    importPreviewLoading: importWizard.importPreviewLoading,
+    importPreviewGeneration: importWizard.importPreviewGeneration,
+    importCommitLoading: importWizard.importCommitLoading,
+    candidateSelections: importWizard.candidateSelections,
+    candidateOverrides: importWizard.candidateOverrides,
+    candidateFilters: importWizard.candidateFilters,
+    importBatch: importWizard.importBatch,
+    importDomainFilter: importWizard.importDomainFilter,
+    aiPromptOverride: editor.aiPromptOverride,
+    aiResponse: editor.aiResponse,
+    aiError: editor.aiError,
+    aiLoading: editor.aiLoading,
+
+    // Computed
+    derivedVariables: editor.derivedVariables,
+    validationLabel: editor.validationLabel,
+    previewText: editor.previewText,
+    requestPreviewText: editor.requestPreviewText,
+    responsePreviewText: editor.responsePreviewText,
+    defaultAIPrompt: editor.defaultAIPrompt,
+    aiPromptText: editor.aiPromptText,
+    aiPreflightReady: editor.aiPreflightReady,
+    aiPreflightState: editor.aiPreflightState,
+    aiPreflightResultText: editor.aiPreflightResultText,
+    availableDomains: publish.availableDomains,
+    visibleImportBatchItems: importWizard.visibleImportBatchItems,
+    ignoredImportCapabilityKeys: importWizard.ignoredImportCapabilityKeys,
+    visibleImportCandidates: importWizard.visibleImportCandidates,
+    importCandidateDomains: importWizard.importCandidateDomains,
+    selectedImportCandidates: importWizard.selectedImportCandidates,
+    canCommitImportPreview: importWizard.canCommitImportPreview,
+    importCommitSummary: importWizard.importCommitSummary,
+    publishedCapabilityNames: publish.publishedCapabilityNames,
+    stats: publish.stats,
+    filteredCapabilities: publish.filteredCapabilities,
+    inputRows: editor.inputRows,
+    testInputRows: editor.testInputRows,
+    outputRows: editor.outputRows,
+    publishTargetPath: editor.publishTargetPath,
+    governanceSummary: editor.governanceSummary,
+    publishChecks: editor.publishChecks,
+    publishReady: editor.publishReady,
+
+    // 分页和批量操作
+    paginatedCapabilities: publish.paginatedCapabilities,
+    pageSize: publish.pageSize,
+    currentPage: publish.currentPage,
+    totalPages: publish.totalPages,
+    groupedStats: publish.groupedStats,
+    publishAll: publish.publishAll,
+
+    // Functions
     loadCapabilities,
-    selectCapability,
-    newDraft,
-    openManualCapability,
-    saveSelectedDraft,
-    validateSelected,
-    testSelected,
-    previewSwaggerURL,
-    clearImportPreview,
-    commitSwaggerImport,
-    updateCandidateOverride,
-    toggleImportIgnored,
-    openImportedCapability,
-    publishSelected,
-    publishCurrent,
-    unpublishSelected,
-    handleQuickPublished,
-    handleQuickPublishError,
-    runAIPreflight,
-    addInputField,
-    removeInputField,
-    renameInputField,
-    setInputType,
-    setInputRequired,
-    addOutputField,
-    removeOutputField,
-    renameOutputField,
-    setOutputPath,
-    testInputFieldValue,
-    setTestInputField,
-    sourceLabel,
-    operationLabel,
-    riskLabel,
-    recommendationLabel,
-    candidateReasonText,
-    candidateVerdictText,
-    hasPublishedTwin,
-    hasStaticToolConflict,
+    selectCapability: editor.selectCapability,
+    newDraft: editor.newDraft,
+    openManualCapability: editor.openManualCapability,
+    saveSelectedDraft: editor.saveSelectedDraft,
+    validateSelected: editor.validateSelected,
+    testSelected: editor.testSelected,
+    previewSwaggerURL: importWizard.previewSwaggerURL,
+    clearImportPreview: importWizard.clearImportPreview,
+    commitSwaggerImport: importWizard.commitSwaggerImport,
+    updateCandidateOverride: importWizard.updateCandidateOverride,
+    toggleImportIgnored: importWizard.toggleImportIgnored,
+    openImportedCapability: importWizard.openImportedCapability,
+    publishSelected: publish.publishSelected,
+    publishCurrent: publish.publishCurrent,
+    unpublishSelected: publish.unpublishSelected,
+    handleQuickPublished: publish.handleQuickPublished,
+    handleQuickPublishError: publish.handleQuickPublishError,
+    runAIPreflight: editor.runAIPreflight,
+    addInputField: editor.addInputField,
+    removeInputField: editor.removeInputField,
+    renameInputField: editor.renameInputField,
+    setInputType: editor.setInputType,
+    setInputRequired: editor.setInputRequired,
+    addOutputField: editor.addOutputField,
+    removeOutputField: editor.removeOutputField,
+    renameOutputField: editor.renameOutputField,
+    setOutputPath: editor.setOutputPath,
+    testInputFieldValue: editor.testInputFieldValue,
+    setTestInputField: editor.setTestInputField,
+    sourceLabel: sourceLabelFn,
+    operationLabel: operationLabelFn,
+    riskLabel: riskLabelFn,
+    recommendationLabel: recommendationLabelFn,
+    candidateReasonText: candidateReasonTextFn,
+    candidateVerdictText: candidateVerdictTextFn,
+    hasPublishedTwin: editor.hasPublishedTwin,
+    hasStaticToolConflict: editor.hasStaticToolConflict,
     isPublishable,
     publishActionLabel,
     currentPublishLabel,
     nextActionLabel,
-    resetAIPreflight,
-    // 分页和批量操作
-    paginatedCapabilities,
-    pageSize,
-    currentPage,
-    totalPages,
-    groupedStats,
-    publishAll,
+    resetAIPreflight: editor.resetAIPreflight,
   };
 }

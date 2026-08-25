@@ -1,14 +1,41 @@
 <script setup lang="ts">
-import { ElButton } from 'element-plus';
+import { ElButton, ElMessage, ElMessageBox } from 'element-plus';
 import type { UseCapabilities } from '../../composables/useCapabilities';
 
 const props = defineProps<{ capabilities: UseCapabilities }>();
 
 async function handlePublishAll() {
   const result = await props.capabilities.publishAll();
-  if (result) {
-    alert(`发布完成：成功 ${result.success} 个，失败 ${result.failed} 个，共 ${result.total} 个`);
+  if (!result) {
+    return;
   }
+  if (result.failed === 0) {
+    ElMessage.success(`已发布 ${result.success} 个能力`);
+    return;
+  }
+  // 有失败项：用明细弹窗替代 alert，逐条列出失败原因，不再吞掉错误。
+  const detailHtml = result.failures
+    .map((failure) => `<p class="publish-fail"><strong>${escapeHtml(failure.name)}</strong><span>${escapeHtml(failure.reason)}</span></p>`)
+    .join('');
+  await ElMessageBox.confirm(
+    detailHtml,
+    `批量发布完成：成功 ${result.success} / ${result.total}`,
+    {
+      type: result.failed > result.success ? 'warning' : 'info',
+      confirmButtonText: '知道了',
+      showCancelButton: false,
+      dangerouslyUseHTMLString: true,
+      customClass: 'publish-result-dialog',
+    },
+  );
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 </script>
 
@@ -173,5 +200,29 @@ async function handlePublishAll() {
   margin-bottom: var(--space-3, 12px);
   font-size: 0.85rem;
   color: var(--color-text-secondary, #57606a);
+}
+</style>
+
+<style>
+/* 批量发布失败明细弹窗：逐条列出失败能力名 + 原因。 */
+.publish-result-dialog .publish-fail {
+  margin: 6px 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--el-color-danger, #f56c6c);
+  background: var(--el-fill-color-light, #f5f7fa);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+}
+
+.publish-result-dialog .publish-fail strong {
+  color: var(--el-text-color-primary, #303133);
+}
+
+.publish-result-dialog .publish-fail span {
+  color: var(--el-text-color-secondary, #909399);
+  word-break: break-all;
 }
 </style>
