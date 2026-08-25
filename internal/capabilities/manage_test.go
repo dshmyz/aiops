@@ -698,7 +698,7 @@ func TestManagerQuickPublishPublishesReadCapabilityDirectly(t *testing.T) {
 	}
 }
 
-func TestManagerQuickPublishRejectsNonGETMethod(t *testing.T) {
+func TestManagerQuickPublishRejectsUnsupportedMethod(t *testing.T) {
 	t.Parallel()
 	manager := capabilities.NewManager(t.TempDir(), nil)
 
@@ -707,12 +707,12 @@ func TestManagerQuickPublishRejectsNonGETMethod(t *testing.T) {
 		Domain:         "redis",
 		ResourceType:   "cluster",
 		BackendBaseURL: "https://middleware.example.com",
-		Method:         http.MethodPost,
+		Method:         "OPTIONS",
 		Path:           "/api/redis/clusters/{cluster}/info",
 		Description:    "Read Redis cluster info",
 	})
-	if !errors.Is(err, capabilities.ErrInvalidQuickPublishMethod) {
-		t.Fatalf("error = %v, want ErrInvalidQuickPublishMethod", err)
+	if !errors.Is(err, capabilities.ErrInvalidQuickPublishRequest) {
+		t.Fatalf("error = %v, want ErrInvalidQuickPublishRequest", err)
 	}
 }
 

@@ -441,14 +441,14 @@ func TestCapabilityQuickPublishMapsConflict(t *testing.T) {
 func TestCapabilityQuickPublishMapsInvalidRequest(t *testing.T) {
 	t.Parallel()
 	service := &capabilityManagementService{
-		quickPublishErr: capabilities.ErrInvalidQuickPublishMethod,
+		quickPublishErr: capabilities.ErrInvalidQuickPublishRequest,
 	}
 	router := httpapi.NewRouter(
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		execution.NewReadOnlyService(&readRunner{}, nil),
 		httpapi.WithCapabilities(service),
 	)
-	body := `{"name":"redis.cluster.info.read","domain":"redis","resource_type":"cluster","backend_base_url":"https://middleware.example.com","method":"POST","path":"/api/redis/clusters/{cluster}/info","description":"Read Redis cluster info"}`
+	body := `{"name":"redis.cluster.info.read","domain":"redis","resource_type":"cluster","backend_base_url":"https://middleware.example.com","method":"OPTIONS","path":"/api/redis/clusters/{cluster}/info","description":"Read Redis cluster info"}`
 	req := signedRequest(t, "/v1/capabilities/quick-publish", body, "admin-1", []string{"admin"}, []string{"prod"})
 	res := httptest.NewRecorder()
 

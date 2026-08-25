@@ -29,8 +29,7 @@ var (
 	ErrInvalidOpenAPIURL           = errors.New("invalid OpenAPI URL")
 	ErrInvalidOpenAPIFingerprint   = errors.New("invalid OpenAPI fingerprint")
 	ErrOpenAPIFingerprintChanged   = errors.New("OpenAPI fingerprint changed")
-	ErrInvalidQuickPublishRequest  = errors.New("quick publish requires name, domain, resource_type, backend_base_url, path, and description")
-	ErrInvalidQuickPublishMethod  = errors.New("quick publish only supports GET method")
+	ErrInvalidQuickPublishRequest  = errors.New("quick publish requires backend_base_url, path, and description")
 	ErrInvalidQuickPublishBaseURL  = errors.New("quick publish requires an absolute http or https backend_base_url")
 )
 
@@ -394,14 +393,14 @@ func (m *Manager) Unpublish(ctx context.Context, name string) (ManagedCapability
 }
 
 func validateQuickPublishRequest(request QuickPublishRequest) error {
-	if strings.TrimSpace(request.Name) == "" || strings.TrimSpace(request.Domain) == "" || strings.TrimSpace(request.ResourceType) == "" {
-		return ErrInvalidQuickPublishRequest
-	}
 	if strings.TrimSpace(request.BackendBaseURL) == "" || strings.TrimSpace(request.Path) == "" || strings.TrimSpace(request.Description) == "" {
 		return ErrInvalidQuickPublishRequest
 	}
-	if request.Method != http.MethodGet {
-		return ErrInvalidQuickPublishMethod
+	if !isSupportedImportMethod(strings.ToUpper(request.Method)) && request.Method != "" {
+		// 方法为空时默认 GET
+		if request.Method != "" {
+			return ErrInvalidQuickPublishRequest
+		}
 	}
 	if err := validatePublishedBaseURL(request.BackendBaseURL); err != nil {
 		return ErrInvalidQuickPublishBaseURL
@@ -409,20 +408,109 @@ func validateQuickPublishRequest(request QuickPublishRequest) error {
 	return nil
 }
 
+// AutoInferQuickPublish 从最少输入自动推断快速发布的完整配置。
+// 只需要 base_url + path + description，其他字段全部智能推断。
+func AutoInferQuickPublish(request QuickPublishRequest) QuickPublishRequest {
+	method := strings.ToUpper(request.Method)
+	if method == "" {
+		method = http.MethodGet
+	}
+	// 从 URL 和 path 推断 domain/resource_type/name
+	text := strings.ToLower(request.BackendBaseURL + " " + request.Path + " " + request.Description)
+	domain := inferDomain(text)
+	resourceType := inferResourceType(text)
+	if request.Domain != "" {
+		domain = request.Domain
+	}
+	if request.ResourceType != "" {
+		resourceType = request.ResourceType
+	}
+	// 推断 name: domain.resource_type.operation
+	operation := "read"
+	if !isReadMethod(method) {
+		operation = inferWriteOperationName(method, request.Path)
+	}
+	name := request.Name
+	if name == "" {
+		name = domain + "." + resourceType + "." + operation
+		// 简单去重处理（如果有 path 变量，追加一个标识）
+		if vars := pathVariables(request.Path); len(vars) > 0 {
+			name += "_by_" + strings.Join(vars, "_and_")
+		}
+	}
+	// 推断 summary_template
+	summaryTemplate := request.SummaryTemplate
+	if summaryTemplate == "" {
+		if isReadMethod(method) {
+			summaryTemplate = "查询" + resourceType + "完成"
+		} else {
+			summaryTemplate = operation + resourceType + "完成"
+		}
+	}
+	return QuickPublishRequest{
+		Name:            name,
+		Domain:          domain,
+		ResourceType:    resourceType,
+		BackendBaseURL:  request.BackendBaseURL,
+		Method:          method,
+		Path:            request.Path,
+		Description:     request.Description,
+		SummaryTemplate: summaryTemplate,
+		Examples:        request.Examples,
+	}
+}
+
+// isReadMethod 判断 HTTP 方法是否为读操作。
+func isReadMethod(method string) bool {
+	return strings.ToUpper(method) == http.MethodGet
+}
+
+// inferWriteOperationName 从方法和路径推断写操作的名称。
+func inferWriteOperationName(method, path string) string {
+	switch strings.ToUpper(method) {
+	case http.MethodPost:
+		return "create"
+	case http.MethodPut:
+		return "update"
+	case http.MethodPatch:
+		return "patch"
+	case http.MethodDelete:
+		return "delete"
+	default:
+		return "write"
+	}
+}
+
 func buildQuickPublishCapability(request QuickPublishRequest) Capability {
+	// 先做智能推断（补全缺失字段）
+	request = AutoInferQuickPublish(request)
+	method := strings.ToUpper(request.Method)
+	if method == "" {
+		method = http.MethodGet
+	}
+	toolOp := tools.Read
+	risk := tools.Low
+	if !isReadMethod(method) {
+		toolOp = tools.Write
+		// 写操作默认 medium 风险，DELETE 为 high
+		risk = tools.Medium
+		if method == http.MethodDelete {
+			risk = tools.High
+		}
+	}
 	inputSchema := map[string]InputField{
 		"environment": {Type: "string", Required: true},
 	}
 	for _, name := range pathVariables(request.Path) {
 		inputSchema[name] = InputField{Type: "string", Required: true}
 	}
-	summaryTemplate := strings.TrimSpace(request.SummaryTemplate)
-	if summaryTemplate == "" {
-		summaryTemplate = "Read " + request.ResourceType
-	}
 	examples := request.Examples
 	if examples == nil {
 		examples = []string{}
+	}
+	outputKind := "observation"
+	if toolOp == tools.Write {
+		outputKind = "action_result"
 	}
 	return Capability{
 		SchemaVersion: 1,
@@ -430,19 +518,19 @@ func buildQuickPublishCapability(request QuickPublishRequest) Capability {
 		Status:        StatusPublished,
 		Domain:        request.Domain,
 		ResourceType:  request.ResourceType,
-		Operation:     tools.Read,
-		Risk:          tools.Low,
+		Operation:     toolOp,
+		Risk:          risk,
 		Backend: BackendSpec{
 			Adapter:   "http",
-			Method:    http.MethodGet,
+			Method:    method,
 			Path:      request.Path,
 			TimeoutMS: 3000,
 			BaseURL:   request.BackendBaseURL,
 		},
 		InputSchema: inputSchema,
 		Output: OutputSpec{
-			Kind:            "observation",
-			SummaryTemplate: summaryTemplate,
+			Kind:            outputKind,
+			SummaryTemplate: request.SummaryTemplate,
 		},
 		Auth: AuthSpec{
 			Roles:             []string{"viewer", "operator", "admin"},

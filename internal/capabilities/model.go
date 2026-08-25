@@ -126,6 +126,7 @@ type InputField struct {
 type OutputSpec struct {
 	Kind            string            `yaml:"kind" json:"kind"`
 	SeverityPath    string            `yaml:"severity_path" json:"severity_path"`
+	StatusMapping   map[string]string `yaml:"status_mapping" json:"status_mapping"`
 	SummaryTemplate string            `yaml:"summary_template" json:"summary_template"`
 	Fields          map[string]string `yaml:"fields" json:"fields"`
 }
@@ -158,6 +159,9 @@ type NormalizedResult struct {
 	Severity string         `json:"severity"`
 	Summary  string         `json:"summary"`
 	Data     map[string]any `json:"data"`
+	// Raw 是后端响应的脱敏(+截断)快照，仅供审计/排查留档。
+	// 用 json:"-" 排除在 JSON 序列化之外，避免进入 LLM 输出或对外暴露。
+	Raw string `json:"-"`
 }
 
 type ResourceRef struct {

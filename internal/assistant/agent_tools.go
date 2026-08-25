@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -104,6 +105,22 @@ func (t *CapabilityTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	// 3. 执行 HTTP 调用
 	result, err := t.adapter.Execute(ctx, t.cap, input)
 	if err != nil {
+		// 失败也留档（便于排查）：记录输入、错误，以及后端失败时带出的脱敏响应体。
+		if t.audit != nil {
+			meta := map[string]any{"input": input, "result": "error", "error": err.Error()}
+			var be *capabilities.BackendError
+			if errors.As(err, &be) {
+				meta["response_raw"] = be.BodyRedacted
+				meta["status_code"] = be.StatusCode
+			}
+			_ = t.audit.Record(ctx, audit.Event{
+				Action:    "tool_executed",
+				Subject:   caller.Subject,
+				RequestID: caller.RequestID,
+				ToolName:  t.cap.Name,
+				Metadata:  meta,
+			})
+		}
 		return "", fmt.Errorf("execute %s: %w", t.cap.Name, err)
 	}
 
@@ -115,8 +132,12 @@ func (t *CapabilityTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 			RequestID: caller.RequestID,
 			ToolName:  t.cap.Name,
 			Metadata: map[string]any{
-				"input":  input,
-				"status": result.Severity,
+				"input":        input,
+				"output":       result.Data,
+				"summary":      result.Summary,
+				"severity":     result.Severity,
+				"response_raw": result.Raw,
+				"result":       "ok",
 			},
 		})
 	}

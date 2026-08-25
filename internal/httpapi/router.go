@@ -732,6 +732,15 @@ func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Req
 			return
 		}
 		writeCapabilityJSON(writer, map[string]any{"capabilities": imported})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/capabilities/quick-publish/infer":
+		var body capabilities.QuickPublishRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
+		if err := decoder.Decode(&body); err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid JSON input")
+			return
+		}
+		inferred := capabilities.AutoInferQuickPublish(body)
+		writeCapabilityJSON(writer, map[string]any{"inferred": inferred})
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/capabilities/quick-publish":
 		var body capabilities.QuickPublishRequest
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))

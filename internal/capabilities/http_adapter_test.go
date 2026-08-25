@@ -3,6 +3,7 @@ package capabilities_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,181 @@ func TestHTTPAdapterBuildsRequestAndNormalizesOutput(t *testing.T) {
 	}
 	if _, ok := result.Data["secret_token"]; ok {
 		t.Fatalf("result leaked redacted field: %+v", result.Data)
+	}
+}
+
+// status_mapping 把接口的原始状态值映射成标准严重级：显式 severity_path 取到 RED，
+// 经 status_mapping 归一为 critical，而不是把原始值当严重级透传。
+func TestHTTPAdapterStatusMappingNormalizesSeverityPathValue(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"status":"RED","usage_pct":86}}`))
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	capability.Output.SeverityPath = "$.data.status"
+	capability.Output.StatusMapping = map[string]string{"RED": "critical", "YELLOW": "warning", "running": "ok"}
+	input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, input)
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	if result.Severity != "critical" {
+		t.Fatalf("severity = %q, want critical", result.Severity)
+	}
+}
+
+// status_mapping 未命中时保持原严重级（向后兼容，不覆盖既有推断/透传）。
+func TestHTTPAdapterStatusMappingUnmatchedKeepsValue(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"status":"warning","usage_pct":86}}`))
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	capability.Output.SeverityPath = "$.data.status"
+	capability.Output.StatusMapping = map[string]string{"RED": "critical"}
+	input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, input)
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	if result.Severity != "warning" {
+		t.Fatalf("severity = %q, want warning (unmatched mapping preserved)", result.Severity)
+	}
+}
+
+// 留档快照 Raw 必须对任意层级敏感字段做脱敏，供审计不含密钥。
+func TestHTTPAdapterRawResponseRedactedForAudit(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"usage_pct":86,"nested":{"secret_token":"hide","zone":"a"}}}`))
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	// Raw 不含任何敏感字段内容，且保留正常返回数据
+	if strings.Contains(result.Raw, "secret_token") || strings.Contains(result.Raw, "hide") {
+		t.Fatalf("audit Raw leaked sensitive data: %s", result.Raw)
+	}
+	if !strings.Contains(result.Raw, "usage_pct") {
+		t.Fatalf("audit Raw should keep non-sensitive data: %s", result.Raw)
+	}
+	// 最终给 LLM 的 Data 不含敏感字段（既有行为），且与留档分离
+	if _, ok := result.Data["secret_token"]; ok {
+		t.Fatalf("LLM Data leaked sensitive field: %+v", result.Data)
+	}
+}
+
+// 非 JSON 响应不得导致能力失败：作为文本文档交给 LLM（data.content），severity 为 info。
+func TestHTTPAdapterSupportsNonJSONTextResponse(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("cluster m1 healthy\nnode-1 up\nnode-2 DOWN"))
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	if err != nil {
+		t.Fatalf("non-JSON response should not fail: %v", err)
+	}
+	content, ok := result.Data["content"].(string)
+	if !ok || !strings.Contains(content, "node-2 DOWN") {
+		t.Fatalf("data.content = %v, want text body", result.Data["content"])
+	}
+	if result.Severity != "info" {
+		t.Fatalf("severity = %q, want info for text response", result.Severity)
+	}
+}
+
+// 超长非 JSON 文本截断到 maxNonJSONContentBytes 并标注 truncated。
+func TestHTTPAdapterNonJSONTextIsTruncated(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("line-metric-", 3000)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(long))
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	content, _ := result.Data["content"].(string)
+	if len(content) >= len(long) {
+		t.Fatalf("content should be truncated: len=%d vs original=%d", len(content), len(long))
+	}
+	if len(content) == 0 || !strings.HasPrefix(content, "line-metric-") {
+		t.Fatalf("truncated content head missing, got prefix %q", content[:min(11, len(content))])
+	}
+	if result.Data["truncated"] != true {
+		t.Fatalf("truncated flag not set")
+	}
+	// 留档快照仍存在，且不承载未截断的完整长文
+	if !strings.Contains(result.Raw, "line-metric") {
+		t.Fatalf("raw snapshot should capture text for audit")
+	}
+}
+
+// 顶层 JSON 数组是合法结构化响应，应纳入 data.items，而非当成文本 content 降级。
+func TestHTTPAdapterTopLevelArrayBecomesStructured(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"orders","lag":5},{"name":"payments","lag":9}]`))
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	if err != nil {
+		t.Fatalf("top-level array should not fail: %v", err)
+	}
+	if _, hasContent := result.Data["content"]; hasContent {
+		t.Fatalf("top-level array must not go through text fallback: %+v", result.Data)
+	}
+	items, ok := result.Data["items"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("data.items = %+v, want array of 2", result.Data["items"])
+	}
+}
+
+// 失败响应（非 2xx）原始脱敏 body 通过 BackendError 携带，供审计留档，且不污染 Error() 消息。
+func TestHTTPAdapterNon2xxCarriesRedactedBodyForAudit(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		_, _ = w.Write([]byte(`{"error":"boom","secret_token":"x"}`))
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	if err == nil {
+		t.Fatalf("non-2xx should fail")
+	}
+	if strings.Contains(err.Error(), "boom") {
+		t.Fatalf("BackendError Error() leaks body: %v", err)
+	}
+	var be *capabilities.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *capabilities.BackendError, got %T", err)
+	}
+	if !strings.Contains(be.BodyRedacted, "boom") {
+		t.Fatalf("BodyRedacted should carry body: %q", be.BodyRedacted)
+	}
+	if strings.Contains(be.BodyRedacted, "secret_token") {
+		t.Fatalf("BodyRedacted leaked sensitive: %q", be.BodyRedacted)
+	}
+	if be.StatusCode != 500 {
+		t.Fatalf("StatusCode = %d, want 500", be.StatusCode)
 	}
 }
 

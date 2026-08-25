@@ -235,7 +235,10 @@ func (a *HTTPAdapter) do(req *http.Request) (*http.Response, error) {
 			return resp, nil
 		}
 
-		lastErr = fmt.Errorf("backend returned HTTP %d", resp.StatusCode)
+		// 非 2xx：读取脱敏错误体供审计留档，作为 BackendError 对外透出。
+		// 这里先读 body 再 close，否则原始错误体在 executeRead/Write 处已无从获取。
+		badBody, _ := io.ReadAll(io.LimitReader(resp.Body, int64(maxBackendResponseBytes+1)))
+		lastErr = newBackendError(fmt.Errorf("backend returned HTTP %d", resp.StatusCode), resp.StatusCode, badBody)
 		resp.Body.Close()
 		if !isRetryable {
 			break
@@ -289,29 +292,54 @@ func (a *HTTPAdapter) executeRead(ctx context.Context, capability Capability, in
 	}
 	var raw map[string]any
 	if err := json.Unmarshal(payload, &raw); err != nil {
-		return NormalizedResult{}, err
+		// 顶层 JSON 数组也是合法结构化响应，纳入 data.items，避免误判为文本文档
+		if arr, ok := topLevelArray(payload); ok {
+			return normalizeTopLevelArray(payload, capability, input, arr), nil
+		}
+		// 非 JSON 响应：降级为文本文档能力，不再失败
+		return normalizeTextResult(payload, capability, input), nil
 	}
 
 	fields := make(map[string]any)
 	if len(capability.Output.Fields) == 0 {
-		// 没有显式字段映射时，传递原始响应数据（适用于仪表盘/概览类查询）
-		for k, v := range raw {
-			if !isSensitive(k) {
-				fields[k] = v
-			}
-		}
+		// 没有显式字段映射时，智能提取：递归展开嵌套对象、数组截断、敏感字段过滤
+		fields = smartExtractFields(raw)
 	} else {
 		for name, path := range capability.Output.Fields {
 			if isSensitive(name) || isSensitivePath(path) {
 				continue
 			}
 			if value, ok := extractPath(raw, path); ok {
+				// 标量值保留原始类型（与原行为一致）；数组/对象智能展开
 				if _, ok := scalarString(value); ok {
 					fields[name] = value
+				} else if arr, ok := value.([]any); ok && len(arr) > 0 {
+					// 数组字段：保留前 maxArrayItems 个标量元素 + 总数
+					safeArr := make([]any, 0, maxArrayItems)
+					for i, item := range arr {
+						if i >= maxArrayItems {
+							break
+						}
+						if _, ok := scalarString(item); ok {
+							safeArr = append(safeArr, item)
+						}
+					}
+					if len(safeArr) > 0 {
+						fields[name] = safeArr
+						fields[name+"_count"] = len(arr)
+					}
+				} else if obj, ok := value.(map[string]any); ok && len(obj) > 0 {
+					// 对象字段：展开扁平子字段
+					subFields := make(map[string]any)
+					flattenObject(name, obj, subFields)
+					for k, v := range subFields {
+						fields[k] = v
+					}
 				}
 			}
 		}
 	}
+	// 严重级别：优先用显式配置的 severity_path，否则智能推断
 	severity := "info"
 	if capability.Output.SeverityPath != "" {
 		if !isSensitivePath(capability.Output.SeverityPath) {
@@ -321,8 +349,20 @@ func (a *HTTPAdapter) executeRead(ctx context.Context, capability Capability, in
 				}
 			}
 		}
+	} else {
+		severity = inferSeverityFromData(fields)
 	}
+	// status_mapping：按能力自配置把原始状态值归一到标准严重级（未命中则保持不变），
+	// 让"值→层级"可针对具体接口配置，而非只能靠全局 classifySeverity 猜。
+	severity = applyStatusMapping(severity, capability.Output.StatusMapping)
 	name := resourceNameFromInput(capability, input)
+	// 摘要：优先用 summary_template，否则智能生成
+	summary := ""
+	if strings.TrimSpace(capability.Output.SummaryTemplate) != "" {
+		summary = renderSummary(capability.Output.SummaryTemplate, input, fields)
+	} else {
+		summary = inferSummaryFromData(fields, capability.ResourceType)
+	}
 	return NormalizedResult{
 		Kind: capability.Output.Kind,
 		Resource: ResourceRef{
@@ -332,8 +372,9 @@ func (a *HTTPAdapter) executeRead(ctx context.Context, capability Capability, in
 			Environment: fmt.Sprint(input["environment"]),
 		},
 		Severity: severity,
-		Summary:  renderSummary(capability.Output.SummaryTemplate, input, fields),
+		Summary:  summary,
 		Data:     fields,
+		Raw:      redactResponse(payload),
 	}, nil
 }
 
@@ -372,22 +413,61 @@ func (a *HTTPAdapter) executeWrite(ctx context.Context, capability Capability, i
 	raw := map[string]any{}
 	if len(payload) > 0 {
 		if err := json.Unmarshal(payload, &raw); err != nil {
-			return NormalizedResult{}, err
+			if arr, ok := topLevelArray(payload); ok {
+				return normalizeTopLevelArray(payload, capability, input, arr), nil
+			}
+			// 非 JSON 响应：降级为文本文档能力，不再失败
+			return normalizeTextResult(payload, capability, input), nil
 		}
 	}
 
 	fields := make(map[string]any)
-	for name, fieldPath := range capability.Output.Fields {
-		if isSensitive(name) || isSensitivePath(fieldPath) {
-			continue
-		}
-		if value, ok := extractPath(raw, fieldPath); ok {
-			if _, ok := scalarString(value); ok {
-				fields[name] = value
+	if len(capability.Output.Fields) == 0 {
+		// 无显式映射时智能提取（与读操作一致）
+		fields = smartExtractFields(raw)
+	} else {
+		for name, fieldPath := range capability.Output.Fields {
+			if isSensitive(name) || isSensitivePath(fieldPath) {
+				continue
+			}
+			if value, ok := extractPath(raw, fieldPath); ok {
+				if _, ok := scalarString(value); ok {
+					fields[name] = value
+				} else if arr, ok := value.([]any); ok && len(arr) > 0 {
+					safeArr := make([]any, 0, maxArrayItems)
+					for i, item := range arr {
+						if i >= maxArrayItems {
+							break
+						}
+						if _, ok := scalarString(item); ok {
+							safeArr = append(safeArr, item)
+						}
+					}
+					if len(safeArr) > 0 {
+						fields[name] = safeArr
+						fields[name+"_count"] = len(arr)
+					}
+				} else if obj, ok := value.(map[string]any); ok && len(obj) > 0 {
+					subFields := make(map[string]any)
+					flattenObject(name, obj, subFields)
+					for k, v := range subFields {
+						fields[k] = v
+					}
+				}
 			}
 		}
 	}
 	name := resourceNameFromInput(capability, input)
+	// 写操作也智能推断摘要
+	summary := ""
+	if strings.TrimSpace(capability.Output.SummaryTemplate) != "" {
+		summary = renderSummary(capability.Output.SummaryTemplate, input, fields)
+	} else {
+		summary = inferSummaryFromData(fields, capability.ResourceType)
+		if summary == "" {
+			summary = "操作执行完成"
+		}
+	}
 	return NormalizedResult{
 		Kind: capability.Output.Kind,
 		Resource: ResourceRef{
@@ -397,9 +477,57 @@ func (a *HTTPAdapter) executeWrite(ctx context.Context, capability Capability, i
 			Environment: fmt.Sprint(input["environment"]),
 		},
 		Severity: "info",
-		Summary:  renderSummary(capability.Output.SummaryTemplate, input, fields),
+		Summary:  summary,
 		Data:     fields,
+		Raw:      redactResponse(payload),
 	}, nil
+}
+
+// normalizeTopLevelArray 处理顶层 JSON 数组：作为结构化结果放入 data.items，
+// 元素递归脱敏（复用 redactValue），避免被误判为文本文档降级。
+func normalizeTopLevelArray(payload []byte, capability Capability, input map[string]any, arr []any) NormalizedResult {
+	return NormalizedResult{
+		Kind: capability.Output.Kind,
+		Resource: ResourceRef{
+			Domain:      capability.Domain,
+			Type:        capability.ResourceType,
+			Name:        resourceNameFromInput(capability, input),
+			Environment: fmt.Sprint(input["environment"]),
+		},
+		Severity: "info",
+		Summary:  fmt.Sprintf("后端返回了 JSON 数组（%d 项），内容见 items 字段", len(arr)),
+		Data:     map[string]any{"items": redactValue(arr)},
+		Raw:      redactResponse(payload),
+	}
+}
+
+// normalizeTextResult 处理无法解析为 JSON 的后端响应：作为"文本文档能力"，
+// 把原文（截断到 maxNonJSONContentBytes）放入 data.content 交给 LLM，而不是让能力失败。
+// severity 固定 info（无结构化状态字段可推断）；留档快照仍走 redactResponse。
+func normalizeTextResult(payload []byte, capability Capability, input map[string]any) NormalizedResult {
+	content := string(payload)
+	truncated := false
+	if len(content) > maxNonJSONContentBytes {
+		content = content[:maxNonJSONContentBytes]
+		truncated = true
+	}
+	fields := map[string]any{"content": content}
+	if truncated {
+		fields["truncated"] = true
+	}
+	return NormalizedResult{
+		Kind: capability.Output.Kind,
+		Resource: ResourceRef{
+			Domain:      capability.Domain,
+			Type:        capability.ResourceType,
+			Name:        resourceNameFromInput(capability, input),
+			Environment: fmt.Sprint(input["environment"]),
+		},
+		Severity: "info",
+		Summary:  "后端返回了非 JSON 文本，内容见 content 字段" + map[bool]string{true: "（已截断）"}[truncated],
+		Data:     fields,
+		Raw:      redactResponse(payload),
+	}
 }
 
 func buildWriteBody(capability Capability, input map[string]any) ([]byte, error) {
