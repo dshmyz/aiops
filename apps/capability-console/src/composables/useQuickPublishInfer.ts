@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { ComputedRef, Ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { inferQuickPublish } from '../api';
@@ -34,8 +34,9 @@ export interface QuickPublishInfer {
 
 /**
  * useQuickPublishInfer 封装快速发布表单的 AI 字段补全：
+ * - 三个必填项首次填齐时自动补全一次（避免每次修改都请求），
+ *   "AI 一键补全 / 重新补全"按钮仍可随时手动触发；
  * - 只覆盖用户未手动编辑过的字段（字段级脏标记），避免推断覆盖用户手填内容；
- * - blur 自动触发与"AI 一键补全"按钮共用 doInfer，推断后可重新补全；
  * - 失败用 ElMessage.warning 提示而非静默降级。
  */
 export function useQuickPublishInfer(options: UseQuickPublishInferOptions): QuickPublishInfer {
@@ -46,6 +47,8 @@ export function useQuickPublishInfer(options: UseQuickPublishInferOptions): Quic
   const inferredCount = ref(0);
   // 字段级脏标记：用户手动编辑过则推断不覆盖。
   const userEdited = ref<Set<QuickPublishInferField>>(new Set());
+  // 自动补全的沿触发标志：必填项从"未齐"变为"齐"且尚未成功推断时才自动触发。
+  let autoTriggered = false;
 
   const canInfer = computed(
     () =>
@@ -53,6 +56,21 @@ export function useQuickPublishInfer(options: UseQuickPublishInferOptions): Quic
       baseURL.value.trim() !== '' &&
       path.value.trim() !== '' &&
       description.value.trim() !== '',
+  );
+
+  // 必填项首次全部填齐（path 与 description 从缺变为有）时自动补全一次。
+  // 手动编辑必填项不会反复触发；已推断后如需更新，走手动"重新补全"按钮。
+  watch(
+    [path, description],
+    ([nextPath, nextDescription], [prevPath, prevDescription]) => {
+      const nowReady = nextPath.trim() !== '' && nextDescription.trim() !== '';
+      const wasReady = prevPath.trim() !== '' && prevDescription.trim() !== '';
+      if (nowReady && !wasReady && !autoTriggered) {
+        autoTriggered = true;
+        void doInfer();
+      }
+    },
+    { flush: 'sync' },
   );
 
   function buildPayload(): QuickPublishPayload {
@@ -114,6 +132,8 @@ export function useQuickPublishInfer(options: UseQuickPublishInferOptions): Quic
     hasInferred.value = false;
     inferredCount.value = 0;
     userEdited.value = new Set();
+    // 复位沿触发标志，使下一次"填齐必填项"仍能自动补全。
+    autoTriggered = false;
   }
 
   return {

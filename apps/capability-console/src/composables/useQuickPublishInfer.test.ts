@@ -35,6 +35,31 @@ function setup() {
   return { infer, baseURL, path, description, name, domain, resourceType, summaryTemplate };
 }
 
+/** 从空必填项开始的 setup，用于测试"填齐自动补全"的沿触发。 */
+function setupEmpty() {
+  const baseURL = ref('https://middleware.example.com');
+  const path = ref('');
+  const description = ref('');
+  const method = ref('GET' as const);
+  const name = ref('');
+  const domain = ref('');
+  const resourceType = ref('');
+  const summaryTemplate = ref('');
+
+  const infer = useQuickPublishInfer({
+    baseURL,
+    path,
+    description,
+    method,
+    name,
+    domain,
+    resourceType,
+    summaryTemplate,
+  });
+
+  return { infer, baseURL, path, description, name, domain, resourceType, summaryTemplate };
+}
+
 describe('useQuickPublishInfer', () => {
   beforeEach(() => {
     mockedInfer.mockReset();
@@ -128,5 +153,95 @@ describe('useQuickPublishInfer', () => {
     await infer.doInfer();
     expect(name.value).toBe('ai.generated.name');
     expect(infer.hasInferred.value).toBe(true);
+  });
+
+  it('必填项首次填齐时自动补全一次', async () => {
+    const { infer, path, description, name } = setupEmpty();
+    mockedInfer.mockResolvedValue({
+      inferred: {
+        name: 'redis.cluster.info.read',
+        domain: 'redis',
+        resource_type: 'cluster',
+        backend_base_url: 'https://middleware.example.com',
+        method: 'GET',
+        path: '/api/redis/clusters/{cluster}/info',
+        description: '查询 Redis 集群信息',
+      },
+    });
+
+    // 填 path 不触发（description 还为空）
+    path.value = '/api/redis/clusters/{cluster}/info';
+    await Promise.resolve();
+    expect(mockedInfer).not.toHaveBeenCalled();
+
+    // 填齐 description 触发自动补全
+    description.value = '查询 Redis 集群信息';
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockedInfer).toHaveBeenCalledTimes(1);
+    expect(name.value).toBe('redis.cluster.info.read');
+    expect(infer.hasInferred.value).toBe(true);
+  });
+
+  it('自动补全只触发一次，后续修改必填项不再重复请求', async () => {
+    const { infer, path, description } = setupEmpty();
+    mockedInfer.mockResolvedValue({
+      inferred: {
+        name: 'redis.cluster.info.read',
+        domain: 'redis',
+        resource_type: 'cluster',
+        backend_base_url: 'https://middleware.example.com',
+        method: 'GET',
+        path: '/api/redis/clusters/{cluster}/info',
+        description: '查询 Redis 集群信息',
+      },
+    });
+
+    path.value = '/api/redis/clusters/{cluster}/info';
+    description.value = '查询 Redis 集群信息';
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockedInfer).toHaveBeenCalledTimes(1);
+
+    // 用户修改必填项不应再次自动请求
+    description.value = '更新后的描述';
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockedInfer).toHaveBeenCalledTimes(1);
+  });
+
+  it('reset 后重新填齐必填项可再次自动补全', async () => {
+    const { infer, path, description, name } = setupEmpty();
+    mockedInfer.mockResolvedValue({
+      inferred: {
+        name: 'redis.cluster.info.read',
+        domain: 'redis',
+        resource_type: 'cluster',
+        backend_base_url: 'https://middleware.example.com',
+        method: 'GET',
+        path: '/api/redis/clusters/{cluster}/info',
+        description: '查询 Redis 集群信息',
+      },
+    });
+
+    // 首次填齐触发
+    path.value = '/api/redis/clusters/{cluster}/info';
+    description.value = '查询 Redis 集群信息';
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockedInfer).toHaveBeenCalledTimes(1);
+
+    // 模拟发布成功后的 reset（组件同时清空必填项）
+    infer.reset();
+    name.value = '';
+    path.value = '';
+    description.value = '';
+
+    // 清空后再填齐，应再次自动触发
+    path.value = '/api/redis/clusters/{cluster}/info';
+    description.value = '查询 Redis 集群信息';
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockedInfer).toHaveBeenCalledTimes(2);
   });
 });
