@@ -46,6 +46,16 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
   const aiLoading = ref(false);
 
   const derivedVariables = computed(() => pathVariables(selected.value.backend.path));
+  // 当前能力合法的测试字段名集合：schema 字段 ∪ 路径变量 ∪ environment。
+  // testInputRows 与 pruneTestInput 都基于它，保证"字段是否合法"唯一出处。
+  const testInputFieldNames = computed(() => {
+    const names = new Set<string>(Object.keys(selected.value.input_schema));
+    for (const name of derivedVariables.value) {
+      names.add(name);
+    }
+    names.add('environment');
+    return names;
+  });
   const validationLabel = computed(() => (validation.value.valid ? '校验通过' : validation.value.error ?? '未校验'));
   const previewText = computed(() => (preview.value ? JSON.stringify(preview.value, null, 2) : '暂无预览'));
   const requestPreviewText = computed(() => `${selected.value.backend.method || 'GET'} ${selected.value.backend.path || '/'}`);
@@ -114,6 +124,26 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     }
     return Array.from(rows.values());
   });
+  // 将 testInputText 中已不属于当前能力合法字段的键清理掉（保留仍在的字段值）。
+  // 用于同 key 重选路径：能力 schema 字段被增删/改名后，旧字段名残留会污染
+  // 测试请求与 AI 预检提示词；裁剪只删失效键，不丢用户仍有效的输入。
+  function pruneTestInput() {
+    const input = parseTestInput(testInputText.value);
+    const names = testInputFieldNames.value;
+    const next: Record<string, unknown> = {};
+    let changed = false;
+    for (const [name, value] of Object.entries(input)) {
+      if (names.has(name)) {
+        next[name] = value;
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) {
+      testInputText.value = JSON.stringify(next);
+      resetAIPreflight();
+    }
+  }
   const outputRows = computed(() =>
     Object.entries(selected.value.output.fields).map(([name, path]) => ({
       name,
@@ -241,14 +271,19 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
   function selectCapability(capability: ManagedCapability) {
     // 能力切换的唯一入口（列表点击 / 导入 / 发布 / 下架 / 刷新自动选中都经过这里）。
     // 切到另一个能力时重置测试参数，避免上一个能力的参数残留导致误测；
-    // 同一能力重新选中（如保存后重选）则保留用户已填的测试输入。
-    if (capabilityKey(capability) !== capabilityKey(selected.value)) {
-      testInputText.value = '{"environment":"prod"}';
-    }
+    // 同一能力重新选中（如保存后重选）则保留用户已填的测试输入，
+    // 但清理 schema 已不存在的字段（能力编辑中增删/改名后旧字段名不再合法）。
+    const switching = capabilityKey(capability) !== capabilityKey(selected.value);
     selected.value = normalizeCapability(JSON.parse(JSON.stringify(capability)) as Partial<ManagedCapability>);
     validation.value = selected.value.validation;
     preview.value = null;
     resetAIPreflight();
+    if (switching) {
+      testInputText.value = '{"environment":"prod"}';
+    } else {
+      // 先更新 selected 再裁剪，pruneTestInput 基于新能力的合法字段集合。
+      pruneTestInput();
+    }
   }
 
   function newDraft() {
