@@ -366,4 +366,58 @@ describe('ConversationTurnItem', () => {
 
     expect(wrapper.find('[data-test="assistant-steps"]').exists()).toBe(false);
   });
+
+  test('thinking auto-expands while streaming, stays expandable after', async () => {
+    const turn: ConversationTurn = {
+      ...baseTurn,
+      id: 'turn-thinking',
+      role: 'assistant',
+      content: '分析中',
+      thinking: '先查 lag 再查 topic…',
+    };
+
+    const wrapper = mount(ConversationTurnItem, { props: { turn, streaming: true } });
+
+    const section = wrapper.find('[data-test="conversation-turn-thinking"]');
+    expect(section.exists()).toBe(true);
+    // 流式期间：thinking 自动展开，无需手动点击即可看到推理过程。
+    // 用 aria-expanded 断言折叠状态：v-show 的 display:none 在 jsdom 下无法
+    // 被 isVisible() 稳定识别，aria-expanded 是组件暴露的可靠状态信号。
+    expect(wrapper.find('.thinking-toggle').attributes('aria-expanded')).toBe('true');
+  });
+
+  test('thinking stays collapsed for replayed turns (no streaming)', () => {
+    const turn: ConversationTurn = {
+      ...baseTurn,
+      id: 'turn-thinking-replay',
+      role: 'assistant',
+      content: '分析中',
+      thinking: '先查 lag 再查 topic…',
+    };
+
+    const wrapper = mount(ConversationTurnItem, { props: { turn, streaming: false } });
+
+    expect(wrapper.find('[data-test="conversation-turn-thinking"]').exists()).toBe(true);
+    // 非流式回放：保持默认收起，不打扰阅读
+    expect(wrapper.find('.thinking-toggle').attributes('aria-expanded')).toBe('false');
+  });
+
+  test('thinking respects manual toggle after stream ends', async () => {
+    const turn: ConversationTurn = {
+      ...baseTurn,
+      id: 'turn-thinking-manual',
+      role: 'assistant',
+      content: '分析完成',
+      thinking: '先查 lag…',
+    };
+
+    const wrapper = mount(ConversationTurnItem, { props: { turn, streaming: true } });
+    // 流式时自动展开，随后用户手动收起，流式结束后保持收起
+    expect(wrapper.find('.thinking-toggle').attributes('aria-expanded')).toBe('true');
+    await wrapper.find('.thinking-toggle').trigger('click');
+    expect(wrapper.find('.thinking-toggle').attributes('aria-expanded')).toBe('false');
+
+    await wrapper.setProps({ streaming: false });
+    expect(wrapper.find('.thinking-toggle').attributes('aria-expanded')).toBe('false');
+  });
 });

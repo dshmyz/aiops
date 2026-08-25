@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { ConversationTurn, Block, DiagnosticPackage, AssistantStep, PlanSummary, RecommendationStatus } from '../types';
 import { formatRelativeTime, formatAbsoluteTime, formatResponseType } from '../conversationFormat';
 import AssistantSteps from './AssistantSteps.vue';
@@ -50,9 +50,24 @@ const showTypingDots = computed(() => Boolean(props.streaming && props.turn.cont
 // 流式生成中且已有内容：末尾追加闪烁光标
 const showStreamingCursor = computed(() => Boolean(props.streaming && props.turn.content !== ''));
 
-// 思考过程折叠状态：默认收起（除非正在流式生成思考中）
+// 思考过程折叠状态：流式生成中 thinking 到达时自动展开（边到边看推理过程），
+// 用户手动点击后进入手动偏好；非流式回放保持默认收起，不打扰阅读。
 const thinkingExpanded = ref(false);
+let thinkingManual = false;
 const hasThinking = computed(() => Boolean(props.turn.thinking && props.turn.thinking.trim()));
+watch(
+  () => [props.streaming, props.turn.thinking],
+  ([streaming, thinking]) => {
+    if (streaming && thinking && !thinkingManual) {
+      thinkingExpanded.value = true;
+    }
+  },
+  { immediate: true },
+);
+function toggleThinking() {
+  thinkingManual = true;
+  thinkingExpanded.value = !thinkingExpanded.value;
+}
 
 // 工具调用折叠状态：默认展开（实时显示调用进度）
 const toolCallsExpanded = ref(true);
@@ -209,7 +224,7 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
           type="button"
           class="thinking-toggle"
           :aria-expanded="thinkingExpanded"
-          @click="thinkingExpanded = !thinkingExpanded"
+          @click="toggleThinking"
         >
           <SfSymbol name="sparkles" :size="16" />
           <span>思考过程</span>
