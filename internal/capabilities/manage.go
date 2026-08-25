@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gracegaoya/ai-operations-copilot/internal/policy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
@@ -389,7 +390,25 @@ func (m *Manager) registerPublished(published ManagedCapability) (ManagedCapabil
 }
 
 func (m *Manager) Unpublish(ctx context.Context, name string) (ManagedCapability, error) {
-	return m.store.MovePublishedToDraft(ctx, name)
+	unpublished, err := m.store.MovePublishedToDraft(ctx, name)
+	if err != nil {
+		return ManagedCapability{}, err
+	}
+	// 与 Publish 的 registerPublished 对称：下架后从运行时注销，避免 AI 仍能
+	// 调用已下线能力。tools 注册 + policy 角色权限 + runner 路由三处同时清理。
+	m.unregisterPublished(unpublished)
+	return unpublished, nil
+}
+
+// unregisterPublished 在下架时清理运行时注册，与 registerPublished 对称。
+// 按"注销优先"顺序：先从工具表与策略层移除（失败则能力已不对外），
+// 再从 runner 移除路由。runner 移除不返回错误（map 删除幂等）。
+func (m *Manager) unregisterPublished(published ManagedCapability) {
+	if m.runtime != nil {
+		_ = tools.UnregisterDynamicTools([]string{published.Name})
+		policy.UnregisterDynamicRolePermissions(map[string][]string{published.Name: append([]string(nil), published.Auth.Roles...)})
+		m.runtime.RemovePublishedCapability(published.Name)
+	}
 }
 
 func validateQuickPublishRequest(request QuickPublishRequest) error {

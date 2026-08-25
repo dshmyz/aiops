@@ -2,9 +2,12 @@ package capabilities
 
 import "context"
 
-// CapabilityStore 抽象能力的持久化操作，使 Manager 与存储后端解耦。第一阶段用
-// FileCapabilityStore（行为与原文件读写完全一致），后续可填 SQLCapabilityStore
-// 实现多节点一致的运行时事实源，而 Manager 业务逻辑不需改动。
+// CapabilityStore 抽象能力的持久化操作，使 Manager 与存储后端解耦。当前有
+// 两个实现：
+//   - FileCapabilityStore：单机文件模式，discovered/ 与 published/ 目录下 yaml
+//   - SQLCapabilityStore：多节点一致的运行时事实源（DB 可用时由 main 优先使用）
+//
+// Manager 业务逻辑对后端无感知，新增后端实现无需改动业务层。
 type CapabilityStore interface {
 	// Configured 检查 store 是否就绪（文件模式 = 目录存在；DB 模式 = 表可连）。
 	Configured() error

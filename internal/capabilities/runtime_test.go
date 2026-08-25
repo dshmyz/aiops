@@ -743,3 +743,153 @@ func writeCapabilityForRegister() capabilities.Capability {
 		},
 	}
 }
+
+// recordingRuntime 记录下架时 RemovePublishedCapability 的调用，用于验证
+// Manager.Unpublish 是否对运行时做了对称清理。
+type recordingRuntime struct {
+	removed []string
+}
+
+func (r *recordingRuntime) AddPublishedCapability(capabilities.Capability) error { return nil }
+func (r *recordingRuntime) RemovePublishedCapability(name string) {
+	r.removed = append(r.removed, name)
+}
+
+func TestManagerUnpublishCleansUpRuntimeRegistration(t *testing.T) {
+	tools.ResetDynamicToolsForTest()
+	policy.ResetDynamicRolePermissionsForTest()
+	t.Cleanup(tools.ResetDynamicToolsForTest)
+	t.Cleanup(policy.ResetDynamicRolePermissionsForTest)
+
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "discovered", "minio.bucket.capacity.read.yaml"), validReadYAML("needs_review"))
+	runtime := &recordingRuntime{}
+	manager := capabilities.NewManagerWithRuntime(root, nil, runtime)
+
+	published, err := manager.Publish(context.Background(), "minio.bucket.capacity.read")
+	if err != nil {
+		t.Fatalf("Publish returned %v", err)
+	}
+	tool, ok := tools.Lookup(published.Name)
+	if !ok {
+		t.Fatalf("Lookup after publish: tool %q not registered", published.Name)
+	}
+	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}}, tool, map[string]any{
+		"environment": "prod",
+		"cluster":     "m1",
+		"bucket":      "archive",
+	})
+	if !decision.Allowed {
+		t.Fatalf("viewer decision after publish = %+v, want allowed", decision)
+	}
+
+	if _, err := manager.Unpublish(context.Background(), published.Name); err != nil {
+		t.Fatalf("Unpublish returned %v", err)
+	}
+
+	// 1) 工具从运行时表注销
+	if _, ok := tools.Lookup(published.Name); ok {
+		t.Fatalf("Lookup after unpublish: tool %q still registered", published.Name)
+	}
+	// 2) 策略层角色权限移除
+	if policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}}, tools.Tool{Name: published.Name, Operation: tools.Read, Risk: tools.Low}, map[string]any{
+		"environment": "prod",
+		"cluster":     "m1",
+		"bucket":      "archive",
+	}).Allowed {
+		t.Fatal("viewer still allowed after unpublish")
+	}
+	// 3) 运行时 runner 被通知移除
+	if len(runtime.removed) != 1 || runtime.removed[0] != published.Name {
+		t.Fatalf("runtime.removed = %v, want [%s]", runtime.removed, published.Name)
+	}
+}
+
+func TestCapabilityReadRunnerExecutesDependencyChainInOrder(t *testing.T) {
+	tools.ResetDynamicToolsForTest()
+	policy.ResetDynamicRolePermissionsForTest()
+	t.Cleanup(tools.ResetDynamicToolsForTest)
+	t.Cleanup(policy.ResetDynamicRolePermissionsForTest)
+
+	var order []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		order = append(order, r.URL.Path)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	}))
+	defer server.Close()
+
+	loaded := drainRestartChain()
+	// 给每个能力定制独立 path，以便断言 pre→root→post 的执行顺序。
+	paths := map[string]string{
+		"lb.backend.drain":   "/drain",
+		"service.restart":    "/restart",
+		"lb.backend.restore": "/restore",
+	}
+	for i := range loaded {
+		loaded[i].Backend.BaseURL = server.URL
+		loaded[i].Backend.Path = paths[loaded[i].Name]
+	}
+	// drain/restore/restart 均为写能力，走 write runner 执行依赖链。
+	runner := capabilities.NewCapabilityWriteRunner(writeExecutorFunc(func(context.Context, string, map[string]any) (map[string]any, error) {
+		t.Fatal("dependency chain fell through to fallback executor")
+		return nil, nil
+	}), loaded, capabilities.NewHTTPAdapter(http.DefaultClient))
+
+	result, err := runner.Execute(context.Background(), "service.restart", map[string]any{"environment": "prod", "cluster": "k1", "bucket": "archive"})
+	if err != nil {
+		t.Fatalf("Read returned %v", err)
+	}
+	wantOrder := []string{"/drain", "/restart", "/restore"}
+	if len(order) != len(wantOrder) {
+		t.Fatalf("call order = %v, want %v", order, wantOrder)
+	}
+	for i := range wantOrder {
+		if !strings.Contains(order[i], wantOrder[i]) {
+			t.Fatalf("call order = %v, want %v", order, wantOrder)
+		}
+	}
+	if result["summary"] == "" {
+		t.Fatalf("result = %+v, want root summary", result)
+	}
+	// 依赖执行明细聚合进 dependencies 字段
+	if deps, ok := result["dependencies"]; !ok {
+		t.Fatalf("result = %+v, want dependencies aggregation", result)
+	} else if arr, ok := deps.([]map[string]any); !ok || len(arr) != 3 {
+		t.Fatalf("dependencies = %+v, want 3 executed steps", deps)
+	}
+}
+
+func TestCapabilityWriteRunnerAbortsOnRequiredDependencyFailure(t *testing.T) {
+	tools.ResetDynamicToolsForTest()
+	policy.ResetDynamicRolePermissionsForTest()
+	t.Cleanup(tools.ResetDynamicToolsForTest)
+	t.Cleanup(policy.ResetDynamicRolePermissionsForTest)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/lb.backend.drain" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"drain failed"}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	}))
+	defer server.Close()
+
+	loaded := drainRestartChain()
+	for i := range loaded {
+		loaded[i].Backend.BaseURL = server.URL
+		loaded[i].Backend.Path = "/" + loaded[i].Name
+	}
+	runner := capabilities.NewCapabilityWriteRunner(writeExecutorFunc(func(context.Context, string, map[string]any) (map[string]any, error) {
+		t.Fatal("dependency chain fell through to fallback executor")
+		return nil, nil
+	}), loaded, capabilities.NewHTTPAdapter(http.DefaultClient))
+
+	_, err := runner.Execute(context.Background(), "service.restart", map[string]any{"environment": "prod", "cluster": "k1", "bucket": "archive"})
+	if err == nil {
+		t.Fatal("Execute succeeded, want required dependency failure to abort chain")
+	}
+	if !strings.Contains(err.Error(), "lb.backend.drain") {
+		t.Fatalf("error = %v, want mention of failing dependency", err)
+	}
+}

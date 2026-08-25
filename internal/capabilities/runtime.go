@@ -22,6 +22,9 @@ type ReadRunner interface {
 
 type PublishedCapabilityRuntime interface {
 	AddPublishedCapability(Capability) error
+	// RemovePublishedCapability 在下架已发布能力时从运行时移除对应 capability，
+	// 使执行路径不再路由到该工具。与 AddPublishedCapability 对称。
+	RemovePublishedCapability(name string)
 }
 
 func RegisterPublished(root string) ([]Capability, error) {
@@ -74,6 +77,9 @@ type CapabilityReadRunner struct {
 	next         ReadRunner
 	capabilities map[string]Capability
 	adapter      *HTTPAdapter
+	// resolver 把 depends_on 声明解析为可执行的依赖链。随 loaded 构造，
+	// Add/Remove 时重建以反映运行时增减。
+	resolver *DependencyResolver
 }
 
 func NewCapabilityReadRunner(next ReadRunner, loaded []Capability, adapter *HTTPAdapter) *CapabilityReadRunner {
@@ -96,7 +102,7 @@ func NewCapabilityReadRunner(next ReadRunner, loaded []Capability, adapter *HTTP
 		}
 		byName[capability.Name] = capability
 	}
-	return &CapabilityReadRunner{next: next, capabilities: byName, adapter: adapter}
+	return &CapabilityReadRunner{next: next, capabilities: byName, adapter: adapter, resolver: NewDependencyResolver(loaded)}
 }
 
 func (r *CapabilityReadRunner) AddPublishedCapability(capability Capability) error {
@@ -120,6 +126,7 @@ func (r *CapabilityReadRunner) AddPublishedCapability(capability Capability) err
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.capabilities[capability.Name] = capability
+	r.rebuildResolverLocked()
 	return nil
 }
 
@@ -127,14 +134,17 @@ func (r *CapabilityReadRunner) Read(ctx context.Context, tool tools.Tool, input 
 	r.mu.RLock()
 	if capability, ok := r.capabilities[tool.Name]; ok {
 		r.mu.RUnlock()
-		result, err := r.adapter.Execute(ctx, capability, input)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"kind": result.Kind, "resource": result.Resource, "severity": result.Severity, "summary": result.Summary, "data": result.Data}, nil
+		return executeCapabilityChain(ctx, r.resolver, r.adapter, capability, input)
 	}
 	r.mu.RUnlock()
 	return r.next.Read(ctx, tool, input)
+}
+
+// RemovePublishedCapability 从读 runner 移除已下架能力，使其不再被路由。
+func (r *CapabilityReadRunner) RemovePublishedCapability(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.capabilities, name)
 }
 
 // CapabilityWriteRunner routes write-tool executions for published dynamic
@@ -148,6 +158,9 @@ type CapabilityWriteRunner struct {
 	capabilities map[string]Capability
 	adapter      *HTTPAdapter
 	readRunner   ReadRunner
+	// resolver 把 depends_on 声明解析为可执行的依赖链。随 loaded 构造，
+	// Add/Remove 时重建以反映运行时增减。
+	resolver *DependencyResolver
 }
 
 func NewCapabilityWriteRunner(next execution.Executor, loaded []Capability, adapter *HTTPAdapter) *CapabilityWriteRunner {
@@ -177,7 +190,7 @@ func NewCapabilityWriteRunnerWithVerifier(next execution.Executor, loaded []Capa
 		}
 		byName[capability.Name] = capability
 	}
-	return &CapabilityWriteRunner{next: next, capabilities: byName, adapter: adapter, readRunner: readRunner}
+	return &CapabilityWriteRunner{next: next, capabilities: byName, adapter: adapter, readRunner: readRunner, resolver: NewDependencyResolver(loaded)}
 }
 
 func (r *CapabilityWriteRunner) AddPublishedCapability(capability Capability) error {
@@ -201,6 +214,7 @@ func (r *CapabilityWriteRunner) AddPublishedCapability(capability Capability) er
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.capabilities[capability.Name] = capability
+	r.rebuildResolverLocked()
 	return nil
 }
 
@@ -208,17 +222,100 @@ func (r *CapabilityWriteRunner) Execute(ctx context.Context, name string, input 
 	r.mu.RLock()
 	if capability, ok := r.capabilities[name]; ok {
 		r.mu.RUnlock()
-		result, err := r.adapter.Execute(ctx, capability, input)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"kind": result.Kind, "resource": result.Resource, "severity": result.Severity, "summary": result.Summary, "data": result.Data}, nil
+		return executeCapabilityChain(ctx, r.resolver, r.adapter, capability, input)
 	}
 	r.mu.RUnlock()
 	if r.next == nil {
 		return nil, fmt.Errorf("no executor registered for tool %q", name)
 	}
 	return r.next.Execute(ctx, name, input)
+}
+
+// RemovePublishedCapability 从写 runner 移除已下架能力，使其不再被路由。
+func (r *CapabilityWriteRunner) RemovePublishedCapability(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.capabilities, name)
+	r.rebuildResolverLocked()
+}
+
+// rebuildResolverLocked 从当前 capabilities 快照重建依赖解析器，使 hot-add/remove
+// 后 depends_on 声明仍然可解析。调用方必须持有 r.mu（写锁）。
+func (r *CapabilityReadRunner) rebuildResolverLocked() {
+	loaded := make([]Capability, 0, len(r.capabilities))
+	for _, capability := range r.capabilities {
+		loaded = append(loaded, capability)
+	}
+	r.resolver = NewDependencyResolver(loaded)
+}
+
+// rebuildResolverLocked 从当前 capabilities 快照重建依赖解析器（写 runner 版）。
+func (r *CapabilityWriteRunner) rebuildResolverLocked() {
+	loaded := make([]Capability, 0, len(r.capabilities))
+	for _, capability := range r.capabilities {
+		loaded = append(loaded, capability)
+	}
+	r.resolver = NewDependencyResolver(loaded)
+}
+
+// executeCapabilityChain 按 depends_on 声明的依赖链顺序执行能力：先执行
+// pre 阶段依赖（最深的先跑），再执行 root 能力，最后执行 post 阶段依赖。
+// required 依赖失败会中止整条链；optional/suggested 依赖失败只记录并跳过，
+// 不阻断 root 执行。返回 root 的规范化结果，依赖执行结果聚合进 data 的
+// dependencies 字段供审计与排障。
+//
+// 依赖 step 与 root 使用同一 adapter（HTTPAdapter 不区分 operation），因此
+// 读 runner 也能编排写依赖、写 runner 也能编排读依赖；依赖是 operator 在
+// 能力 YAML 中声明的可信编排，root 已通过策略层鉴权。
+func executeCapabilityChain(ctx context.Context, resolver *DependencyResolver, adapter *HTTPAdapter, root Capability, input map[string]any) (map[string]any, error) {
+	chain, err := resolver.Resolve(root.Name, input)
+	if err != nil {
+		return nil, err
+	}
+	executed := make([]map[string]any, 0, len(chain.Steps))
+	var rootResult *NormalizedResult
+	for _, step := range chain.Steps {
+		capability, ok := resolver.byName[step.Capability]
+		if !ok {
+			return nil, fmt.Errorf("capability %q in dependency chain is not registered", step.Capability)
+		}
+		result, err := adapter.Execute(ctx, capability, step.Input)
+		if err != nil {
+			if step.Required() {
+				return nil, fmt.Errorf("dependency %q (%s phase): %w", step.Capability, step.Phase, err)
+			}
+			// optional/suggested 依赖失败：记录并继续，不阻断 root。
+			executed = append(executed, map[string]any{
+				"capability": step.Capability,
+				"phase":      step.Phase,
+				"skipped":    true,
+				"error":      err.Error(),
+			})
+			continue
+		}
+		executed = append(executed, map[string]any{
+			"capability": step.Capability,
+			"phase":      step.Phase,
+			"summary":    result.Summary,
+		})
+		if step.Capability == root.Name && step.Phase == "" {
+			rootResult = &result
+		}
+	}
+	if rootResult == nil {
+		return nil, fmt.Errorf("root capability %q did not execute in dependency chain", root.Name)
+	}
+	response := map[string]any{
+		"kind":     rootResult.Kind,
+		"resource": rootResult.Resource,
+		"severity": rootResult.Severity,
+		"summary":  rootResult.Summary,
+		"data":     rootResult.Data,
+	}
+	if len(executed) > 1 {
+		response["dependencies"] = executed
+	}
+	return response, nil
 }
 
 func isPublishedWriteCapability(capability Capability) bool {

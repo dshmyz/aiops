@@ -59,6 +59,11 @@ func (r *compositeCapabilityRuntime) AddPublishedCapability(capability capabilit
 	return r.write.AddPublishedCapability(capability)
 }
 
+func (r *compositeCapabilityRuntime) RemovePublishedCapability(name string) {
+	r.read.RemovePublishedCapability(name)
+	r.write.RemovePublishedCapability(name)
+}
+
 // buildCapabilityRuntimes wires the read runner, write executor (which also
 // implements execution.Verifier), and hot-publish runtime. When capabilities
 // are not configured the function returns the static stubs so the rest of the

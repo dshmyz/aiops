@@ -840,3 +840,33 @@ paths:
 		t.Fatalf("retention_hours input not enriched: %+v", cap.InputSchema["retention_hours"])
 	}
 }
+
+func TestManagerUnpublishCleansUpPublishedFile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "published", "minio.bucket.capacity.read.yaml"), validReadYAML("published"))
+	manager := capabilities.NewManager(root, nil)
+
+	unpublished, err := manager.Unpublish(context.Background(), "minio.bucket.capacity.read")
+	if err != nil {
+		t.Fatalf("Unpublish returned %v", err)
+	}
+	if unpublished.Source != "discovered" || unpublished.Status != "needs_review" {
+		t.Fatalf("unpublished = %+v, want discovered needs_review", unpublished)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "published", "minio.bucket.capacity.read.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("published file was not cleaned up, stat = %v", err)
+	}
+	draftPath := filepath.Join(root, "discovered", "minio.bucket.capacity.read.yaml")
+	draftData, err := os.ReadFile(draftPath)
+	if err != nil {
+		t.Fatalf("discovered draft missing after unpublish: %v", err)
+	}
+	if strings.Contains(string(draftData), "status: published") {
+		t.Fatalf("discovered draft still contains published status:\n%s", draftData)
+	}
+	if !strings.Contains(string(draftData), "status: needs_review") {
+		t.Fatalf("discovered draft does not contain needs_review status:\n%s", draftData)
+	}
+}

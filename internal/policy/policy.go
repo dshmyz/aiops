@@ -82,6 +82,22 @@ func RegisterDynamicRolePermissions(toolRoles map[string][]string) {
 	}
 }
 
+// UnregisterDynamicRolePermissions removes role permissions for the given tools.
+// 与 RegisterDynamicRolePermissions 对称：下架已发布能力时调用，避免策略层残留
+// 对已下线工具的角色放行。未注册的工具/角色被静默忽略（幂等）。
+func UnregisterDynamicRolePermissions(toolRoles map[string][]string) {
+	dynamicRolePermissionsMu.Lock()
+	defer dynamicRolePermissionsMu.Unlock()
+	for tool := range toolRoles {
+		for role, tools := range dynamicRolePermissions {
+			delete(tools, tool)
+			if len(tools) == 0 {
+				delete(dynamicRolePermissions, role)
+			}
+		}
+	}
+}
+
 // ResetDynamicRolePermissionsForTest clears runtime permissions between tests.
 func ResetDynamicRolePermissionsForTest() {
 	dynamicRolePermissionsMu.Lock()
