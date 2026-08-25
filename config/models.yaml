@@ -1,8 +1,20 @@
 # models.yaml — 模型配置注册表
-# 每个模型定义角色（planner/reasoning/formatter）和连接参数
+#
+# 通过 COPILOT_MODELS_CONFIG 指定本文件路径即启用。它作为「唯一事实来源」：
+# yaml 里定义的角色生效，未定义的角色回退到对应 COPILOT_* 环境变量兜底。
+# 角色 -> 兜底 env：
+#   planner   -> COPILOT_OPENAI_MODEL / _BASE_URL / _API_KEY / _TIMEOUT / _MAX_TOKENS
+#   intent    -> COPILOT_INTENT_MODEL / _BASE_URL / _API_KEY（缺省回退 planner）
+#   reasoning -> COPILOT_REASONING_MODEL / _BASE_URL / _API_KEY（缺省回退 planner）
+#   tool      -> 缺省回退 planner（agent 工具调用模型，无 json_object）
+#   fallback  -> COPILOT_FALLBACK_MODEL（主模型限流时降级）
+#
+# api_key 支持 ${ENV_VAR} 语法，避免在文件里明文落盘。
+# 各角色未显式 timeout 时的默认：planner 30s / intent 15s / reasoning 60s /
+# tool 60s / fallback 30s。
 
 models:
-  # 主模型：工具调用 + 意图规划
+  # 主模型：意图识别 + 规划 + 历史压缩 + 回复整形兜底
   planner:
     provider: openai
     model: mimo-v2.5
@@ -10,6 +22,25 @@ models:
     api_key: ${COPILOT_OPENAI_API_KEY}
     timeout: 30s
     max_tokens: 2048
+
+  # 意图识别专用模型（可选）：只在此处为「意图 + 规划」这一步指定更小/更快
+  # 或更便宜的模型；不配置则复用上面的 planner。时间预算独立性也走这里。
+  # intent:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   base_url: https://api.openai.com/v1
+  #   api_key: ${COPILOT_INTENT_API_KEY}
+  #   timeout: 15s
+  #   max_tokens: 512
+
+  # agent 工具调用模型（可选，缺省复用 planner；注意不带 json_object）
+  # tool:
+  #   provider: openai
+  #   model: gpt-4o
+  #   base_url: https://api.openai.com/v1
+  #   api_key: ${COPILOT_OPENAI_API_KEY}
+  #   timeout: 60s
+  #   max_tokens: 2048
 
   # 推理模型：深度分析 + 报告生成
   reasoning:
@@ -20,14 +51,24 @@ models:
     timeout: 60s
     max_tokens: 4096
 
-  # 格式化模型：回复整形（可选，不设则复用 planner）
+  # 备用模型（可选）：主模型连续 3 次 429 限流时自动降级到它
+  # fallback:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   base_url: https://api.openai.com/v1
+  #   api_key: ${COPILOT_FALLBACK_API_KEY}
+  #   timeout: 30s
+  #   max_tokens: 2048
+
+  # formatter / compactor 目前复用 planner 模型，不单独接线。
+  # 如需独立回复整形 / 摘要历史模型，可在这里增加 formatter / compactor 角色。
   # formatter:
   #   provider: openai
   #   model: gpt-4o-mini
   #   base_url: https://api.openai.com/v1
   #   api_key: ${OPENAI_API_KEY}
-
-  # 压缩模型：对话历史摘要（可选，不设则复用 planner）
   # compactor:
   #   provider: openai
   #   model: gpt-4o-mini
+  #   base_url: https://api.openai.com/v1
+  #   api_key: ${OPENAI_API_KEY}

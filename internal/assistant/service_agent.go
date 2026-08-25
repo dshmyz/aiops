@@ -2,6 +2,8 @@ package assistant
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/autonomy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
+	"github.com/gracegaoya/ai-operations-copilot/internal/execution"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
 	"github.com/gracegaoya/ai-operations-copilot/internal/policy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/store"
@@ -95,19 +99,24 @@ func (s *Service) executeAgentStep(ctx context.Context, user identity.CurrentUse
 	}
 	tool, ok := tools.Lookup(intent.ToolName)
 	if !ok {
+		s.recordDenied(ctx, user, intent.ToolName, policy.ToolNotRegistered)
 		return StepOutcome{}, fmt.Errorf("%w: %s", ErrPolicyDenied, policy.ToolNotRegistered)
 	}
-	decision := policy.Evaluate(user, tool, intent.Input)
+	// LLM 生成的 environment 值可能缺失或不在用户白名单（误伤 environment_denied），
+	// 读路径兜底到用户首个允许环境；写路径保持严格（environment 限定写身份）。
+	input := policy.DefaultEnvironment(user, intent.Input)
+	decision := policy.Evaluate(user, tool, input)
 	if !decision.Allowed {
+		s.recordDenied(ctx, user, tool.Name, decision.Reason)
 		return StepOutcome{}, fmt.Errorf("%w: %s", ErrPolicyDenied, decision.Reason)
 	}
 	if s.reads == nil {
 		return StepOutcome{}, errors.New("read service is required")
 	}
 	out.Tool = tool.Name
-	out.Input = intent.Input
+	out.Input = input
 	// Attribute this read to its loop step for audit.
-	answer, err := s.reads.ExecuteRead(ctx, user, tool.Name, intent.Input)
+	answer, err := s.reads.ExecuteRead(ctx, user, tool.Name, input)
 	if err != nil {
 		return StepOutcome{}, err
 	}
@@ -146,12 +155,14 @@ func (s *Service) agentDiagnosticStep(ctx context.Context, user identity.Current
 		return StepOutcome{}, errors.New("diagnostic service is required")
 	}
 	toolName := resolveDiagnosticToolName(s.diagnostics, *intent.Diagnostic)
-	pkg, err := s.diagnostics.Run(ctx, user, *intent.Diagnostic)
+	diagRequest := *intent.Diagnostic
+	diagRequest.Environment = policy.DefaultEnvironmentValue(user, diagRequest.Environment)
+	pkg, err := s.diagnostics.Run(ctx, user, diagRequest)
 	if err != nil {
 		return StepOutcome{}, err
 	}
 	out.Tool = toolName
-	out.Input = map[string]any{"domain": intent.Diagnostic.Domain, "environment": intent.Diagnostic.Environment}
+	out.Input = map[string]any{"domain": diagRequest.Domain, "environment": diagRequest.Environment}
 	out.Output = map[string]any{
 		"summary":         diagnosticStepSummary(pkg),
 		"environment":     pkg.Environment,
@@ -180,10 +191,12 @@ func (s *Service) agentWriteStep(ctx context.Context, user identity.CurrentUser,
 	}
 	tool, ok := tools.Lookup(intent.ToolName)
 	if !ok {
+		s.recordDenied(ctx, user, intent.ToolName, policy.ToolNotRegistered)
 		return StepOutcome{}, fmt.Errorf("%w: %s", ErrPolicyDenied, policy.ToolNotRegistered)
 	}
 	decision := policy.Evaluate(user, tool, intent.Input)
 	if !decision.Allowed {
+		s.recordDenied(ctx, user, tool.Name, decision.Reason)
 		return StepOutcome{}, fmt.Errorf("%w: %s", ErrPolicyDenied, decision.Reason)
 	}
 	// E2: 低风险写若通过准入门则自动执行（已确认 plan → 执行 → advisory 结果），
@@ -515,14 +528,54 @@ func agentMaxControlSteps() int {
 // stepEventFromOutcome renders an executed advisory step as a StreamEvent for
 // the frontend step timeline.
 func stepEventFromOutcome(out StepOutcome) StreamEvent {
+	status := "done"
+	if out.Err != "" {
+		status = "error"
+	}
 	return StreamEvent{Step: &StepEvent{
 		Tool:      out.Tool,
 		StepIndex: out.StepIndex,
-		Status:    "done",
+		Status:    status,
 		Summary:   out.Summary,
 		Input:     out.Input,
 		Output:    out.Output,
+		Error:     out.Err,
 	}}
+}
+
+// recordDenied records an agent-loop policy denial as an audit event, mirroring
+// ReadOnlyService.record (execution/readonly.go). Denials at the loop's read and
+// write branches return before ExecuteRead, so this is the only place they are
+// attributed; it is a no-op when the audit service is nil.
+func (s *Service) recordDenied(ctx context.Context, user identity.CurrentUser, toolName string, reason policy.Reason) {
+	if s.audit == nil {
+		return
+	}
+	metadata := map[string]any{}
+	if step, ok := execution.AgentStepFromContext(ctx); ok {
+		if step.Conversation != "" {
+			metadata["conversation_turn_id"] = step.Conversation
+		}
+		metadata["agent_step"] = step.StepIndex
+	}
+	_ = s.audit.Record(ctx, audit.Event{
+		ID:        newDeniedAuditID(),
+		RequestID: user.RequestID,
+		Subject:   user.Subject,
+		ToolName:  toolName,
+		Action:    audit.ActionReadonlyToolRejected,
+		Decision:  string(reason),
+		Metadata:  metadata,
+		CreatedAt: s.now(),
+	})
+}
+
+func newDeniedAuditID() string {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		panic("secure random source unavailable: " + err.Error())
+	}
+	return hex.EncodeToString(value)
 }
 
 // handoffResponse renders an executive StepOutcome as a confirmation_required
@@ -723,6 +776,11 @@ func stepPayload(out StepOutcome) map[string]any {
 	payload := map[string]any{
 		"tool":       out.Tool,
 		"step_index": out.StepIndex,
+		"status":     "done",
+	}
+	if out.Err != "" {
+		payload["status"] = "failed"
+		payload["error"] = out.Err
 	}
 	if out.Input != nil {
 		payload["input"] = out.Input

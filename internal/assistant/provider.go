@@ -30,16 +30,24 @@ const (
 	envReasoningBaseURL = "COPILOT_REASONING_BASE_URL"
 	envReasoningAPIKey  = "COPILOT_REASONING_API_KEY"
 
+	// 意图识别专用模型配置（可选，不设则复用主模型）
+	envIntentModel   = "COPILOT_INTENT_MODEL"
+	envIntentBaseURL = "COPILOT_INTENT_BASE_URL"
+	envIntentAPIKey  = "COPILOT_INTENT_API_KEY"
+
+	// 统一模型配置注册表文件（models.yaml），角色由 yaml 提供、env 兜底
+	envModelsConfig = "COPILOT_MODELS_CONFIG"
+
 	// 备用模型配置（可选，主模型限流时自动切换）
 	envFallbackModel   = "COPILOT_FALLBACK_MODEL"
 	envFallbackBaseURL = "COPILOT_FALLBACK_BASE_URL"
 	envFallbackAPIKey  = "COPILOT_FALLBACK_API_KEY"
 
-	// defaultChatTimeout is the per-LLM-call timeout used for the eino-openai
-	// chat model unless overridden by COPILOT_OPENAI_TIMEOUT. Reasoning models
-	// (e.g. mimo) can need longer than the historical 5s to formulate a plan, so
-	// the value is configurable in the environment.
-	defaultChatTimeout = 5 * time.Second
+	// defaultChatTimeout is the per-LLM-call fallback timeout for chat models
+	// whose role config doesn't specify one (intent planning / compression can
+	// take longer than a fast fatal timeout). Plan and reasoning roles set their
+	// own defaults (30s / 60s) in the registry; this only guards the extreme case.
+	defaultChatTimeout = 30 * time.Second
 	// defaultChatRetry is the default number of one-shot completion attempts
 	// (1 = no retry). COPILOT_OPENAI_RETRY overrides it.
 	defaultChatRetry = 2
@@ -90,50 +98,76 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 	if provider != "eino-openai" {
 		return nil, nil, nil, "", fmt.Errorf("unsupported assistant provider %q", provider)
 	}
-	apiKey := strings.TrimSpace(env[envOpenAIAPIKey])
-	modelName := strings.TrimSpace(env[envOpenAIModel])
-	if apiKey == "" || modelName == "" {
+	reg, err := LoadModelRegistry(env)
+	if err != nil {
+		return nil, nil, nil, "", fmt.Errorf("load model registry: %w", err)
+	}
+	plannerCfg, ok := reg.Resolve(RolePlanner)
+	if !ok {
+		return nil, nil, nil, "", errors.New("COPILOT_OPENAI_MODEL (or models.yaml planner) is required for eino-openai")
+	}
+	if strings.TrimSpace(resolveEnvVar(plannerCfg.APIKey)) == "" || strings.TrimSpace(plannerCfg.Model) == "" {
 		return nil, nil, nil, "", errors.New("COPILOT_OPENAI_API_KEY and COPILOT_OPENAI_MODEL are required for eino-openai")
-	}
-	temperature := float32(0)
-	maxCompletionTokens := 256
-	if v := strings.TrimSpace(env[envOpenAIMaxTokens]); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxCompletionTokens = n
-		}
-	}
-	timeout := defaultChatTimeout
-	if v := strings.TrimSpace(env[envOpenAITimeout]); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			timeout = d
-		}
 	}
 	// chat is typed as the model interface so it can be swapped for the retry
 	// wrapper below while still being shared by planner/compactor.
-	var chat model.BaseChatModel
-	var err error
-	chat, err = newOpenAIChat(ctx, apiKey, strings.TrimSpace(env[envOpenAIBaseURL]), modelName, temperature, maxCompletionTokens, timeout, true)
+	// 意图识别走独立 intent 槽位（若配置），否则复用 planner 模型。
+	intentChat, intentErr := intentChatFromRegistry(ctx, reg, env)
+	if intentErr != nil {
+		return nil, nil, nil, "", intentErr
+	}
+	chat, err := chatFromConfig(ctx, plannerCfg, env, true, defaultChatTimeout)
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("create eino openai chat model: %w", err)
 	}
-	// Retry transient one-shot completions (provider drops the connection or
-	// stalls awaiting headers) so momentary backends don't surface as hard
-	// failures. Attempts defaults to 2; both knobs are configurable via env.
-	chat = withChatRetry(chat, retryAttempts(env), retryBackoff(env))
-
 	// LLMFormatter 用独立的无 json_object chat：其 prompt 是分隔符格式的自由文本
 	//（[[SUMMARY_START]]...[[SUMMARY_END]]），流式路径把 SUMMARY 区间逐 token 转发。
 	// 若复用 planner 的 json_object chat，模型只回严格 JSON，没有 [[SUMMARY_START]]
 	// 标记 → 0 delta，且空 summary 触发 code 兜底（工具调用路径"一波输出"的根因）。
-	formatterChat, ferr := newOpenAIChat(ctx, apiKey, strings.TrimSpace(env[envOpenAIBaseURL]), modelName, temperature, maxCompletionTokens, timeout, false)
+	formatterChat, ferr := chatFromConfig(ctx, reg.MustResolve(RoleFormatter), env, false, defaultChatTimeout)
 	if ferr != nil {
 		// 极端回退：共享 planner chat（丧失流式，但整形功能不降级）。
 		formatterChat = chat
-	} else {
-		formatterChat = withChatRetry(formatterChat, retryAttempts(env), retryBackoff(env))
 	}
 	formatter := NewChainedFormatter(NewLLMFormatter(formatterChat), NewCodeFallbackFormatter())
-	return NewEinoPlanner(chat), NewLLMCompactor(chat), formatter, "eino-openai", nil
+	planner := NewEinoPlannerWithIntent(chat, intentChat)
+	return planner, NewLLMCompactor(chat), formatter, "eino-openai", nil
+}
+
+// intentChatFromRegistry 解析意图识别专用模型（RoleIntent）。未显式配置或与
+// planner 相同则返回 nil（调用方复用 planner 模型）。
+func intentChatFromRegistry(ctx context.Context, reg *ModelsConfig, env map[string]string) (model.BaseChatModel, error) {
+	plannerCfg, ok := reg.Resolve(RolePlanner)
+	if !ok {
+		return nil, nil
+	}
+	intentCfg, hasIntent := reg.Resolve(RoleIntent)
+	if !hasIntent || intentCfg.Model == "" || intentCfg.Model == plannerCfg.Model {
+		return nil, nil
+	}
+	return chatFromConfig(ctx, intentCfg, env, true, 15*time.Second)
+}
+
+// chatFromConfig 依据统一注册表中的 ModelConfig 创建带重试的 eino-openai chat。
+// cfg.Timeout 留空时使用 defaultTimeout；maxTokens 缺省回退 2048。
+func chatFromConfig(ctx context.Context, cfg ModelConfig, env map[string]string, jsonMode bool, defaultTimeout time.Duration) (model.BaseChatModel, error) {
+	apiKey := resolveEnvVar(cfg.APIKey)
+	baseURL := resolveEnvVar(cfg.BaseURL)
+	timeout := defaultTimeout
+	if cfg.Timeout != "" {
+		if d, err := time.ParseDuration(cfg.Timeout); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+	maxTokens := cfg.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 2048
+	}
+	chat, err := newOpenAIChat(ctx, apiKey, baseURL, cfg.Model, 0, maxTokens, timeout, jsonMode)
+	if err != nil {
+		return nil, err
+	}
+	return withChatRetry(chat, retryAttempts(env), retryBackoff(env)), nil
 }
 
 // newOpenAIChat 创建 eino-openai 聊天模型。jsonMode 为 true 时强制
@@ -200,6 +234,10 @@ func EnvMapFromLookup(lookup func(string) string) map[string]string {
 		envReasoningModel:     lookup(envReasoningModel),
 		envReasoningBaseURL:   lookup(envReasoningBaseURL),
 		envReasoningAPIKey:    lookup(envReasoningAPIKey),
+		envIntentModel:        lookup(envIntentModel),
+		envIntentBaseURL:      lookup(envIntentBaseURL),
+		envIntentAPIKey:       lookup(envIntentAPIKey),
+		envModelsConfig:       lookup(envModelsConfig),
 		envFallbackModel:      lookup(envFallbackModel),
 		envFallbackBaseURL:    lookup(envFallbackBaseURL),
 		envFallbackAPIKey:     lookup(envFallbackAPIKey),
@@ -209,70 +247,38 @@ func EnvMapFromLookup(lookup func(string) string) map[string]string {
 // NewFallbackChatModel 创建带降级的 chat model。
 // 如果 COPILOT_FALLBACK_MODEL 未设置，返回 nil（不降级）。
 func NewFallbackChatModel(ctx context.Context, primary model.BaseChatModel, env map[string]string) model.BaseChatModel {
-	modelName := strings.TrimSpace(env[envFallbackModel])
-	if modelName == "" {
-		return nil
-	}
-	apiKey := strings.TrimSpace(env[envFallbackAPIKey])
-	if apiKey == "" {
-		apiKey = strings.TrimSpace(env[envOpenAIAPIKey])
-	}
-	baseURL := strings.TrimSpace(env[envFallbackBaseURL])
-	if baseURL == "" {
-		baseURL = strings.TrimSpace(env[envOpenAIBaseURL])
-	}
-	temperature := float32(0)
-	maxTokens := 2048
-	timeout := 30 * time.Second
-
-	chat, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
-		APIKey:              apiKey,
-		BaseURL:             baseURL,
-		Model:               modelName,
-		Timeout:             timeout,
-		Temperature:         &temperature,
-		MaxCompletionTokens: &maxTokens,
-	})
+	reg, err := LoadModelRegistry(env)
 	if err != nil {
 		return nil
 	}
-	var fallbackWrapped model.BaseChatModel = chat
-	fallbackWrapped = withChatRetry(fallbackWrapped, retryAttempts(env), retryBackoff(env))
+	cfg, ok := reg.Resolve(RoleFallback)
+	if !ok || cfg.Model == "" {
+		return nil // 未配置备用模型，不降级
+	}
+	fallbackWrapped, err := chatFromConfig(ctx, cfg, env, false, 30*time.Second)
+	if err != nil {
+		return nil
+	}
 	// 3 次连续 429 后切换到备用模型
 	return newFallbackChat(primary, fallbackWrapped, 3)
 }
 
-// NewReasoningModelFromEnv 创建推理模型。如果 COPILOT_REASONING_MODEL 未设置，
-// 返回 nil（表示复用主模型）。
+// NewReasoningModelFromEnv 创建推理模型。如果未配置 RoleReasoning（models.yaml
+// 或 COPILOT_REASONING_MODEL），返回 nil（表示复用主模型）。
 func NewReasoningModelFromEnv(ctx context.Context, env map[string]string) model.BaseChatModel {
-	modelName := strings.TrimSpace(env[envReasoningModel])
-	if modelName == "" {
-		return nil // 未配置推理模型，复用主模型
-	}
-	apiKey := strings.TrimSpace(env[envReasoningAPIKey])
-	if apiKey == "" {
-		apiKey = strings.TrimSpace(env[envOpenAIAPIKey]) // fallback 到主模型 key
-	}
-	baseURL := strings.TrimSpace(env[envReasoningBaseURL])
-	if baseURL == "" {
-		baseURL = strings.TrimSpace(env[envOpenAIBaseURL]) // fallback 到主模型 URL
-	}
-	temperature := float32(0)
-	maxTokens := 4096           // 推理模型给更多 token
-	timeout := 60 * time.Second // 推理模型需要更长时间
-
-	chat, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
-		APIKey:              apiKey,
-		BaseURL:             baseURL,
-		Model:               modelName,
-		Timeout:             timeout,
-		Temperature:         &temperature,
-		MaxCompletionTokens: &maxTokens,
-	})
+	reg, err := LoadModelRegistry(env)
 	if err != nil {
 		return nil
 	}
-	return withChatRetry(chat, retryAttempts(env), retryBackoff(env))
+	cfg, ok := reg.Resolve(RoleReasoning)
+	if !ok || cfg.Model == "" {
+		return nil // 未配置推理模型，复用主模型
+	}
+	chat, err := chatFromConfig(ctx, cfg, env, false, 60*time.Second)
+	if err != nil {
+		return nil
+	}
+	return chat
 }
 
 // NewToolChatModelFromEnv 创建用于 LLM function calling 的 chat model（agent
@@ -289,36 +295,17 @@ func NewToolChatModelFromEnv(ctx context.Context, env map[string]string) model.B
 	if provider != "eino-openai" {
 		return nil
 	}
-	apiKey := strings.TrimSpace(env[envOpenAIAPIKey])
-	modelName := strings.TrimSpace(env[envOpenAIModel])
-	if apiKey == "" || modelName == "" {
-		return nil
-	}
-	temperature := float32(0)
-	maxTokens := 1024 // agent 需要给模型输出工具调用参数/回答留余量
-	if v := strings.TrimSpace(env[envOpenAIMaxTokens]); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxTokens = n
-		}
-	}
-	timeout := 60 * time.Second // agent 循环单轮可较慢
-	if v := strings.TrimSpace(env[envOpenAITimeout]); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			timeout = d
-		}
-	}
-
-	chat, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
-		APIKey:              apiKey,
-		BaseURL:             strings.TrimSpace(env[envOpenAIBaseURL]),
-		Model:               modelName,
-		Timeout:             timeout,
-		Temperature:         &temperature,
-		MaxCompletionTokens: &maxTokens,
-		// 无 ResponseFormat：让模型正常发起 tool call。
-	})
+	reg, err := LoadModelRegistry(env)
 	if err != nil {
 		return nil
 	}
-	return withChatRetry(chat, retryAttempts(env), retryBackoff(env))
+	cfg, ok := reg.Resolve(RoleTool)
+	if !ok || cfg.Model == "" {
+		return nil
+	}
+	chat, err := chatFromConfig(ctx, cfg, env, false, 60*time.Second)
+	if err != nil {
+		return nil
+	}
+	return chat
 }

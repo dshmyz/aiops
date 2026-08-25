@@ -21,6 +21,7 @@ import (
 
 type EinoPlanner struct {
 	chat              model.BaseChatModel
+	intentChat        model.BaseChatModel // 可选：意图识别专用模型，nil 时复用 chat
 	parser            schema.MessageParser[einoIntent]
 	systemPrompt      func() string // nil → use hardcoded einoPlanningPrompt
 	knowledge         KnowledgeAugmenter
@@ -30,6 +31,15 @@ type EinoPlanner struct {
 
 // ChatModel 返回底层的 chat model，用于创建 LLMParamExtractor 等。
 func (p *EinoPlanner) ChatModel() model.BaseChatModel {
+	return p.chat
+}
+
+// intentModel 返回意图识别使用的 chat：配置了独立 intent 槽位时优先用它，
+// 否则复用 planner 主模型。
+func (p *EinoPlanner) intentModel() model.BaseChatModel {
+	if p.intentChat != nil {
+		return p.intentChat
+	}
 	return p.chat
 }
 
@@ -44,6 +54,16 @@ func NewEinoPlanner(chat model.BaseChatModel) *EinoPlanner {
 	return &EinoPlanner{
 		chat:   chat,
 		parser: schema.NewMessageJSONParser[einoIntent](nil),
+	}
+}
+
+// NewEinoPlannerWithIntent 创建可能使用独立意图识别模型的 planner。intentChat
+// 为 nil 时意图识别复用 chat（主模型）。
+func NewEinoPlannerWithIntent(chat, intentChat model.BaseChatModel) *EinoPlanner {
+	return &EinoPlanner{
+		chat:       chat,
+		intentChat: intentChat,
+		parser:     schema.NewMessageJSONParser[einoIntent](nil),
 	}
 }
 
@@ -138,6 +158,7 @@ type StepEvent struct {
 	Summary   string         `json:"summary,omitempty"`
 	Input     map[string]any `json:"input,omitempty"`
 	Output    map[string]any `json:"output,omitempty"`
+	Error     string         `json:"error,omitempty"`
 }
 
 // ProgressEvent reports a pipeline stage transition so the frontend can render
@@ -210,7 +231,7 @@ func (p *EinoPlanner) Plan(ctx context.Context, user identity.CurrentUser, messa
 	messages = append(messages, historyMessages(history)...)
 	messages = append(messages, schema.UserMessage(injectPageContext(message, pageContext)))
 	started := time.Now()
-	response, err := p.chat.Generate(ctx, messages)
+	response, err := p.intentModel().Generate(ctx, messages)
 	if err != nil {
 		span.RecordError(err)
 		return Intent{}, err
@@ -302,7 +323,7 @@ func (p *EinoPlanner) PlanStream(ctx context.Context, user identity.CurrentUser,
 	messages = append(messages, historyMessages(history)...)
 	messages = append(messages, schema.UserMessage(injectPageContext(message, pageContext)))
 
-	reader, err := p.chat.Stream(ctx, messages)
+	reader, err := p.intentModel().Stream(ctx, messages)
 	if err != nil {
 		// 流式降级为一次性: chat.Stream 不可用或出错, 退化为调用 Plan
 		// (chat.Generate), 发送单个 Done 事件. 保持流式契约 (总有且仅有一个
