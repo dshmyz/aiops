@@ -12,9 +12,9 @@ backend:
  timeout_ms: 3000
  base_url: http://127.0.0.1:19090
 input_schema:
- name:
- type: string
- required: true
+    name:
+      type: string
+      required: true
 output:
  kind: observation
  severity_path: $.status
@@ -28,8 +28,8 @@ governance:
  requires_approval: false
  precheck_tools: []
  rollback:
- strategy: ""
- source: ""
+   strategy: ""
+   source: ""
 auth:
  roles:
  - viewer

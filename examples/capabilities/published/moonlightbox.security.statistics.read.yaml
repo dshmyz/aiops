@@ -24,13 +24,13 @@ governance:
  requires_action_plan: false
  requires_approval: false
  rollback:
- source: ''
- strategy: ''
+   source: ''
+   strategy: ''
 input_schema:
- name:
- description: 资源名称（可选）
- required: false
- type: string
+    name:
+      description: 资源名称（可选）
+      required: false
+      type: string
 name: moonlightbox.security.statistics.read
 operation: read
 output:
@@ -43,8 +43,7 @@ output:
  total_vulns: $.data.total_vulns
  kind: observation
  severity_path: $.data
- summary_template: 安全漏洞扫描统计：高危 {high} 个、中危 {medium} 个、低危 {low} 个，共 {total_vulns}
- 个漏洞
+ summary_template: "安全漏洞扫描统计：高危 {high} 个、中危 {medium} 个、低危 {low} 个，共 {total_vulns} 个漏洞"
 resource_type: vulnerability
 risk: low
 schema_version: 1

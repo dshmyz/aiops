@@ -24,13 +24,13 @@ governance:
  requires_action_plan: false
  requires_approval: false
  rollback:
- source: ''
- strategy: ''
+   source: ''
+   strategy: ''
 input_schema:
- name:
- description: 缓存名称（可选，不填返回全部缓存统计）
- required: false
- type: string
+    name:
+      description: 缓存名称（可选，不填返回全部缓存统计）
+      required: false
+      type: string
 name: moonlightbox.cache.stats.read
 operation: read
 output:
