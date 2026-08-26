@@ -108,8 +108,7 @@ backend:
 ```json
 {
   "sub": "alice",
-  "roles": ["sre", "ops"],
-  "allowed_environments": ["prod", "staging"]
+  "roles": ["sre", "ops"]
 }
 ```
 
@@ -126,26 +125,7 @@ backend:
 - `redis.cache.flush`
 - `mysql.slow_query.analyze`
 
-### 2. 环境隔离
-
-所有模板都包含 `environment` 参数，确保：
-
-```yaml
-auth:
-    environment_scoped: true  # 强制环境隔离
-```
-
-用户在 JWT 中声明允许的环境：
-
-```json
-{
-  "allowed_environments": ["staging", "dev"]
-}
-```
-
-这样即使角色是 `admin`，也无法操作 `prod`。
-
-### 3. Precheck Tools
+### 2. Precheck Tools
 
 对于高风险操作，定义前置检查：
 
@@ -158,7 +138,7 @@ governance:
 
 AI Agent 会在执行前自动调用这些能力。
 
-### 4. Rollback 策略
+### 3. Rollback 策略
 
 | 策略 | 说明 | 何时使用 |
 |------|------|---------|
@@ -204,7 +184,7 @@ A: 先改 `status: draft`，调用 API 测试：
 curl -X POST http://localhost:19090/api/agent/chat \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
-    "message": "重启 dev 环境 default namespace 的 test-pod",
+    "message": "重启 default namespace 的 test-pod",
     "session_id": "test-123"
   }'
 ```

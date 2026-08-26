@@ -7,66 +7,66 @@ operation: read
 risk: low
 
 backend:
- adapter: http
- method: GET
- path: /api/mysql/{instance}/slow-queries
- timeout_ms: 10000
- base_url: http://db-management-api:8080
+    adapter: http
+    method: GET
+    path: /api/mysql/{instance}/slow-queries
+    timeout_ms: 10000
+    base_url: http://db-management-api:8080
 
 input_schema:
- instance:
- type: string
- required: true
- time_window_start:
- type: string
- time_window_end:
- type: string
- min_duration_ms:
- type: integer
- min: 100
- limit:
- type: integer
- min: 1
- max: 500
+    instance:
+        type: string
+        required: true
+    time_window_start:
+        type: string
+    time_window_end:
+        type: string
+    min_duration_ms:
+        type: integer
+        min: 100
+    limit:
+        type: integer
+        min: 1
+        max: 500
 output:
- kind: observation
- severity_path: $.status
- summary_template: "Found {count} slow queries on instance {instance}"
- fields:
- slow_queries: $.data.queries
- total_count: $.data.total_count
- avg_duration_ms: $.data.avg_duration
+    kind: observation
+    severity_path: $.status
+    summary_template: "Found {count} slow queries on instance {instance}"
+    fields:
+        slow_queries: $.data.queries
+        total_count: $.data.total_count
+        avg_duration_ms: $.data.avg_duration
 
 governance:
- requires_action_plan: false
- requires_approval: false
- precheck_tools: []
- rollback:
- strategy: ""
- source: ""
+    requires_action_plan: false
+    requires_approval: false
+    precheck_tools: []
+    rollback:
+        strategy: ""
+        source: ""
 
 auth:
- roles:
- - viewer
- - operator
- - admin
+    roles:
+        - viewer
+        - operator
+        - admin
 
 ai:
- description: |
- Analyze slow query logs from a MySQL instance to identify performance
- bottlenecks. Returns query patterns, execution times, tables scanned, and
- optimization suggestions.
+    description: |
+        Analyze slow query logs from a MySQL instance to identify performance
+        bottlenecks. Returns query patterns, execution times, tables scanned, and
+        optimization suggestions.
 
- Use cases: investigate sudden performance degradation, identify missing
- indexes before an optimization sprint, monitor query performance after a
- deployment.
+        Use cases: investigate sudden performance degradation, identify missing
+        indexes before an optimization sprint, monitor query performance after a
+        deployment.
 
- Note: large time windows may return many results - start with the recent
- 1-2 hours. Combine with EXPLAIN for optimization recommendations. The slow
- query log must be enabled on the instance. This reads the slow_log table or
- file and does not affect query performance.
+        Note: large time windows may return many results - start with the recent
+        1-2 hours. Combine with EXPLAIN for optimization recommendations. The slow
+        query log must be enabled on the instance. This reads the slow_log table or
+        file and does not affect query performance.
 
- examples:
- - 分析 mysql-master-01 实例最近 1 小时超过 2 秒的慢查询
- - analyze slow queries on mysql instance db-staging, last 6 hours, min duration 500ms
- - 给我看一下 mysql-local 实例昨天的慢查询 top 20
+    examples:
+        - 分析 mysql-master-01 实例最近 1 小时超过 2 秒的慢查询
+        - analyze slow queries on mysql instance db-staging, last 6 hours, min duration 500ms
+        - 给我看一下 mysql-local 实例昨天的慢查询 top 20
