@@ -10,6 +10,7 @@ import MarkdownContent from './MarkdownContent.vue';
 import MessageFeedbackButtons from './MessageFeedbackButtons.vue';
 import ProgressTimeline from './ProgressTimeline.vue';
 import SfSymbol from './SfSymbol.vue';
+import { mergeExecutionProgress } from '../conversationProgress';
 
 const props = defineProps<{
   turn: ConversationTurn;
@@ -75,6 +76,12 @@ const hasToolCalls = computed(() => Boolean(props.turn.tool_calls && props.turn.
 
 // 进度阶段时间线：当 turn 累积了 progress_stages 时显示
 const hasProgress = computed(() => Boolean(props.turn.progress_stages && props.turn.progress_stages.length > 0));
+
+// 合并阶段与工具调用为一条 Trae 式执行进度流（阶段骨架 + 工具子项）。
+// 诊断/读路径的工具调用锚定在 tool_executing 阶段下。
+const progressEntries = computed(() =>
+  mergeExecutionProgress(props.turn.progress_stages ?? [], props.turn.tool_calls ?? [], Boolean(props.streaming)),
+);
 
 // 已执行步骤（agent 循环）：优先用实时 SSE 累积的 steps；回放时该 turn 本身是
 // 持久化的 tool_step（response_payload 含 tool/input/result/step_index/summary），
@@ -285,10 +292,10 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
         </div>
       </div>
 
-      <!-- 进度事件折叠区：展示 plan→policy→execution 链路的阶段切换时间线 -->
+      <!-- 执行进度流：阶段骨架 + 工具子项（参考 Trae 的实时工具调用流） -->
       <ProgressTimeline
         v-if="isAssistant && hasProgress"
-        :stages="turn.progress_stages!"
+        :entries="progressEntries"
         :streaming="streaming"
       />
 

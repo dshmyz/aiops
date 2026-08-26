@@ -1,81 +1,55 @@
 <script setup lang="ts">
 /**
- * 进度事件清单。
+ * 执行进度流（参考 Trae / Claude 的"实时工具调用流"体验）。
  *
- * 渲染 assistant 问答链路的阶段切换时间线（planning → tool_executing →
- * formatting），让用户在等待最终响应时能看到 Agent 当前处于哪个阶段。
+ * 渲染 assistant 问答链路的一条连贯执行进度时间线：阶段作骨架（planning →
+ * tool_executing → formatting），工具调用作为缩进子项锚定在 tool_executing
+ * 之下。让用户在等待最终响应时能实时看到 Agent 正在做什么、已经完成什么。
  *
  * 设计原则：
- * - 默认展开：进度是用户等待期间最需要的信息，直接可见；仍可点击收起
- * - 完成态语义：已结束的阶段显示绿色 ✓ 与完成时态文案，仅当前阶段用进行时态
- * - 不暴露原始 CoT：只显示阶段标签和工具名（如有），不展示 LLM 思考内容
- * - 与 thinking-section / tool-calls-section 并列，三者职责互补：
- *   thinking 看 CoT、tool_calls 看工具 IO、progress 看阶段时序
+ * - 默认展开：进度是等待期间最需要的信息，直接可见；仍可点击收起
+ * - 完成态语义：已结束的阶段/工具显示绿色 ✓ 与完成时态文案，仅当前进行中的
+ *   变体用进行时态 + 脉冲
+ * - 不暴露原始 CoT：只显示阶段标签与工具名，不展示 LLM 思考内容
+ * - 输入是已合并的执行流条目（conversationProgress.mergeExecutionProgress 的
+ *   输出），组件本身不关心三源数据如何汇聚，保持单一只管渲染
  */
 import { computed, ref } from 'vue';
-import type { ProgressStage } from '../types';
+import type { ProgressEntry } from '../conversationProgress';
 import SfSymbol from './SfSymbol.vue';
 
 const props = defineProps<{
-  /** 该 turn 累积的进度阶段列表（按接收顺序） */
-  stages: ProgressStage[];
+  /** 合并后的执行进度条目流（阶段 + 工具子项，按顺序） */
+  entries: ProgressEntry[];
   /** 当前是否仍在流式生成（控制"进行中"标记） */
   streaming?: boolean;
 }>();
 
 const expanded = ref(true);
 
-const hasStages = computed(() => props.stages.length > 0);
+const hasEntries = computed(() => props.entries.length > 0);
 
-/** 当前最新阶段，用于折叠态显示"进行中"提示 */
-const currentStage = computed(() => {
-  if (props.stages.length === 0) return null;
-  return props.stages[props.stages.length - 1];
+/** 当前进行中的条目（最后一个未完成），用于折叠态提示 */
+const currentEntry = computed(() => {
+  for (let i = props.entries.length - 1; i >= 0; i -= 1) {
+    if (!props.entries[i].done) return props.entries[i];
+  }
+  return null;
 });
 
-/** 阶段完成后的中文标签（完成时态） */
-const stageLabelDone: Record<ProgressStage['stage'], string> = {
-  planning: '已规划任务',
-  tool_executing: '已执行任务',
-  formatting: '已生成回复',
-};
-
-/** 阶段进行中的中文标签（进行时态） */
-const stageLabelActive: Record<ProgressStage['stage'], string> = {
-  planning: '模型规划中',
-  tool_executing: '工具执行中',
-  formatting: '回复整形中',
-};
-
-/** 阶段对应的 SF Symbol 图标名（进行中时使用） */
-const stageIcon: Record<ProgressStage['stage'], 'sparkles' | 'waveform' | 'bubble-left'> = {
-  planning: 'sparkles',
-  tool_executing: 'waveform',
-  formatting: 'bubble-left',
-};
+/** 已完成条目数量（含工具子项） */
+const doneCount = computed(() => props.entries.filter((e) => e.done).length);
 
 /**
- * 判断第 idx 个阶段是否已完成。
- *
- * 流式结束后所有阶段都算完成；流式期间只有最后一个阶段是进行中，
- * 因为后端按顺序推送、新阶段到达即意味着前一阶段已结束。
+ * 工具条目判断是否进行中。工具阶段下，done=true 即完成；
+ * 流式且工具未 done 才视为进行中。
  */
-function isDone(idx: number): boolean {
-  if (!props.streaming) return true;
-  return idx < props.stages.length - 1;
+function isToolActive(entry: ProgressEntry): boolean {
+  return entry.kind === 'tool' && props.streaming && !entry.done;
 }
 
-function labelFor(stage: ProgressStage['stage'], done: boolean): string {
-  const table = done ? stageLabelDone : stageLabelActive;
-  return table[stage] ?? stage;
-}
-
-function iconFor(stage: ProgressStage['stage']): 'sparkles' | 'waveform' | 'bubble-left' {
-  return stageIcon[stage] ?? 'sparkles';
-}
-
-/** 格式化相对时间显示（HH:MM:SS）。不显示毫秒：同一阶段的前后端事件几乎
- *  同毫秒到达，毫秒时间戳会让时间线看起来机械/像编造。 */
+/** 格式化相对时间显示（HH:MM:SS）。不显示毫秒：阶段与工具几乎同时到达，
+ *  毫秒会让时间线显得机械。 */
 function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -85,31 +59,23 @@ function formatTime(iso: string): string {
 </script>
 
 <template>
-  <div
-    v-if="hasStages"
-    data-test="progress-timeline"
-    class="progress-timeline"
-  >
+  <div v-if="hasEntries" data-test="progress-timeline" class="progress-timeline">
     <button
       type="button"
       class="progress-toggle"
       :aria-expanded="expanded"
       @click="expanded = !expanded"
     >
-      <SfSymbol
-        :name="streaming && currentStage ? iconFor(currentStage.stage) : 'checkmark-circle'"
-        :size="16"
-        :class="streaming ? 'progress-toggle-icon-active' : 'progress-toggle-icon-done'"
-      />
+      <SfSymbol :name="'checkmark-circle'" :size="16" :class="currentEntry ? 'progress-toggle-icon-active' : 'progress-toggle-icon-done'" />
       <span class="progress-summary">
-        <template v-if="streaming && currentStage">
-          {{ labelFor(currentStage.stage, false) }}<template v-if="currentStage.detail"> · {{ currentStage.detail }}</template>
+        <template v-if="currentEntry">
+          {{ currentEntry.label }}<template v-if="currentEntry.detail"> · {{ currentEntry.detail }}</template>
         </template>
         <template v-else>
-          已完成 {{ stages.length }} 个阶段
+          已完成 {{ doneCount }} 个步骤
         </template>
       </span>
-      <span v-if="streaming" class="progress-pulse" aria-hidden="true"></span>
+      <span v-if="currentEntry" class="progress-pulse" aria-hidden="true"></span>
       <span class="progress-chevron" :class="{ expanded }">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
           <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
@@ -118,18 +84,21 @@ function formatTime(iso: string): string {
     </button>
     <ol v-show="expanded" class="progress-list">
       <li
-        v-for="(s, idx) in stages"
+        v-for="(e, idx) in entries"
         :key="idx"
         class="progress-item"
-        :class="[`stage-${s.stage}`, isDone(idx) ? 'is-done' : 'is-active']"
-        :data-test="`progress-item-${isDone(idx) ? 'done' : 'active'}`"
+        :class="[`stage-${e.stage}`, e.kind === 'tool' ? 'is-tool' : 'is-phase', isToolActive(e) ? 'is-active' : 'is-done']"
+        :data-test="isToolActive(e) ? 'progress-item-active' : 'progress-item-done'"
       >
         <span class="progress-item-icon">
-          <SfSymbol :name="isDone(idx) ? 'checkmark-circle' : iconFor(s.stage)" :size="16" />
+          <SfSymbol
+            :name="isToolActive(e) ? 'waveform' : 'checkmark-circle'"
+            :size="isToolActive(e) ? 14 : 16"
+          />
         </span>
-        <span class="progress-item-label">{{ labelFor(s.stage, isDone(idx)) }}</span>
-        <span class="progress-item-time">{{ formatTime(s.received_at) }}</span>
-        <span v-if="s.detail" class="progress-item-detail">{{ s.detail }}</span>
+        <span class="progress-item-label">{{ e.label }}</span>
+        <span class="progress-item-time">{{ formatTime(e.time) }}</span>
+        <span v-if="e.detail" class="progress-item-detail">{{ e.detail }}</span>
       </li>
     </ol>
   </div>
@@ -208,6 +177,7 @@ function formatTime(iso: string): string {
 /*
  * 两行网格：第一行 图标 + 标签 + 时间，第二行 detail 说明文字（与标签左对齐缩进）。
  * 图标列固定 22px，detail 从第 2 列开始，形成"标题 + 缩进描述"的清单观感。
+ * 工具子项额外左缩进，体现"阶段下的动作"，形成阶段 → 动作的树状层级。
  */
 .progress-item {
   display: grid;
@@ -256,13 +226,22 @@ function formatTime(iso: string): string {
   word-break: break-word;
 }
 
-/* 完成态统一绿色 ✓；进行中按阶段配色：planning 紫、tool_executing 蓝、formatting 绿 */
-.progress-item.is-done .progress-item-icon { color: #3f9b62; }
-.progress-item.is-active.stage-planning .progress-item-icon { color: #a75bc2; }
-.progress-item.is-active.stage-tool_executing .progress-item-icon { color: #4f7ccf; }
-.progress-item.is-active.stage-formatting .progress-item-icon { color: #3f9b62; }
+/* 工具子项缩进：阶段 → 动作的层级 */
+.progress-item.is-tool {
+  padding-left: 1.25rem;
+  font-size: 0.82rem;
+}
 
-/* 进行中的阶段图标脉冲，与折叠态的 progress-pulse 保持一致的等待语义 */
+.progress-item.is-tool .progress-item-label {
+  font-weight: 400;
+  color: #4a525b;
+}
+
+/* 完成态统一绿色 ✓；进行中的工具子项蓝色波形 + 脉冲 */
+.progress-item.is-done .progress-item-icon { color: #3f9b62; }
+.progress-item.is-active .progress-item-icon { color: #4f7ccf; }
+
+/* 进行中的工具子项脉冲，与折叠态的 progress-pulse 保持一致的等待语义 */
 .progress-item.is-active .progress-item-icon {
   animation: progress-pulse 1.2s ease-in-out infinite;
 }
