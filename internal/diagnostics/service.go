@@ -103,7 +103,6 @@ func (s *Service) Run(ctx context.Context, user identity.CurrentUser, request Re
 		return Package{}, errors.New("诊断读取服务未配置")
 	}
 	domain := validated.domain
-	environment := validated.environment
 	toolName := validated.toolName
 	resourceType := validated.resourceType
 	name := validated.resourceName
@@ -116,7 +115,7 @@ func (s *Service) Run(ctx context.Context, user identity.CurrentUser, request Re
 	if name == "" {
 		name = defaultResourceName(domain, resourceType)
 	}
-	input := buildReadInput(validated.inputSchema, environment, name)
+	input := buildReadInput(validated.inputSchema, name)
 	result, err := s.reads.ExecuteRead(ctx, user, toolName, input)
 	if err != nil {
 		return Package{}, err
@@ -128,7 +127,7 @@ func (s *Service) Run(ctx context.Context, user identity.CurrentUser, request Re
 	finding := Finding{ID: newID("finding"), Severity: severity, Summary: findingSummary(domain, severity, name), EvidenceIDs: []string{observation.ID}, Confidence: ConfidenceMedium}
 
 	// 使用建议生成器生成建议
-	recResult, _ := s.recommendationGen.Generate(ctx, domain, name, environment, severity, result)
+	recResult, _ := s.recommendationGen.Generate(ctx, domain, name, severity, result)
 	if recResult.Summary == "" {
 		recResult.Summary = recommendationSummary(domain, severity, name)
 		recResult.Rationale = observation.Summary
@@ -145,9 +144,8 @@ func (s *Service) Run(ctx context.Context, user identity.CurrentUser, request Re
 
 	pkg := Package{
 		ID:              newID("diag"),
-		Environment:     environment,
 		Domains:         []string{domain},
-		Resources:       []ResourceRef{{Domain: domain, Type: resourceType, ID: resourceID, Name: name, Environment: environment}},
+		Resources:       []ResourceRef{{Domain: domain, Type: resourceType, ID: resourceID, Name: name}},
 		Observations:    []Observation{observation},
 		Findings:        []Finding{finding},
 		Recommendations: []Recommendation{recommendation},
@@ -164,7 +162,6 @@ func (s *Service) Run(ctx context.Context, user identity.CurrentUser, request Re
 
 type validatedRequest struct {
 	domain       string
-	environment  string
 	resourceType string
 	resourceName string
 	toolName     string
@@ -197,10 +194,6 @@ func (s *Service) validateRequest(request Request) (validatedRequest, error) {
 		return validatedRequest{}, fmt.Errorf("%w: 资源类型 %q 与 %q 不匹配", ErrInvalidRequest, requestedResourceType, resourceType)
 	}
 
-	environment, err := validateRequestString("environment", request.Environment, true)
-	if err != nil {
-		return validatedRequest{}, err
-	}
 	resourceName, err := validateRequestString("resource name", request.ResourceName, false)
 	if err != nil {
 		return validatedRequest{}, err
@@ -208,7 +201,6 @@ func (s *Service) validateRequest(request Request) (validatedRequest, error) {
 
 	return validatedRequest{
 		domain:       domain,
-		environment:  environment,
 		resourceType: resourceType,
 		resourceName: resourceName,
 		toolName:     toolName,
@@ -217,12 +209,11 @@ func (s *Service) validateRequest(request Request) (validatedRequest, error) {
 	}, nil
 }
 
-// ValidateRequestFields 校验诊断请求的字段卫生（环境必填 + 环境/资源名长度限制）。
-// 它的定位是"参数卫生防线"：执行编排器应在对环境做默认允许值规约之前、对用户
-// 原始输入调用它，避免降权逻辑（DefaultEnvironmentValue）把超长等非法值静默抹平。
+// ValidateRequestFields 校验诊断请求的字段卫生（域必填 + 域/资源名长度限制）。
+// 它的定位是"参数卫生防线"：执行编排器应在执行前对用户原始输入调用它。
 // 与 validateRequest 不同，它不解析 runbook/能力，只做纯字段检查。
 func ValidateRequestFields(request Request) error {
-	if _, err := validateRequestString("environment", request.Environment, true); err != nil {
+	if _, err := validateRequestString("domain", request.Domain, true); err != nil {
 		return err
 	}
 	if _, err := validateRequestString("resource name", request.ResourceName, false); err != nil {
@@ -357,23 +348,21 @@ func (s *Service) resolveRunbookCapability(domain, requestedResourceType string)
 
 // buildReadInput constructs the input map for a diagnostic read tool. When a
 // capability input schema is available, the resource name is mapped to the
-// first non-environment field declared in the schema (preferring "name" when
-// present). When no schema is supplied, the input defaults to the standard
-// {environment, name} shape used by the built-in health read tools.
-func buildReadInput(schema map[string]any, environment, name string) map[string]any {
+// first field declared in the schema (preferring "name" when present). When
+// no schema is supplied, the input defaults to the standard {name} shape used
+// by the built-in health read tools.
+func buildReadInput(schema map[string]any, name string) map[string]any {
 	if len(schema) == 0 {
-		return map[string]any{"environment": environment, "name": name}
+		return map[string]any{"name": name}
 	}
-	input := map[string]any{"environment": environment}
+	input := map[string]any{}
 	if _, ok := schema["name"]; ok {
 		input["name"] = name
 		return input
 	}
 	fields := make([]string, 0, len(schema))
 	for field := range schema {
-		if field != "environment" {
-			fields = append(fields, field)
-		}
+		fields = append(fields, field)
 	}
 	sort.Strings(fields)
 	if len(fields) > 0 {

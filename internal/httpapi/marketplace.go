@@ -25,9 +25,9 @@ type MarketplaceService interface {
 	Get(ctx context.Context, id string) (*marketplace.Registry, error)
 	ListVersions(ctx context.Context, capabilityID string) ([]marketplace.Version, error)
 	GetVersion(ctx context.Context, capabilityID, versionID string) (*marketplace.Version, error)
-	Rate(ctx context.Context, capabilityID, userID string, rating int, review, versionUsed, environment *string) error
+	Rate(ctx context.Context, capabilityID, userID string, rating int, review, versionUsed *string) error
 	ListRatings(ctx context.Context, capabilityID string, limit, offset int) ([]marketplace.Rating, int, error)
-	RecordDownload(ctx context.Context, capabilityID, versionID, userID string, organizationID, environment *string, source string) error
+	RecordDownload(ctx context.Context, capabilityID, versionID, userID string, organizationID *string, source string) error
 	Stats(ctx context.Context, capabilityID string) (*marketplace.Stats, error)
 }
 
@@ -213,11 +213,7 @@ func (r *Router) serveMarketplaceDownload(ctx context.Context, writer http.Respo
 		writeMarketplaceError(writer, err)
 		return
 	}
-	var environment *string
-	if value := strings.TrimSpace(request.URL.Query().Get("environment")); value != "" {
-		environment = &value
-	}
-	_ = r.marketplace.RecordDownload(ctx, capabilityID, versionID, subject, nil, environment, "api")
+	_ = r.marketplace.RecordDownload(ctx, capabilityID, versionID, subject, nil, "api")
 
 	writeCapabilityJSON(writer, map[string]any{
 		"version":      version.Version,
@@ -248,7 +244,6 @@ func (r *Router) serveMarketplaceRate(ctx context.Context, writer http.ResponseW
 		Rating      int     `json:"rating"`
 		Review      *string `json:"review"`
 		VersionUsed *string `json:"version_used"`
-		Environment *string `json:"environment"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 16*1024))
 	if err := decoder.Decode(&body); err != nil {
@@ -259,7 +254,7 @@ func (r *Router) serveMarketplaceRate(ctx context.Context, writer http.ResponseW
 		writeError(writer, http.StatusBadRequest, "rating must be between 1 and 5")
 		return
 	}
-	if err := r.marketplace.Rate(ctx, capabilityID, subject, body.Rating, body.Review, body.VersionUsed, body.Environment); err != nil {
+	if err := r.marketplace.Rate(ctx, capabilityID, subject, body.Rating, body.Review, body.VersionUsed); err != nil {
 		writeMarketplaceError(writer, err)
 		return
 	}

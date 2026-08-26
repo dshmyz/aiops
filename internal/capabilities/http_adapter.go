@@ -366,10 +366,9 @@ func (a *HTTPAdapter) executeRead(ctx context.Context, capability Capability, in
 	return NormalizedResult{
 		Kind: capability.Output.Kind,
 		Resource: ResourceRef{
-			Domain:      capability.Domain,
-			Type:        capability.ResourceType,
-			Name:        name,
-			Environment: fmt.Sprint(input["environment"]),
+			Domain: capability.Domain,
+			Type:   capability.ResourceType,
+			Name:   name,
 		},
 		Severity: severity,
 		Summary:  summary,
@@ -471,10 +470,9 @@ func (a *HTTPAdapter) executeWrite(ctx context.Context, capability Capability, i
 	return NormalizedResult{
 		Kind: capability.Output.Kind,
 		Resource: ResourceRef{
-			Domain:      capability.Domain,
-			Type:        capability.ResourceType,
-			Name:        name,
-			Environment: fmt.Sprint(input["environment"]),
+			Domain: capability.Domain,
+			Type:   capability.ResourceType,
+			Name:   name,
 		},
 		Severity: "info",
 		Summary:  summary,
@@ -489,10 +487,9 @@ func normalizeTopLevelArray(payload []byte, capability Capability, input map[str
 	return NormalizedResult{
 		Kind: capability.Output.Kind,
 		Resource: ResourceRef{
-			Domain:      capability.Domain,
-			Type:        capability.ResourceType,
-			Name:        resourceNameFromInput(capability, input),
-			Environment: fmt.Sprint(input["environment"]),
+			Domain: capability.Domain,
+			Type:   capability.ResourceType,
+			Name:   resourceNameFromInput(capability, input),
 		},
 		Severity: "info",
 		Summary:  fmt.Sprintf("后端返回了 JSON 数组（%d 项），内容见 items 字段", len(arr)),
@@ -518,10 +515,9 @@ func normalizeTextResult(payload []byte, capability Capability, input map[string
 	return NormalizedResult{
 		Kind: capability.Output.Kind,
 		Resource: ResourceRef{
-			Domain:      capability.Domain,
-			Type:        capability.ResourceType,
-			Name:        resourceNameFromInput(capability, input),
-			Environment: fmt.Sprint(input["environment"]),
+			Domain: capability.Domain,
+			Type:   capability.ResourceType,
+			Name:   resourceNameFromInput(capability, input),
 		},
 		Severity: "info",
 		Summary:  "后端返回了非 JSON 文本，内容见 content 字段" + map[bool]string{true: "（已截断）"}[truncated],
@@ -537,9 +533,6 @@ func buildWriteBody(capability Capability, input map[string]any) ([]byte, error)
 	}
 	body := map[string]any{}
 	for name, value := range input {
-		if name == "environment" {
-			continue
-		}
 		if _, isPath := pathVars[name]; isPath {
 			continue
 		}

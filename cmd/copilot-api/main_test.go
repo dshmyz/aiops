@@ -48,9 +48,8 @@ func TestAssistantPlannerFromEnvIsCapabilityAware(t *testing.T) {
 	err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
 		Tool: tools.Tool{Name: "minio.bucket.capacity.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment": {Type: "string", Required: true},
-			"cluster":     {Type: "string", Required: true},
-			"bucket":      {Type: "string", Required: true},
+			"cluster": {Type: "string", Required: true},
+			"bucket":  {Type: "string", Required: true},
 		},
 	}})
 	if err != nil {
@@ -201,10 +200,9 @@ func TestCapabilityManagerFromEnvHotRegistersPublishedCapability(t *testing.T) {
 	if !ok {
 		t.Fatal("published capability was not hot-registered")
 	}
-	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}}, tool, map[string]any{
-		"environment": "prod",
-		"cluster":     "m1",
-		"bucket":      "archive",
+	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}}, tool, map[string]any{
+		"cluster": "m1",
+		"bucket":  "archive",
 	})
 	if !decision.Allowed {
 		t.Fatalf("published capability policy denied after hot registration: %+v", decision)
@@ -264,10 +262,9 @@ func TestCapabilityRuntimesRouteHotPublishedWriteThroughHTTPAdapter(t *testing.T
 		t.Fatalf("write executor = %T, want *CapabilityWriteRunner", writeExecutor)
 	}
 	result, err := runner.Execute(context.Background(), tool.Name, map[string]any{
-		"environment": "prod",
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"quota":       100,
+		"cluster": "m1",
+		"bucket":  "archive",
+		"quota":   100,
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -294,7 +291,7 @@ func TestCapabilityRuntimesFallBackToStaticWhenUnconfigured(t *testing.T) {
 type stubAuthenticator struct{}
 
 func (stubAuthenticator) Authenticate(*http.Request) (identity.CurrentUser, error) {
-	return identity.CurrentUser{Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}}, nil
+	return identity.CurrentUser{Roles: []string{"admin"}}, nil
 }
 
 func waitForHealth(t *testing.T, url string) *http.Response {
@@ -339,9 +336,6 @@ backend:
   path: /api/minio/clusters/{cluster}/buckets/{bucket}/capacity
   timeout_ms: 3000
 input_schema:
-  environment:
-    type: string
-    required: true
   cluster:
     type: string
     required: true
@@ -355,7 +349,6 @@ output:
     usage_pct: $.data.usage_pct
 auth:
   roles: [viewer, operator, admin]
-  environment_scoped: true
 ai:
   description: Read bucket capacity.
 `
@@ -376,9 +369,6 @@ backend:
   path: /api/minio/clusters/{cluster}/buckets/{bucket}/quota
   timeout_ms: 3000
 input_schema:
-  environment:
-    type: string
-    required: true
   cluster:
     type: string
     required: true
@@ -393,7 +383,6 @@ output:
   summary_template: Bucket {bucket} quota set to {quota}
 auth:
   roles: [operator, admin]
-  environment_scoped: true
 governance:
   requires_action_plan: true
   requires_approval: true

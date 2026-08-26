@@ -203,7 +203,7 @@ type ToolCallEvent struct {
 
 // maxHistoryTurns limits how many previous turns are forwarded to the LLM
 // to keep prompts bounded. Set to 10 (5 user + 5 assistant) which is enough
-// to resolve "刚才那个" / "同 environment 再查一个" style references.
+// to resolve "刚才那个" / "再查一个" style references.
 const maxHistoryTurns = 10
 
 // maxHistoryChars bounds the total character count of history messages
@@ -274,7 +274,6 @@ func (p *EinoPlanner) parseIntent(ctx context.Context, response *schema.Message)
 		return Intent{
 			Diagnostic: &diagnostics.Request{
 				Domain:       strings.TrimSpace(parsed.Diagnostic.Domain),
-				Environment:  strings.TrimSpace(parsed.Diagnostic.Environment),
 				ResourceType: strings.TrimSpace(parsed.Diagnostic.ResourceType),
 				ResourceName: strings.TrimSpace(parsed.Diagnostic.ResourceName),
 				Runbook:      strings.TrimSpace(parsed.Diagnostic.Runbook),
@@ -307,19 +306,12 @@ func (p *EinoPlanner) parseIntent(ctx context.Context, response *schema.Message)
 
 // missingClarificationFields 对比动态工具的 input schema 与 LLM 产出参数，
 // 返回缺失必填字段的结构化表单字段。静态工具（无声明式 schema）返回 nil，
-// 维持原有"放行后由策略层 ValidateInput 报错"的行为。environment 仅在
-// 写工具上算缺参：读路径由 policy.DefaultEnvironment 统一兜底，写路径的
-// environment 是人工确认计划的一部分，保持严格。
+// 维持原有"放行后由策略层 ValidateInput 报错"的行为。
 func missingClarificationFields(toolName string, input map[string]any) []PreflightField {
 	schema, ok := tools.DynamicInputSchema(toolName)
 	if !ok {
 		return nil
 	}
-	tool, ok := tools.Lookup(toolName)
-	if !ok {
-		return nil
-	}
-	skipEnvironment := tool.Operation == tools.Read
 	names := make([]string, 0, len(schema))
 	for name := range schema {
 		names = append(names, name)
@@ -329,9 +321,6 @@ func missingClarificationFields(toolName string, input map[string]any) []Preflig
 	for _, name := range names {
 		field := schema[name]
 		if !field.Required {
-			continue
-		}
-		if name == "environment" && skipEnvironment {
 			continue
 		}
 		if v, present := input[name]; present && !isEmptyInputValue(v) {
@@ -471,8 +460,8 @@ func (p *EinoPlanner) planStreamFallback(ctx context.Context, message string, hi
 //     most recent reference is never lost.
 //
 // Assistant turns carry a structured [Last Intent] block (when Turn.Intent
-// is populated) so the LLM can resolve references like "同 environment" /
-// "再查一个" deterministically instead of guessing from prose.
+// is populated) so the LLM can resolve references like "再查一个" / "刚才那个"
+// deterministically instead of guessing from prose.
 //
 // Turns with empty content are skipped.
 func historyMessages(history []Turn) []*schema.Message {
@@ -566,7 +555,7 @@ func formatToolStepTurn(turn Turn) string {
 
 // formatAssistantTurn appends a [Last Intent] block to the assistant message
 // when the turn has a structured Intent. This lets the LLM resolve references
-// like "同 environment" / "再查一个" deterministically instead of guessing
+// like "再查一个" / "刚才那个" deterministically instead of guessing
 // from the user's prose.
 //
 // Falls back to the original content when:
@@ -579,7 +568,6 @@ func formatAssistantTurn(content string, intent *Intent) string {
 	}
 	if intent.Diagnostic != nil {
 		return content + "\n\n[Last Intent]\ndiagnostic: domain=" + intent.Diagnostic.Domain +
-			", environment=" + intent.Diagnostic.Environment +
 			", resource_type=" + intent.Diagnostic.ResourceType +
 			", resource_name=" + intent.Diagnostic.ResourceName
 	}
@@ -639,7 +627,6 @@ type einoIntent struct {
 
 type einoDiagnostic struct {
 	Domain       string `json:"domain"`
-	Environment  string `json:"environment"`
 	ResourceType string `json:"resource_type"`
 	ResourceName string `json:"resource_name"`
 	Runbook      string `json:"runbook"`
@@ -654,8 +641,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 系统注册了多个动态能力（见下方"可用的动态能力"列表）。当用户请求匹配其中某个能力时：
 1. 直接用该能力的 tool_name 填入 tool_name 字段
 2. 从用户消息中提取该能力 input_schema 所需的参数填入 input 字段
-3. 用户未指定 environment 时默认 "prod"
-4. 不需要走 diagnostic 通道，直接用 tool_name
+3. 不需要走 diagnostic 通道，直接用 tool_name
 
 ## 输出格式
 只返回JSON，不要包含任何其他文本：
@@ -683,7 +669,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 - 对象或null
 - 包含工具执行所需的参数
 - 参数应从用户消息中提取
-- 示例：{"cluster_name": "prod-cluster-01", "environment": "prod"}
+- 示例：{"cluster_name": "prod-cluster-01"}
 
 ### diagnostic（诊断对象）
 - 对象或null
@@ -692,7 +678,6 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 - 结构：
   {
     "domain": string,
-    "environment": "prod" | "staging" | "dev",
     "resource_type": string,
     "resource_name": string,
     "runbook": "health" | "capacity" | "consumer_lag"
@@ -742,8 +727,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 ## 参数提取规则
 1. 从用户消息中直接提取明确的参数值
 2. 使用历史对话中的信息补充缺失参数
-3. 对于指代词（"刚才那个"、"同environment"等），从历史对话中查找对应值
-4. 默认环境为"prod"，除非用户明确指定其他环境
+3. 对于指代词（"刚才那个"、"再查一个"等），从历史对话中查找对应值
 
 ## confidence阈值和处理逻辑
 - confidence >= 0.7：正常返回意图
@@ -753,21 +737,20 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 
 ## 多轮对话利用指南
 1. 优先查看历史对话中的[Last Intent]块
-2. 当用户说"同environment"时，使用历史对话中的environment值
-3. 当用户说"再查一个"时，使用历史对话中的tool_name
-4. 当用户说"刚才那个"时，引用历史对话中的资源名称
+2. 当用户说"再查一个"时，使用历史对话中的tool_name
+3. 当用户说"刚才那个"时，引用历史对话中的资源名称
 
 ## Few-shot示例
 
 ### 示例1：普通工具调用
-用户："查看生产集群状态"
+用户："查看集群状态"
 输出：
 {
   "tool_name": "cluster.status.read",
-  "input": {"environment": "prod"},
+  "input": {"cluster_name": "cluster-01"},
   "diagnostic": null,
   "confidence": 0.95,
-  "explanation": "用户想查看生产环境集群状态"
+  "explanation": "用户想查看集群状态"
 }
 
 ### 示例2：诊断请求
@@ -778,7 +761,6 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
   "input": null,
   "diagnostic": {
     "domain": "已注册的中间件域",
-    "environment": "prod",
     "resource_type": "该域对应的资源类型",
     "resource_name": "*",
     "runbook": "consumer_lag"
@@ -799,15 +781,15 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 }
 
 ### 示例4：利用历史对话
-历史：[Last Intent] tool_name: cluster.status.read, input: {"environment": "prod", "cluster_name": "cluster-01"}
-用户："同environment再查系统态势"
+历史：[Last Intent] tool_name: cluster.status.read, input: {"cluster_name": "cluster-01"}
+用户："再查一下系统态势"
 输出：
 {
   "tool_name": "system.posture.read",
-  "input": {"environment": "prod"},
+  "input": {},
   "diagnostic": null,
   "confidence": 0.85,
-  "explanation": "用户想在相同环境下查看系统态势"
+  "explanation": "用户想继续查看系统态势"
 }
 
 ### 示例5：告警查询
@@ -815,15 +797,15 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 输出：
 {
   "tool_name": "alert.query",
-  "input": {"environment": "prod"},
+  "input": {},
   "diagnostic": null,
   "confidence": 0.9,
-  "explanation": "用户想查看生产环境当前告警",
+  "explanation": "用户想查看当前告警",
   "final_answer": false
 }
 
 ### 示例6：工具结果反馈后完成回答
-历史：[Last Intent] tool_name: alert.query, input: {"environment":"prod"}, result: [{"name":"消息队列慢消费者","severity":"warning"}]
+历史：[Last Intent] tool_name: alert.query, input: {}, result: [{"name":"消息队列慢消费者","severity":"warning"}]
 用户："当前有哪些告警？"
 输出：
 {
@@ -831,14 +813,14 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
   "input": null,
   "diagnostic": null,
   "confidence": 0.95,
-  "explanation": "已用告警工具取得生产环境告警，可以回答",
+  "explanation": "已用告警工具取得告警，可以回答",
   "final_answer": true,
-  "summary": "生产环境当前有 1 条告警：消息队列慢消费者（warning）。"
+  "summary": "当前有 1 条告警：消息队列慢消费者（warning）。"
 }
 
 ### 示例7：单域健康检查完成立即收尾（不要空转重复同一工具）
-历史：[Last Intent] diagnostic: domain=消息队列域, environment=prod, resource_type=consumer_group, resource_name=orders；结果摘要：对应读工具：诊断完成：1 个观察，1 个发现，1 个建议
-用户："检查 prod 消息队列消费组健康"
+历史：[Last Intent] diagnostic: domain=消息队列域, resource_type=consumer_group, resource_name=orders；结果摘要：对应读工具：诊断完成：1 个观察，1 个发现，1 个建议
+用户："检查消息队列消费组健康"
 输出：
 {
   "tool_name": null,
@@ -847,7 +829,7 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
   "confidence": 0.95,
   "explanation": "消息队列消费组健康检查已完成并拿到结论，无需再次调用同一工具，直接汇总",
   "final_answer": true,
-  "summary": "prod 消息队列消费组健康检查完成：1 个观察、1 个发现、1 个建议。"
+  "summary": "消息队列消费组健康检查完成：1 个观察、1 个发现、1 个建议。"
 }
 
 ## 重要约束
@@ -857,16 +839,13 @@ const einoPlanningPrompt = `你是一个中间件运维副驾驶的意图规划�
 4. 不要包含任何非JSON内容`
 
 // injectPageContext prepends a page-context hint to the user message so the
-// LLM planner can use it to fill in missing fields (environment, domain,
-// resource) when the message itself does not mention them. The hint is a
-// compact single-line prefix; message tokens still take precedence because
-// the LLM sees both the hint and the original message. When pageContext is
-// empty, the message is returned unchanged (backward compatible).
+// LLM planner can use it to fill in missing fields (domain, resource) when the
+// message itself does not mention them. The hint is a compact single-line
+// prefix; message tokens still take precedence because the LLM sees both the
+// hint and the original message. When pageContext is empty, the message is
+// returned unchanged (backward compatible).
 func injectPageContext(message string, pageContext PageContext) string {
 	parts := make([]string, 0, 4)
-	if pageContext.Environment != "" {
-		parts = append(parts, "environment="+pageContext.Environment)
-	}
 	if pageContext.Domain != "" {
 		parts = append(parts, "domain="+pageContext.Domain)
 	}

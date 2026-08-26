@@ -18,7 +18,6 @@ function makeCapabilities(): ManagedCapability[] {
       timeout_ms: 3000,
     },
     input_schema: {
-      environment: { type: 'string' as const, required: true },
       cluster: { type: 'string' as const, required: true },
       bucket: { type: 'string' as const, required: true },
     },
@@ -28,7 +27,7 @@ function makeCapabilities(): ManagedCapability[] {
       summary_template: 'Bucket {bucket} usage is {usage_pct}%',
       fields: { usage_pct: '$.data.usage_pct' },
     },
-    auth: { roles: ['viewer', 'operator', 'admin'], environment_scoped: true },
+    auth: { roles: ['viewer', 'operator', 'admin'] },
     ai: { description: 'read minio bucket capacity', examples: [] },
     validation: { valid: true },
   };
@@ -44,7 +43,7 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     name: 'minio 巡检',
     subject: 'admin-1',
     capability_name: 'minio.bucket.capacity.read',
-    input: { environment: 'prod', cluster: 'm1', bucket: 'archive' },
+    input: { cluster: 'm1', bucket: 'archive' },
     schedule_kind: 'preset',
     preset: 'daily',
     cron_expr: null,
@@ -94,7 +93,7 @@ describe('ScheduledTaskForm', () => {
 
     await wrapper.find('[data-test="scheduled-task-name"]').setValue('minio 每日巡检');
     await wrapper.find('[data-test="scheduled-task-capability"]').setValue('minio.bucket.capacity.read');
-    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod","cluster":"m1","bucket":"archive"}');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     // 默认 schedule_kind=preset，preset=null，需要选一个 preset
     expect(wrapper.find('[data-test="schedule-preset-picker"]').exists()).toBe(true);
     await wrapper.find('[data-test="schedule-preset-option"][data-preset="daily"]').trigger('click');
@@ -110,7 +109,7 @@ describe('ScheduledTaskForm', () => {
       capability_name: 'minio.bucket.capacity.read',
       run_kind: 'read',
       runbook_slug: null,
-      input: { environment: 'prod', cluster: 'm1', bucket: 'archive' },
+      input: { cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'preset',
       preset: 'daily',
       cron_expr: null,
@@ -124,7 +123,7 @@ describe('ScheduledTaskForm', () => {
 
     await wrapper.find('[data-test="scheduled-task-name"]').setValue('cron 巡检');
     await wrapper.find('[data-test="scheduled-task-capability"]').setValue('minio.bucket.capacity.read');
-    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod"}');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     // 切换到 cron 模式
     await wrapper.find('[data-test="scheduled-task-schedule-kind"]').setValue('cron');
     expect(wrapper.find('[data-test="schedule-cron-input-wrapper"]').exists()).toBe(true);
@@ -148,7 +147,7 @@ describe('ScheduledTaskForm', () => {
 
     await wrapper.find('[data-test="scheduled-task-name"]').setValue('cron 巡检');
     await wrapper.find('[data-test="scheduled-task-capability"]').setValue('kafka.topic.lag.read');
-    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod"}');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     await wrapper.find('[data-test="scheduled-task-schedule-kind"]').setValue('cron');
     await wrapper.find('[data-test="schedule-cron-input"]').setValue('0 2 * * 1-5');
 
@@ -161,7 +160,7 @@ describe('ScheduledTaskForm', () => {
       capability_name: 'kafka.topic.lag.read',
       run_kind: 'read',
       runbook_slug: null,
-      input: { environment: 'prod' },
+      input: { cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'cron',
       preset: null,
       cron_expr: '0 2 * * 1-5',
@@ -177,7 +176,7 @@ describe('ScheduledTaskForm', () => {
     expect((wrapper.find('[data-test="scheduled-task-name"]').element as HTMLInputElement).value).toBe('minio 巡检');
     expect((wrapper.find('[data-test="scheduled-task-capability"]').element as HTMLSelectElement).value).toBe('minio.bucket.capacity.read');
     expect((wrapper.find('[data-test="scheduled-task-input"]').element as HTMLTextAreaElement).value).toBe(
-      JSON.stringify({ environment: 'prod', cluster: 'm1', bucket: 'archive' }, null, 2),
+      JSON.stringify({ cluster: 'm1', bucket: 'archive' }, null, 2),
     );
     expect((wrapper.find('[data-test="scheduled-task-schedule-kind"]').element as HTMLSelectElement).value).toBe('preset');
     // preset 模式下高亮 daily
@@ -232,7 +231,7 @@ describe('ScheduledTaskForm', () => {
     });
 
     await wrapper.find('[data-test="scheduled-task-capability"]').setValue('minio.bucket.capacity.read');
-    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod"}');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     await wrapper.find('[data-test="schedule-preset-option"][data-preset="daily"]').trigger('click');
 
     // name 仍为空
@@ -245,7 +244,7 @@ describe('ScheduledTaskForm', () => {
     });
 
     await wrapper.find('[data-test="scheduled-task-name"]').setValue('minio 巡检');
-    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod"}');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     await wrapper.find('[data-test="schedule-preset-option"][data-preset="daily"]').trigger('click');
 
     // capability 仍为空
@@ -259,7 +258,7 @@ describe('ScheduledTaskForm', () => {
 
     await wrapper.find('[data-test="scheduled-task-name"]').setValue('minio 巡检');
     await wrapper.find('[data-test="scheduled-task-capability"]').setValue('minio.bucket.capacity.read');
-    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod"}');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     // preset 模式但未选 preset
     expect(wrapper.find('[data-test="scheduled-task-submit"]').attributes('disabled')).toBeDefined();
   });
@@ -312,7 +311,7 @@ describe('ScheduledTaskForm', () => {
     await wrapper.find('[data-test="scheduled-task-name"]').setValue('minio 保留期定时设置');
     await wrapper.find('[data-test="scheduled-task-run-kind"]').setValue('runbook');
     await wrapper.find('[data-test="scheduled-task-runbook"]').setValue('minio-retention-set-low');
-    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod","cluster":"m1","bucket":"archive"}');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     await wrapper.find('[data-test="schedule-preset-option"][data-preset="daily"]').trigger('click');
 
     expect(wrapper.find('[data-test="scheduled-task-submit"]').attributes('disabled')).toBeUndefined();
@@ -326,7 +325,7 @@ describe('ScheduledTaskForm', () => {
       capability_name: '',
       run_kind: 'runbook',
       runbook_slug: 'minio-retention-set-low',
-      input: { environment: 'prod', cluster: 'm1', bucket: 'archive' },
+      input: { cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'preset',
       preset: 'daily',
       cron_expr: null,
@@ -340,7 +339,7 @@ describe('ScheduledTaskForm', () => {
 
     await wrapper.find('[data-test="scheduled-task-name"]').setValue('minio 保留期定时设置');
     await wrapper.find('[data-test="scheduled-task-run-kind"]').setValue('runbook');
-    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod"}');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     await wrapper.find('[data-test="schedule-preset-option"][data-preset="daily"]').trigger('click');
 
     // 未选 runbook → disabled

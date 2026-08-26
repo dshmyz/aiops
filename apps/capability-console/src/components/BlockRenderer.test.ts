@@ -17,7 +17,7 @@ describe('BlockRenderer', () => {
       {
         type: 'incident_card',
         title: 'Kafka 集群延迟告警',
-        content: 'prod 环境 consumer_group 延迟超过阈值',
+        content: 'consumer_group 延迟超过阈值',
       },
     ];
     const wrapper = mount(BlockRenderer, {
@@ -27,7 +27,7 @@ describe('BlockRenderer', () => {
     expect(wrapper.find('[data-test="block-renderer"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="block-incident_card"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('Kafka 集群延迟告警');
-    expect(wrapper.text()).toContain('prod 环境 consumer_group 延迟超过阈值');
+    expect(wrapper.text()).toContain('consumer_group 延迟超过阈值');
   });
 
   test('renders risk_notice block with risk level', () => {
@@ -52,7 +52,7 @@ describe('BlockRenderer', () => {
       {
         type: 'risk_notice',
         title: '操作预演 (Dry-Run)',
-        content: '将把 prod 环境的 topic orders 的消息保留时间设置为 72 小时。',
+        content: '将把 topic orders 的消息保留时间设置为 72 小时。',
         payload: {
           affected_resources: ['topic:orders@prod'],
           commands: ['kafka-configs --alter --add-config retention.hours=72'],
@@ -131,7 +131,7 @@ describe('BlockRenderer', () => {
         payload: {
           action_code: 'middleware.diagnose',
           fields: [
-            { name: 'environment', type: 'select', required: true, options: ['prod', 'staging'] },
+            { name: 'cluster', type: 'select', required: true, options: ['m1', 'm2'] },
             { name: 'service', type: 'text', required: true },
           ],
         },
@@ -142,9 +142,9 @@ describe('BlockRenderer', () => {
     });
 
     expect(wrapper.find('[data-test="block-approval_form"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain('environment');
+    expect(wrapper.text()).toContain('cluster');
     expect(wrapper.text()).toContain('service');
-    expect(wrapper.text()).toContain('prod');
+    expect(wrapper.text()).toContain('m1');
   });
 
   test('renders evidence_timeline with events', () => {

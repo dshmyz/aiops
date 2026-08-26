@@ -128,19 +128,17 @@ type Rating struct {
 	Rating       int       `json:"rating"`
 	Review       *string   `json:"review,omitempty"`
 	VersionUsed  *string   `json:"version_used,omitempty"`
-	Environment  *string   `json:"environment,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // Stats aggregates a capability's execution history.
 type Stats struct {
-	CapabilityID    string         `json:"capability_id"`
-	TotalDownloads  int            `json:"total_downloads"`
-	TotalExecutions int            `json:"total_executions"`
-	SuccessRate     float64        `json:"success_rate"`
-	AvgDurationMS   *float64       `json:"avg_duration_ms,omitempty"`
-	ByEnvironment   map[string]int `json:"executions_by_environment"`
+	CapabilityID    string   `json:"capability_id"`
+	TotalDownloads  int      `json:"total_downloads"`
+	TotalExecutions int      `json:"total_executions"`
+	SuccessRate     float64  `json:"success_rate"`
+	AvgDurationMS   *float64 `json:"avg_duration_ms,omitempty"`
 }
 
 // PublishRequest publishes a new capability or a new version of an existing one.
@@ -527,7 +525,7 @@ func (s *Service) GetVersion(ctx context.Context, capabilityID, versionID string
 // Rate records or replaces a user's rating and recomputes the capability's
 // aggregate score in the same transaction, so avg_rating never lags the
 // underlying rows.
-func (s *Service) Rate(ctx context.Context, capabilityID, userID string, rating int, review, versionUsed, environment *string) error {
+func (s *Service) Rate(ctx context.Context, capabilityID, userID string, rating int, review, versionUsed *string) error {
 	if rating < 1 || rating > 5 {
 		return errors.New("rating must be between 1 and 5")
 	}
@@ -544,28 +542,26 @@ func (s *Service) Rate(ctx context.Context, capabilityID, userID string, rating 
 	now := s.now()
 	if s.sqlite {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO capability_ratings
-			(id, capability_id, user_id, rating, review, version_used, environment, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(id, capability_id, user_id, rating, review, version_used, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(capability_id, user_id) DO UPDATE SET
 				rating = excluded.rating,
 				review = excluded.review,
 				version_used = excluded.version_used,
-				environment = excluded.environment,
 				updated_at = excluded.updated_at`,
-			uuid.NewString(), capabilityID, userID, rating, review, versionUsed, environment, now, now); err != nil {
+			uuid.NewString(), capabilityID, userID, rating, review, versionUsed, now, now); err != nil {
 			return fmt.Errorf("record rating: %w", err)
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO capability_ratings
-			(id, capability_id, user_id, rating, review, version_used, environment, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(id, capability_id, user_id, rating, review, version_used, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON DUPLICATE KEY UPDATE
 				rating = VALUES(rating),
 				review = VALUES(review),
 				version_used = VALUES(version_used),
-				environment = VALUES(environment),
 				updated_at = VALUES(updated_at)`,
-			uuid.NewString(), capabilityID, userID, rating, review, versionUsed, environment, now, now); err != nil {
+			uuid.NewString(), capabilityID, userID, rating, review, versionUsed, now, now); err != nil {
 			return fmt.Errorf("record rating: %w", err)
 		}
 	}
@@ -596,7 +592,7 @@ func (s *Service) ListRatings(ctx context.Context, capabilityID string, limit, o
 	}
 
 	rows, err := s.db.QueryContext(ctx, `SELECT id, capability_id, user_id, rating, review,
-		version_used, environment, created_at, updated_at
+		version_used, created_at, updated_at
 		FROM capability_ratings WHERE capability_id = ?
 		ORDER BY created_at DESC LIMIT ? OFFSET ?`, capabilityID, limit, offset)
 	if err != nil {
@@ -608,7 +604,7 @@ func (s *Service) ListRatings(ctx context.Context, capabilityID string, limit, o
 	for rows.Next() {
 		var r Rating
 		if err := rows.Scan(&r.ID, &r.CapabilityID, &r.UserID, &r.Rating, &r.Review,
-			&r.VersionUsed, &r.Environment, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			&r.VersionUsed, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		ratings = append(ratings, r)
@@ -620,7 +616,7 @@ func (s *Service) ListRatings(ctx context.Context, capabilityID string, limit, o
 }
 
 // RecordDownload tracks a download and bumps the capability's download counter.
-func (s *Service) RecordDownload(ctx context.Context, capabilityID, versionID, userID string, organizationID, environment *string, source string) error {
+func (s *Service) RecordDownload(ctx context.Context, capabilityID, versionID, userID string, organizationID *string, source string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -628,9 +624,9 @@ func (s *Service) RecordDownload(ctx context.Context, capabilityID, versionID, u
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO capability_downloads
-		(id, capability_id, version_id, user_id, organization_id, environment, download_source, downloaded_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		uuid.NewString(), capabilityID, versionID, userID, organizationID, environment, source, s.now()); err != nil {
+		(id, capability_id, version_id, user_id, organization_id, download_source, downloaded_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		uuid.NewString(), capabilityID, versionID, userID, organizationID, source, s.now()); err != nil {
 		return fmt.Errorf("record download: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -642,7 +638,7 @@ func (s *Service) RecordDownload(ctx context.Context, capabilityID, versionID, u
 
 // RecordUsage tracks one execution of a capability so search can rank by real
 // operational use rather than downloads alone.
-func (s *Service) RecordUsage(ctx context.Context, capabilityID string, versionID *string, userID string, organizationID *string, environment, status string, durationMS *int, actionPlanID *string) error {
+func (s *Service) RecordUsage(ctx context.Context, capabilityID string, versionID *string, userID string, organizationID *string, status string, durationMS *int, actionPlanID *string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -650,9 +646,9 @@ func (s *Service) RecordUsage(ctx context.Context, capabilityID string, versionI
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO capability_usage_stats
-		(id, capability_id, version_id, user_id, organization_id, environment, status, execution_time_ms, action_plan_id, executed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		uuid.NewString(), capabilityID, versionID, userID, organizationID, environment, status, durationMS, actionPlanID, s.now()); err != nil {
+		(id, capability_id, version_id, user_id, organization_id, status, execution_time_ms, action_plan_id, executed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		uuid.NewString(), capabilityID, versionID, userID, organizationID, status, durationMS, actionPlanID, s.now()); err != nil {
 		return fmt.Errorf("record usage: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -664,7 +660,7 @@ func (s *Service) RecordUsage(ctx context.Context, capabilityID string, versionI
 
 // Stats aggregates a capability's download and execution history.
 func (s *Service) Stats(ctx context.Context, capabilityID string) (*Stats, error) {
-	result := &Stats{CapabilityID: capabilityID, ByEnvironment: map[string]int{}}
+	result := &Stats{CapabilityID: capabilityID}
 
 	var succeeded int
 	var avgDuration sql.NullFloat64
@@ -689,23 +685,6 @@ func (s *Service) Stats(ctx context.Context, capabilityID string) (*Stats, error
 		return nil, fmt.Errorf("count downloads: %w", err)
 	}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT environment, COUNT(*)
-		FROM capability_usage_stats WHERE capability_id = ? GROUP BY environment`, capabilityID)
-	if err != nil {
-		return nil, fmt.Errorf("aggregate usage by environment: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var environment string
-		var count int
-		if err := rows.Scan(&environment, &count); err != nil {
-			return nil, err
-		}
-		result.ByEnvironment[environment] = count
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 	return result, nil
 }
 

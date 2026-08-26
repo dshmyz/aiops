@@ -3,7 +3,6 @@ import { ref, watch } from 'vue';
 import type { PendingPlanDetail, ExecutionResult } from '../types';
 import { confirmPlan } from '../api';
 import {
-  labelForEnvironment,
   labelForRisk,
   labelForPlanStatus,
 } from '../labels';
@@ -64,7 +63,6 @@ async function handleConfirm() {
       <h4>{{ plan.tool }}</h4>
     </header>
     <dl class="inline-meta">
-      <div><dt>环境</dt><dd>{{ labelForEnvironment(plan.environment) }}</dd></div>
       <div><dt>风险</dt><dd>{{ labelForRisk(plan.risk) }}</dd></div>
       <div><dt>状态</dt><dd>{{ labelForPlanStatus(plan.status) }}</dd></div>
       <div><dt>版本</dt><dd>{{ plan.version }}</dd></div>

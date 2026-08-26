@@ -53,7 +53,7 @@ func TestResolveOrdersPreAndPostDependencies(t *testing.T) {
 	t.Parallel()
 	resolver := capabilities.NewDependencyResolver(drainRestartChain())
 
-	chain, err := resolver.Resolve("service.restart", map[string]any{"environment": "prod"})
+	chain, err := resolver.Resolve("service.restart", map[string]any{"instance": "10.0.1.5:8080"})
 	if err != nil {
 		t.Fatalf("Resolve returned %v", err)
 	}
@@ -86,7 +86,7 @@ func TestResolveRunsDeepestPrerequisiteFirst(t *testing.T) {
 	}
 	loaded = append(loaded, health)
 
-	chain, err := capabilities.NewDependencyResolver(loaded).Resolve("service.restart", map[string]any{"environment": "prod"})
+	chain, err := capabilities.NewDependencyResolver(loaded).Resolve("service.restart", map[string]any{"instance": "10.0.1.5:8080"})
 	if err != nil {
 		t.Fatalf("Resolve returned %v", err)
 	}
@@ -114,7 +114,7 @@ func TestResolveSchedulesSharedDependencyOnce(t *testing.T) {
 	}
 	loaded = append(loaded, health)
 
-	chain, err := capabilities.NewDependencyResolver(loaded).Resolve("service.restart", map[string]any{"environment": "prod"})
+	chain, err := capabilities.NewDependencyResolver(loaded).Resolve("service.restart", map[string]any{"instance": "h1"})
 	if err != nil {
 		t.Fatalf("Resolve returned %v", err)
 	}
@@ -190,7 +190,6 @@ func TestResolveAppliesInputMapping(t *testing.T) {
 	}
 
 	chain, err := capabilities.NewDependencyResolver(loaded).Resolve("service.restart", map[string]any{
-		"environment": "prod",
 		"instance":    "10.0.1.5:8080",
 	})
 	if err != nil {
@@ -204,9 +203,9 @@ func TestResolveAppliesInputMapping(t *testing.T) {
 	if got := drainStep.Input["backend"]; got != "10.0.1.5:8080" {
 		t.Fatalf("mapped backend = %v, want 10.0.1.5:8080", got)
 	}
-	// environment gates policy, so it must survive a mapping that omits it.
-	if got := drainStep.Input["environment"]; got != "prod" {
-		t.Fatalf("environment = %v, want prod to be carried through", got)
+	// 依赖链上补全输入：mapping 未涉及的根输入应透传给依赖步骤。
+	if got := drainStep.Input["instance"]; got != "10.0.1.5:8080" {
+		t.Fatalf("carried instance = %v, want 10.0.1.5:8080", got)
 	}
 }
 
@@ -222,7 +221,7 @@ func TestResolveRejectsInputMappingWithMissingField(t *testing.T) {
 		}
 	}
 
-	_, err := capabilities.NewDependencyResolver(loaded).Resolve("service.restart", map[string]any{"environment": "prod"})
+	_, err := capabilities.NewDependencyResolver(loaded).Resolve("service.restart", map[string]any{})
 	if err == nil {
 		t.Fatal("Resolve accepted a mapping that references a missing input field")
 	}

@@ -248,7 +248,7 @@ func TestManagerTestExecutesReadCapabilityAndReturnsNormalizedResult(t *testing.
 	manager := capabilities.NewManager(t.TempDir(), capabilities.NewHTTPAdapter(server.Client()))
 	capability := managedReadCapability("minio.bucket.capacity.read", "needs_review")
 	capability.Backend.BaseURL = server.URL
-	result, err := manager.Test(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := manager.Test(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Test returned %v", err)
 	}
@@ -259,7 +259,7 @@ func TestManagerTestExecutesReadCapabilityAndReturnsNormalizedResult(t *testing.
 	writeCapability := managedReadCapability("minio.bucket.capacity.set", "needs_review")
 	writeCapability.Operation = tools.Write
 	writeCapability.Backend.Method = http.MethodPost
-	if _, err := manager.Test(context.Background(), writeCapability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}); !errors.Is(err, capabilities.ErrTestRequiresReadGET) {
+	if _, err := manager.Test(context.Background(), writeCapability, map[string]any{"cluster": "m1", "bucket": "archive"}); !errors.Is(err, capabilities.ErrTestRequiresReadGET) {
 		t.Fatalf("write test error = %v, want ErrTestRequiresReadGET", err)
 	}
 }
@@ -635,7 +635,6 @@ func managedReadCapability(name, status string) capabilities.Capability {
 			TimeoutMS: 3000,
 		},
 		InputSchema: map[string]capabilities.InputField{
-			"environment": {Type: "string", Required: true},
 			"cluster":     {Type: "string", Required: true},
 			"bucket":      {Type: "string", Required: true},
 		},
@@ -645,8 +644,7 @@ func managedReadCapability(name, status string) capabilities.Capability {
 			Fields:          map[string]string{"usage_pct": "$.data.usage_pct"},
 		},
 		Auth: capabilities.AuthSpec{
-			Roles:             []string{"viewer", "operator", "admin"},
-			EnvironmentScoped: true,
+			Roles: []string{"viewer", "operator", "admin"},
 		},
 	}
 }
@@ -681,8 +679,8 @@ func TestManagerQuickPublishPublishesReadCapabilityDirectly(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "published", "redis.cluster.info.read.yaml")); err != nil {
 		t.Fatalf("published file missing: %v", err)
 	}
-	if _, ok := published.InputSchema["environment"]; !ok || !published.InputSchema["environment"].Required {
-		t.Fatalf("input_schema missing required environment, got %+v", published.InputSchema)
+	if _, ok := published.InputSchema["environment"]; ok {
+		t.Fatalf("input_schema unexpectedly contains environment (concept removed), got %+v", published.InputSchema)
 	}
 	if field, ok := published.InputSchema["cluster"]; !ok || !field.Required || field.Type != "string" {
 		t.Fatalf("input_schema missing required cluster string variable, got %+v", published.InputSchema)

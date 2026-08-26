@@ -192,7 +192,7 @@ func TestAgentExecutorStreamsToolPathFinalAnswer(t *testing.T) {
 				Type: "function",
 				Function: schema.FunctionCall{
 					Name:      "kafka.consumer_lag.read",
-					Arguments: `{"environment":"prod"}`,
+					Arguments: `{}`,
 				},
 			}},
 		},

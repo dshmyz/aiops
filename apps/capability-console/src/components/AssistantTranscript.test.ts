@@ -9,7 +9,7 @@ describe('AssistantTranscript', () => {
       id: 'turn-1',
       conversation_id: 'conv-1',
       role: 'user',
-      content: '查看 prod 集群状态',
+      content: '查看 集群状态',
       created_at: '2026-07-27T10:00:00Z',
     },
     {
@@ -48,7 +48,7 @@ describe('AssistantTranscript', () => {
     expect(wrapper.find('[data-test="assistant-transcript-empty"]').exists()).toBe(false);
     const items = wrapper.findAll('[data-test="conversation-turn-item"]');
     expect(items).toHaveLength(2);
-    expect(items[0].find('[data-test="conversation-turn-content"]').text()).toBe('查看 prod 集群状态');
+    expect(items[0].find('[data-test="conversation-turn-content"]').text()).toBe('查看 集群状态');
     expect(items[1].find('[data-test="conversation-turn-content"]').text()).toBe('Volume data is healthy');
   });
 

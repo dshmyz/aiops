@@ -22,7 +22,7 @@ func TestConfirmedPlanCannotChangeInput(t *testing.T) {
 	ctx, service, plan, _, _ := confirmedWritePlan(t)
 
 	_, err := service.ExecuteConfirmedPlan(ctx, plan.ID, map[string]any{
-		"environment": "prod", "topic": "orders", "retention_hours": 16,
+		"topic": "orders", "retention_hours": 16,
 	})
 	if err == nil || !contains(err.Error(), "immutable") {
 		t.Fatalf("execute changed input error = %v, want immutable error", err)
@@ -32,14 +32,14 @@ func TestConfirmedPlanCannotChangeInput(t *testing.T) {
 func TestExecuteConfirmedPlanUsesStoredSnapshotAndIdempotencyKey(t *testing.T) {
 	t.Parallel()
 	ctx, service, plan, runner, _ := confirmedWritePlan(t)
-	input := map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}
+	input := map[string]any{"topic": "orders", "retention_hours": 72}
 
 	first, err := service.ExecuteConfirmedPlan(ctx, plan.ID, input)
 	if err != nil {
 		t.Fatalf("first execution: %v", err)
 	}
 	input["retention_hours"] = 16
-	second, err := service.ExecuteConfirmedPlan(ctx, plan.ID, map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72})
+	second, err := service.ExecuteConfirmedPlan(ctx, plan.ID, map[string]any{"topic": "orders", "retention_hours": 72})
 	if err != nil {
 		t.Fatalf("second execution: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestSanitizedResultSummaryPreservesOutputAndStripsNestedSecrets(t *testing.
 	ctx, service, plan, runner, repository := confirmedWritePlan(t)
 	runner.result = map[string]any{
 		"kind":     "config",
-		"resource": map[string]any{"name": "orders", "environment": "prod"},
+		"resource": map[string]any{"name": "orders", "region": "cn-east"},
 		"severity": "low",
 		"summary":  "retention set to 72h",
 		"data": map[string]any{
@@ -441,11 +441,11 @@ func (e *recordingExecutor) Execute(_ context.Context, _ string, input map[strin
 }
 
 func writeInput() map[string]any {
-	return map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}
+	return map[string]any{"topic": "orders", "retention_hours": 72}
 }
 
 func testUser() identity.CurrentUser {
-	return identity.CurrentUser{Subject: "operator-1", Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}, RequestID: "req-task-3"}
+	return identity.CurrentUser{Subject: "operator-1", Roles: []string{"admin"}, RequestID: "req-task-3"}
 }
 
 func tool(t *testing.T, name string) tools.Tool {
@@ -480,7 +480,7 @@ func ensureMiddlewareWriteTool(t *testing.T) {
 				SupportsDryRun:      true,
 			},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment":     {Type: "string", Required: true},
+
 				"topic":           {Type: "string", Required: true},
 				"retention_hours": {Type: "integer", Required: true},
 			},
@@ -517,7 +517,7 @@ func TestExecutionObserverNotifiedOnSuccess(t *testing.T) {
 	observer := &recordingObserver{}
 	service.WithObservers(observer)
 
-	input := map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}
+	input := map[string]any{"topic": "orders", "retention_hours": 72}
 	_, err := service.ExecuteConfirmedPlan(ctx, plan.ID, input)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -580,7 +580,7 @@ func TestExecutionObserverNotCalledOnReused(t *testing.T) {
 	observer := &recordingObserver{}
 	service.WithObservers(observer)
 
-	input := map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}
+	input := map[string]any{"topic": "orders", "retention_hours": 72}
 	_, _ = service.ExecuteConfirmedPlan(ctx, plan.ID, input)
 	_, _ = service.ExecuteConfirmedPlan(ctx, plan.ID, input) // reused
 
@@ -635,7 +635,7 @@ func TestExecuteConfirmedPlanSucceedsClearsErrorSummary(t *testing.T) {
 	t.Parallel()
 	ctx, service, plan, _, repository := confirmedWritePlan(t)
 
-	input := map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}
+	input := map[string]any{"topic": "orders", "retention_hours": 72}
 	if _, err := service.ExecuteConfirmedPlan(ctx, plan.ID, input); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -661,7 +661,7 @@ func TestExecutionEventContainsRequestIDAndResult(t *testing.T) {
 	observer := &recordingObserver{}
 	service.WithObservers(observer)
 
-	input := map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}
+	input := map[string]any{"topic": "orders", "retention_hours": 72}
 	_, err := service.ExecuteConfirmedPlan(ctx, plan.ID, input)
 	if err != nil {
 		t.Fatalf("execute: %v", err)

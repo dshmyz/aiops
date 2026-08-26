@@ -242,7 +242,6 @@ onMounted(() => {
               <span class="risk-badge">{{ labelForRisk(plan.risk) }}</span>
             </div>
             <div class="overview-plan-meta">
-              <span>{{ plan.environment || '不指定' }}</span>
               <span>{{ plan.created_by }}</span>
               <span>{{ formatRelativeTime(plan.created_at) }} 创建 · {{ formatRelativeTime(plan.expires_at) }} 过期</span>
             </div>

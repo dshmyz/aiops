@@ -37,10 +37,9 @@ const dueTaskLimit = 100
 // 定时任务由 admin 配置时已完成鉴权，调度器不再重复 policy 校验。
 func systemUser() identity.CurrentUser {
 	return identity.CurrentUser{
-		Subject:             systemSchedulerSubject,
-		Roles:               []string{"scheduler"},
-		AllowedEnvironments: []string{},
-		RequestID:           "scheduler",
+		Subject:   systemSchedulerSubject,
+		Roles:     []string{"scheduler"},
+		RequestID: "scheduler",
 	}
 }
 

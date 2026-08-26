@@ -202,7 +202,7 @@ func TestTriggerAlsoUsesAtomicUpdate(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",

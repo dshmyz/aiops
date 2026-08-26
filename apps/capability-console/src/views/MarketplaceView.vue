@@ -110,7 +110,7 @@ const stats = ref<MarketplaceStats | null>(null);
 const detailLoading = ref(false);
 const detailError = ref('');
 
-const downloadForm = reactive({ versionID: '', environment: '' });
+const downloadForm = reactive({ versionID: '' });
 const downloaded = ref<{ version: string; yaml: string } | null>(null);
 
 async function openDetail(registry: MarketplaceRegistry) {

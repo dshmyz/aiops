@@ -293,12 +293,10 @@ func UnregisterDynamicTools(names []string) error {
 }
 
 func validateDynamicInputSchema(toolName string, schema map[string]DynamicInputField) error {
+	// 空 schema 合法：只读能力可能不需要参数（如平台只读元工具）。
+	// 写能力若声明了参数，由发布侧校验输入完整性。
 	if len(schema) == 0 {
-		return fmt.Errorf("dynamic tool %q requires input fields", toolName)
-	}
-	environment, ok := schema["environment"]
-	if !ok || environment.Type != "string" || !environment.Required {
-		return fmt.Errorf("dynamic tool %q requires environment as a required string", toolName)
+		return nil
 	}
 	for name, field := range schema {
 		if strings.TrimSpace(name) == "" {
@@ -348,16 +346,12 @@ func ValidateInput(requested Tool, input map[string]any) error {
 
 	switch tool.Name {
 	case ClusterStatusRead, QuerySystemPosture:
-		if err := onlyFields(input, "environment"); err != nil {
+		if err := onlyFields(input); err != nil {
 			return err
 		}
-		_, err := requiredString(input, "environment")
-		return err
+		return nil
 	case AlertQuery:
-		if err := onlyFields(input, "environment", "severity", "status", "domain"); err != nil {
-			return err
-		}
-		if _, err := requiredString(input, "environment"); err != nil {
+		if err := onlyFields(input, "severity", "status", "domain"); err != nil {
 			return err
 		}
 		if severity, ok := input["severity"]; ok {
@@ -372,19 +366,13 @@ func ValidateInput(requested Tool, input map[string]any) error {
 		}
 		return nil
 	case EventQuery:
-		if err := onlyFields(input, "environment", "query"); err != nil {
-			return err
-		}
-		if _, err := requiredString(input, "environment"); err != nil {
+		if err := onlyFields(input, "query"); err != nil {
 			return err
 		}
 		_, err := requiredString(input, "query")
 		return err
 	case TaskQuery:
-		if err := onlyFields(input, "environment", "status", "limit"); err != nil {
-			return err
-		}
-		if _, err := requiredString(input, "environment"); err != nil {
+		if err := onlyFields(input, "status", "limit"); err != nil {
 			return err
 		}
 		if status, ok := input["status"]; ok {
@@ -399,12 +387,12 @@ func ValidateInput(requested Tool, input map[string]any) error {
 		}
 		return nil
 	case IncidentView:
-		// 告警全景 pivot：域 / 资源类型 / 资源名 / 环境 均可选字符串，由
+		// 告警全景 pivot：域 / 资源类型 / 资源名 均可选字符串，由
 		// incidentViewReadRunner 按任意组合软定位告警锚点后补全。
-		if err := onlyFields(input, "domain", "resource_type", "resource_name", "environment"); err != nil {
+		if err := onlyFields(input, "domain", "resource_type", "resource_name"); err != nil {
 			return err
 		}
-		for _, name := range []string{"domain", "resource_type", "resource_name", "environment"} {
+		for _, name := range []string{"domain", "resource_type", "resource_name"} {
 			if v, ok := input[name]; ok {
 				if _, ok := v.(string); !ok {
 					return fmt.Errorf("parameter %q must be a string", name)

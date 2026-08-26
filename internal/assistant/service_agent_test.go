@@ -30,9 +30,9 @@ func TestPersistAgentRunRecordsFailedStep(t *testing.T) {
 			{
 				Kind:      StepAdvisory,
 				Tool:      "minio.bucket.health.read",
-				Input:     map[string]any{"environment": "prod", "bucket": "archive"},
-				Err:       "policy denied: environment_denied",
-				Summary:   "工具执行失败：policy denied: environment_denied",
+				Input:     map[string]any{"bucket": "archive"},
+				Err:       "policy denied: risk_denied",
+				Summary:   "工具执行失败：policy denied: risk_denied",
 				StepIndex: 0,
 			},
 		},
@@ -57,8 +57,8 @@ func TestPersistAgentRunRecordsFailedStep(t *testing.T) {
 	if found.ResponsePayload["status"] != "failed" {
 		t.Fatalf("payload status = %v, want failed", found.ResponsePayload["status"])
 	}
-	if got, _ := found.ResponsePayload["error"].(string); got != "policy denied: environment_denied" {
-		t.Fatalf("payload error = %v, want policy denied: environment_denied", found.ResponsePayload["error"])
+	if got, _ := found.ResponsePayload["error"].(string); got != "policy denied: risk_denied" {
+		t.Fatalf("payload error = %v, want policy denied: risk_denied", found.ResponsePayload["error"])
 	}
 	if found.ResponsePayload["tool"] != "minio.bucket.health.read" {
 		t.Fatalf("payload tool = %v, want minio.bucket.health.read", found.ResponsePayload["tool"])
@@ -74,10 +74,9 @@ func TestRecordDeniedWritesAuditEvent(t *testing.T) {
 		Subject:             "admin-1",
 		RequestID:           "req-1",
 		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{"prod", "staging", "dev"},
 	}
 	ctx := execution.WithAgentStep(context.Background(), execution.AgentStep{StepIndex: 3, Conversation: "conv-9"})
-	s.recordDenied(ctx, user, "minio.bucket.health.read", policy.EnvironmentDenied)
+	s.recordDenied(ctx, user, "minio.bucket.health.read", policy.RiskDenied)
 
 	page, err := repo.ListAudit(context.Background(), store.AuditFilter{})
 	if err != nil {
@@ -93,8 +92,8 @@ func TestRecordDeniedWritesAuditEvent(t *testing.T) {
 	if event.Action != audit.ActionReadonlyToolRejected {
 		t.Fatalf("action = %q, want %q", event.Action, audit.ActionReadonlyToolRejected)
 	}
-	if event.Decision != string(policy.EnvironmentDenied) {
-		t.Fatalf("decision = %q, want environment_denied", event.Decision)
+	if event.Decision != string(policy.RiskDenied) {
+		t.Fatalf("decision = %q, want risk_denied", event.Decision)
 	}
 	if event.Subject != "admin-1" {
 		t.Fatalf("subject = %q", event.Subject)
@@ -110,5 +109,5 @@ func TestRecordDeniedWritesAuditEvent(t *testing.T) {
 // TestRecordDeniedNilAuditNoop 验证 audit 未配置时 recordDenied 是 no-op 不 panic。
 func TestRecordDeniedNilAuditNoop(t *testing.T) {
 	s := &Service{}
-	s.recordDenied(context.Background(), identity.CurrentUser{Subject: "u"}, "tool.a", policy.EnvironmentDenied)
+	s.recordDenied(context.Background(), identity.CurrentUser{Subject: "u"}, "tool.a", policy.RiskDenied)
 }

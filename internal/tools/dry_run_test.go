@@ -24,7 +24,7 @@ func registerMiddlewareWrite(t *testing.T) {
 			SupportsDryRun:      true,
 		},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment":     {Type: "string", Required: true},
+
 			"topic":           {Type: "string", Required: true},
 			"retention_hours": {Type: "integer", Required: true},
 		},

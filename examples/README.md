@@ -44,9 +44,9 @@ read tools.
 Try these prompts:
 
 ```text
-查询 prod m1 archive bucket 的 minio 容量
-查询 prod g1 data volume 的 glusterfs 状态
-查询 prod k1 payments consumer_group 的 kafka 延迟
+查询 m1 archive bucket 的 minio 容量
+查询 g1 data volume 的 glusterfs 状态
+查询 k1 payments consumer_group 的 kafka 延迟
 ```
 
 ## Swagger Import Test

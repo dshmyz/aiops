@@ -14,7 +14,7 @@ export interface UseIncident {
 
 /**
  * incident.view 告警全景：operator 输入资源身份（domain / resource_type /
- * resource_name / environment），后端 incidentViewReadRunner 软匹配各证据源，
+ * resource_name），后端 incidentViewReadRunner 软匹配各证据源，
  * 返回可回链的 incident 全景（timeline / scheduled_runs / probes / runbooks /
  * recent_writes / counts）。
  */

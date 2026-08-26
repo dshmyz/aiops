@@ -65,7 +65,7 @@ func TestListExecutionsReturnsJSONNotBase64(t *testing.T) {
 	}
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/executions", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/executions", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body = %s", res.Code, http.StatusOK, res.Body.String())
@@ -112,7 +112,7 @@ func TestListExecutionsRejectsNonAdmin(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/executions", "", "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/executions", "", "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d (admin-only)", res.Code, http.StatusForbidden)
@@ -129,7 +129,7 @@ func TestListExecutionsReturnsChronological(t *testing.T) {
 	seedExecutionForHTTP(t, repository, "plan-2", "minio.bucket.quota.set", "failed", &started, base.Add(time.Second))
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/executions", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/executions", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body = %s", res.Code, http.StatusOK, res.Body.String())
@@ -166,7 +166,7 @@ func TestListExecutionsFiltersByStatus(t *testing.T) {
 	seedExecutionForHTTP(t, repository, "plan-2", "minio.bucket.quota.set", "failed", &started, base.Add(time.Second))
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/executions?status=failed", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/executions?status=failed", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", res.Code, http.StatusOK)
@@ -197,7 +197,7 @@ func TestListExecutionsFiltersByToolName(t *testing.T) {
 	seedExecutionForHTTP(t, repository, "plan-2", "minio.bucket.quota.set", "failed", &started, base.Add(time.Second))
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/executions?tool=topic.retention.set", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/executions?tool=topic.retention.set", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", res.Code, http.StatusOK)
@@ -230,7 +230,7 @@ func TestListExecutionsPaginatesByKeyset(t *testing.T) {
 
 	// 第一页
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/executions?limit=2", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/executions?limit=2", "", "admin-1", []string{"admin"}))
 	if res.Code != http.StatusOK {
 		t.Fatalf("page1 status = %d, want %d", res.Code, http.StatusOK)
 	}
@@ -258,7 +258,7 @@ func TestListExecutionsPaginatesByKeyset(t *testing.T) {
 
 	// 第二页
 	res2 := httptest.NewRecorder()
-	router.ServeHTTP(res2, signedRequest(t, "/v1/executions?limit=2&cursor_created_at="+page1.NextCursor.CreatedAt+"&cursor_id="+page1.NextCursor.ID, "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res2, signedRequest(t, "/v1/executions?limit=2&cursor_created_at="+page1.NextCursor.CreatedAt+"&cursor_id="+page1.NextCursor.ID, "", "admin-1", []string{"admin"}))
 	if res2.Code != http.StatusOK {
 		t.Fatalf("page2 status = %d, want %d", res2.Code, http.StatusOK)
 	}
@@ -291,7 +291,7 @@ func TestListExecutionsRejectsUnsupportedQueryParameter(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/executions?foo=bar", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/executions?foo=bar", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", res.Code, http.StatusBadRequest)

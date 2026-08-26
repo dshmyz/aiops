@@ -7,64 +7,59 @@ operation: write
 risk: high
 
 backend:
-    adapter: http
-    method: POST
-    path: /api/redis/{cluster}/flush
-    timeout_ms: 30000
-    base_url: http://redis-management-api:8080
+ adapter: http
+ method: POST
+ path: /api/redis/{cluster}/flush
+ timeout_ms: 30000
+ base_url: http://redis-management-api:8080
 
 input_schema:
-    cluster:
-        type: string
-        required: true
-    database:
-        type: integer
-        min: 0
-        max: 15
-    pattern:
-        type: string
-    environment:
-        type: string
-        required: true
-
+ cluster:
+ type: string
+ required: true
+ database:
+ type: integer
+ min: 0
+ max: 15
+ pattern:
+ type: string
 output:
-    kind: action
-    severity_path: $.status
-    summary_template: "Flushed Redis keys matching pattern '{pattern}' in cluster {cluster}"
-    fields:
-        keys_deleted: $.data.deleted_count
-        execution_time_ms: $.data.execution_time
+ kind: action
+ severity_path: $.status
+ summary_template: "Flushed Redis keys matching pattern '{pattern}' in cluster {cluster}"
+ fields:
+ keys_deleted: $.data.deleted_count
+ execution_time_ms: $.data.execution_time
 
 governance:
-    requires_action_plan: true
-    requires_approval: true
-    precheck_tools:
-        - redis.keys.count
-    rollback:
-        strategy: none
-        source: "Cache flush is irreversible. Ensure the pattern is correct before execution."
+ requires_action_plan: true
+ requires_approval: true
+ precheck_tools:
+ - redis.keys.count
+ rollback:
+ strategy: none
+ source: "Cache flush is irreversible. Ensure the pattern is correct before execution."
 
 auth:
-    roles:
-        - admin
-    environment_scoped: true
+ roles:
+ - admin
 
 ai:
-    description: |
-        Flush (delete) Redis keys matching a pattern. Dangerous operation.
+ description: |
+ Flush (delete) Redis keys matching a pattern. Dangerous operation.
 
-        Use cases: clear expired session data after migration, invalidate corrupted
-        cache entries, emergency cache clear during an incident.
+ Use cases: clear expired session data after migration, invalidate corrupted
+ cache entries, emergency cache clear during an incident.
 
-        Warning: pattern "*" deletes ALL keys in the database; this is irreversible.
-        Always verify the pattern with redis.keys.count first; consider targeted DEL
-        for small key sets. Never use "*" in production without explicit approval.
-        Check key count first - if >10k keys consider an async job. Coordinate with
-        the application team before flushing shared caches, and monitor application
-        error rate after (cold cache raises DB load). For large-scale flush use
-        SCAN + DEL rather than KEYS + DEL to avoid blocking.
+ Warning: pattern "*" deletes ALL keys in the database; this is irreversible.
+ Always verify the pattern with redis.keys.count first; consider targeted DEL
+ for small key sets. Never use "*" in production without explicit approval.
+ Check key count first - if >10k keys consider an async job. Coordinate with
+ the application team before flushing shared caches, and monitor application
+ error rate after (cold cache raises DB load). For large-scale flush use
+ SCAN + DEL rather than KEYS + DEL to avoid blocking.
 
-    examples:
-        - "清空 prod 环境 redis 集群 cache-01 database 0 里所有以 user:session: 开头的 key"
-        - 'flush keys matching "temp:*" in redis cluster cache-staging, database 1'
-        - "删除 dev 环境 redis-local 集群里的所有 rate_limit:api:* key"
+ examples:
+ - "清空 redis 集群 cache-01 database 0 里所有以 user:session: 开头的 key"
+ - 'flush keys matching "temp:*" in redis cluster cache-staging, database 1'
+ - "删除 redis-local 集群里的所有 rate_limit:api:* key"

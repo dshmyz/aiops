@@ -19,7 +19,7 @@ import (
 // Authorization header and model name.
 func TestEinoPlannerRealHTTPPath(t *testing.T) {
 	t.Parallel()
-	intentJSON := `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.95,"explanation":"check cluster status"}`
+	intentJSON := `{"tool_name":"cluster.status.read","input":{},"confidence":0.95,"explanation":"check cluster status"}`
 	var requestCount int
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -83,12 +83,12 @@ func TestEinoPlannerRealHTTPPath(t *testing.T) {
 		t.Fatalf("new planner: %v", err)
 	}
 
-	intent, err := planner.Plan(context.Background(), user(), "查看 prod 集群状态", nil, assistant.PageContext{})
+	intent, err := planner.Plan(context.Background(), user(), "查看 集群状态", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("Plan returned %v", err)
 	}
-	if intent.ToolName != tools.ClusterStatusRead || intent.Input["environment"] != "prod" {
-		t.Fatalf("intent = %+v, want cluster.status.read on prod", intent)
+	if intent.ToolName != tools.ClusterStatusRead {
+		t.Fatalf("intent = %+v, want cluster.status.read", intent)
 	}
 	if requestCount == 0 {
 		t.Fatal("mock server did not receive any request")
@@ -100,7 +100,7 @@ func TestEinoPlannerRealHTTPPath(t *testing.T) {
 // deltas and parse the final intent.
 func TestEinoPlannerRealHTTPPathStream(t *testing.T) {
 	t.Parallel()
-	intentJSON := `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.95,"explanation":"check cluster status"}`
+	intentJSON := `{"tool_name":"cluster.status.read","input":{},"confidence":0.95,"explanation":"check cluster status"}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -145,7 +145,7 @@ func TestEinoPlannerRealHTTPPathStream(t *testing.T) {
 		t.Fatalf("planner type = %T, want *EinoPlanner", planner)
 	}
 
-	events, err := ep.PlanStream(context.Background(), user(), "查看 prod 集群状态", nil, assistant.PageContext{})
+	events, err := ep.PlanStream(context.Background(), user(), "查看 集群状态", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("PlanStream returned %v", err)
 	}
@@ -242,7 +242,7 @@ func TestLLMCompactorRealHTTPPath(t *testing.T) {
 
 	turns := []assistant.Turn{
 		{Role: "system_summary", Content: "Previous: user checked cluster status."},
-		{Role: "user", Content: "查 prod kafka orders group 的 lag"},
+		{Role: "user", Content: "查 kafka orders group 的 lag"},
 		{Role: "assistant", Content: "lag = 1234"},
 		{Role: "user", Content: "再查 MinIO bucket"},
 		{Role: "assistant", Content: "MinIO healthy"},

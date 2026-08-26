@@ -8,7 +8,7 @@ describe('ConversationTurnItem', () => {
     id: 'turn-1',
     conversation_id: 'conv-1',
     role: 'user',
-    content: '查看 prod 集群状态',
+    content: '查看 集群状态',
     created_at: '2026-07-27T10:00:00Z',
   };
 
@@ -18,7 +18,7 @@ describe('ConversationTurnItem', () => {
     expect(wrapper.find('[data-test="conversation-turn-item"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="conversation-turn-item"]').classes()).toContain('user');
     expect(wrapper.find('[data-test="conversation-turn-role"]').text()).toBe('你');
-    expect(wrapper.find('[data-test="conversation-turn-content"]').text()).toBe('查看 prod 集群状态');
+    expect(wrapper.find('[data-test="conversation-turn-content"]').text()).toBe('查看 集群状态');
     expect(wrapper.find('[data-test="conversation-turn-response-type"]').exists()).toBe(false);
   });
 
@@ -364,7 +364,7 @@ describe('ConversationTurnItem', () => {
         tool: 'cluster.status.read',
         step_index: 0,
         summary: 'cluster.status.read：green',
-        input: { environment: 'prod' },
+        input: { cluster: 'c1' },
         result: { status: 'green' },
       },
     };
@@ -384,15 +384,15 @@ describe('ConversationTurnItem', () => {
       id: 'turn-toolstep-denied',
       role: 'assistant',
       response_type: 'tool_step',
-      content: '工具执行失败：policy denied: environment_denied',
+      content: '工具执行失败：policy denied: action_not_allowed',
       response_payload: {
         type: 'tool_step',
         tool: 'minio.bucket.health.read',
         step_index: 0,
         status: 'failed',
-        error: 'policy denied: environment_denied',
-        summary: '工具执行失败：policy denied: environment_denied',
-        input: { environment: 'production', bucket: 'archive' },
+        error: 'policy denied: action_not_allowed',
+        summary: '工具执行失败：policy denied: action_not_allowed',
+        input: { bucket: 'archive' },
       },
     };
 
@@ -404,14 +404,14 @@ describe('ConversationTurnItem', () => {
     expect(item.text()).toContain('minio.bucket.health.read');
     // denied 归入 failed 展示，文案为"已拒绝"并显示原始错误
     expect(item.text()).toContain('已拒绝');
-    expect(item.text()).toContain('policy denied: environment_denied');
+    expect(item.text()).toContain('policy denied: action_not_allowed');
   });
 
   test('user turn never renders steps block', () => {
     const turn: ConversationTurn = {
       ...baseTurn,
       role: 'user',
-      content: '检查 prod 集群',
+      content: '检查集群',
       steps: [{ tool: 'cluster.status.read', step_index: 0, status: 'done' }],
     };
 

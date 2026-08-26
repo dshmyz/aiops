@@ -7,67 +7,62 @@ operation: read
 risk: low
 
 backend:
-    adapter: http
-    method: GET
-    path: /api/v1/query
-    timeout_ms: 30000
-    base_url: http://prometheus:9090
+ adapter: http
+ method: GET
+ path: /api/v1/query
+ timeout_ms: 30000
+ base_url: http://prometheus:9090
 
 input_schema:
-    promql_query:
-        type: string
-        required: true
-    timestamp:
-        type: string
-    query_timeout:
-        type: string
-    environment:
-        type: string
-        required: true
-
+ promql_query:
+ type: string
+ required: true
+ timestamp:
+ type: string
+ query_timeout:
+ type: string
 output:
-    kind: observation
-    severity_path: $.status
-    summary_template: "Query returned {result_count} metric series"
-    fields:
-        result_type: $.data.resultType
-        result: $.data.result
-        result_count: $.data.result.length
+ kind: observation
+ severity_path: $.status
+ summary_template: "Query returned {result_count} metric series"
+ fields:
+ result_type: $.data.resultType
+ result: $.data.result
+ result_count: $.data.result.length
 
 governance:
-    requires_action_plan: false
-    requires_approval: false
-    precheck_tools: []
-    rollback:
-        strategy: ""
-        source: ""
+ requires_action_plan: false
+ requires_approval: false
+ precheck_tools: []
+ rollback:
+ strategy: ""
+ source: ""
 
 auth:
-    roles:
-        - viewer
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - viewer
+ - operator
+ - admin
 
 ai:
-    description: |
-        Execute a PromQL query against Prometheus to retrieve metrics.
+ description: |
+ Execute a PromQL query against Prometheus to retrieve metrics.
 
-        Common queries:
-        - up{job="api-server"} - check if targets are up
-        - rate(http_requests_total[5m]) - request rate over 5 minutes
-        - container_memory_usage_bytes{pod=~"api-.*"} - memory usage by pod pattern
-        - histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) - P99 latency
+ Common queries:
+ - up{job="api-server"} - check if targets are up
+ - rate(http_requests_total[5m]) - request rate over 5 minutes
+ - container_memory_usage_bytes{pod=~"api-.*"} - memory usage by pod pattern
+ - histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) - P99 latency
 
-        Use cases: investigate alerts and anomalies, capacity planning and trend
-        analysis, ad-hoc performance troubleshooting.
+ Use cases: investigate alerts and anomalies, capacity planning and trend
+ analysis, ad-hoc performance troubleshooting.
 
-        Note: complex queries with large cardinality may timeout or overload
-        Prometheus; prefer recording rules for frequently-run expensive queries;
-        limit time range and label selectors; for historical analysis use
-        /api/v1/query_range instead.
+ Note: complex queries with large cardinality may timeout or overload
+ Prometheus; prefer recording rules for frequently-run expensive queries;
+ limit time range and label selectors; for historical analysis use
+ /api/v1/query_range instead.
 
-    examples:
-        - 查询 prod 环境最近 5 分钟 api-server 的 QPS
-        - query memory usage for all pods in namespace default, environment staging
-        - 给我看一下 dev 环境 redis 集群的连接数指标
+ examples:
+ - 查询 最近 5 分钟 api-server 的 QPS
+ - query memory usage for all pods in namespace default
+ - 给我看一下 redis 集群的连接数指标

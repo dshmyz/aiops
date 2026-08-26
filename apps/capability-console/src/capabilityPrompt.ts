@@ -47,16 +47,14 @@ function operationKeyword(name: string): string {
 
 /**
  * 根据 Capability 与用户输入的测试参数，拼一句话形式的 AI 预检提示词。
- * 环境默认取 prod，非 environment 字段值按顺序参与拼接。
+ * 各字段值按顺序参与拼接。
  */
 export function buildAIPrompt(capability: ManagedCapability, input: Record<string, unknown>): string {
-  const environment = stringValue(input.environment) || 'prod';
   const values = Object.entries(input)
-    .filter(([name]) => name !== 'environment')
     .map(([_name, value]) => stringValue(value))
     .filter((value) => value !== '');
   const resource = capability.resource_type || 'resource';
   const domain = capability.domain || 'middleware';
   const keyword = operationKeyword(capability.name);
-  return ['查询', environment, ...values, resource, '的', domain, keyword].filter(Boolean).join(' ');
+  return ['查询', ...values, resource, '的', domain, keyword].filter(Boolean).join(' ');
 }

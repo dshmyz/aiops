@@ -63,10 +63,6 @@ func Normalize(p WebhookPayload, now time.Time) (Alert, error) {
 	if status == "" {
 		status = StatusFiring
 	}
-	environment := strings.TrimSpace(p.Environment)
-	if environment == "" {
-		environment = "prod"
-	}
 	firedAt := now
 	if p.FiredAt != nil {
 		firedAt = p.FiredAt.UTC()
@@ -79,7 +75,6 @@ func Normalize(p WebhookPayload, now time.Time) (Alert, error) {
 		Description:  p.Description,
 		Severity:     severity,
 		Status:       status,
-		Environment:  environment,
 		Domain:       p.Domain,
 		ResourceType: p.ResourceType,
 		ResourceName: p.ResourceName,

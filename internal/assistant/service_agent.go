@@ -102,9 +102,8 @@ func (s *Service) executeAgentStep(ctx context.Context, user identity.CurrentUse
 		s.recordDenied(ctx, user, intent.ToolName, policy.ToolNotRegistered)
 		return StepOutcome{}, fmt.Errorf("%w: %s", ErrPolicyDenied, policy.ToolNotRegistered)
 	}
-	// LLM 生成的 environment 值可能缺失或不在用户白名单（误伤 environment_denied），
-	// 读路径兜底到用户首个允许环境；写路径保持严格（environment 限定写身份）。
-	input := policy.DefaultEnvironment(user, intent.Input)
+	// 读路径的 input 直接透传（不再做默认环境规约），由策略层校验。
+	input := intent.Input
 	decision := policy.Evaluate(user, tool, input)
 	if !decision.Allowed {
 		s.recordDenied(ctx, user, tool.Name, decision.Reason)
@@ -156,16 +155,14 @@ func (s *Service) agentDiagnosticStep(ctx context.Context, user identity.Current
 	}
 	toolName := resolveDiagnosticToolName(s.diagnostics, *intent.Diagnostic)
 	diagRequest := *intent.Diagnostic
-	diagRequest.Environment = policy.DefaultEnvironmentValue(user, diagRequest.Environment)
 	pkg, err := s.diagnostics.Run(ctx, user, diagRequest)
 	if err != nil {
 		return StepOutcome{}, err
 	}
 	out.Tool = toolName
-	out.Input = map[string]any{"domain": diagRequest.Domain, "environment": diagRequest.Environment}
+	out.Input = map[string]any{"domain": diagRequest.Domain}
 	out.Output = map[string]any{
 		"summary":         diagnosticStepSummary(pkg),
-		"environment":     pkg.Environment,
 		"domains":         pkg.Domains,
 		"severity":        packageSeverity(pkg),
 		"observations":    observationSummaries(pkg),

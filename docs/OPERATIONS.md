@@ -126,7 +126,6 @@ curl -s http://127.0.0.1:18080/metrics   # Prometheus 指标
 | CAS | `COPILOT_CAS_SERVER_URL` / `_SERVICE_URL` | CAS 服务器与本服务 URL（cas/both 必需） |
 | CAS | `COPILOT_CAS_SESSION_TTL` | 会话 cookie 有效期（Go duration），默认 8h |
 | CAS | `COPILOT_CAS_DEFAULT_ROLES` | CAS 用户默认角色（JSON 数组），默认 `["operator"]` |
-| CAS | `COPILOT_CAS_DEFAULT_ENVIRONMENTS` | 默认允许环境（JSON 数组），默认 `["prod","staging","dev"]` |
 | LLM | `COPILOT_ASSISTANT_PROVIDER` | `eino-openai` 或空（确定性 planner） |
 | LLM | `COPILOT_OPENAI_BASE_URL` / `_API_KEY` / `_MODEL` | OpenAI 兼容接口 |
 | LLM | `COPILOT_OPENAI_TIMEOUT` / `_RETRY` / `_RETRY_BACKOFF` | 超时/重试/退避 |
@@ -152,7 +151,7 @@ openssl rand -base64 32   # JWT HMAC 密钥
 openssl rand -hex 32      # webhook 密钥
 
 export COPILOT_JWT_HMAC_SECRET="<your-secret>"
-go run gen_token.go       # 生成 24h 有效的 admin JWT（含 prod/staging/dev 环境白名单）
+go run gen_token.go       # 生成 24h 有效的 admin JWT（仅开发/联调）
 ```
 
 > `gen_token.go` 生成一个 `roles:["admin"]` 的 JWT，仅用于开发/联调，**不要用于生产身份体系**。
@@ -180,9 +179,9 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（含 prod/staging/de
 | `POST /v1/assistant/messages` · `POST /v1/assistant/stream` | 任一登录用户 |
 | `GET/POST /v1/assistant/conversations*` | 任一登录用户（归 subject） |
 | `POST/GET /v1/assistant/feedback` | 任一登录用户；admin 可按 subject 过滤 |
-| `GET /v1/action-plans` · `GET /v1/action-plans/{id}` | viewer/operator/admin（+环境白名单） |
-| `POST /v1/action-plans/{id}/confirm` | viewer/operator/admin + 策略/environment |
-| `POST /v1/action-plans/{id}/reject` | viewer/operator/admin + 策略/environment（显式拒绝，离开 pending 队列；幂等） |
+| `GET /v1/action-plans` · `GET /v1/action-plans/{id}` | viewer/operator/admin |
+| `POST /v1/action-plans/{id}/confirm` | viewer/operator/admin + 策略 |
+| `POST /v1/action-plans/{id}/reject` | viewer/operator/admin + 策略（显式拒绝，离开 pending 队列；幂等） |
 | `GET /v1/overview` | 任一登录用户（执行计数仅 admin，其余字段按需缺省） |
 | `GET /v1/audit-events` · `/v1/audit-events/search` | viewer/operator/admin |
 | `GET /v1/executions` | **admin only** |
@@ -248,7 +247,7 @@ JWT（CAS 登录跳转 `/v1/auth/config` + `/v1/auth/cas/*`）。登录后侧栏
 **CAS 角色**：CAS 用户角色优先取 CAS 下发的 `roles` 属性；未下发时用
 `COPILOT_CAS_DEFAULT_ROLES`（默认 `["operator"]`）。**默认不含 admin** —— admin 需由 CAS
 在 `roles` 属性下发，或用 `COPILOT_CAS_DEFAULT_ROLES=["admin","operator"]` 显式放开
-（仅内部可信场景）。环境同理用 `COPILOT_CAS_DEFAULT_ENVIRONMENTS`。
+（仅内部可信场景）。
 
 ---
 

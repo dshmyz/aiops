@@ -38,9 +38,6 @@ func semanticYAML(name, description string) string {
 		"    pod:\n" +
 		"        type: string\n" +
 		"        required: true\n" +
-		"    environment:\n" +
-		"        type: string\n" +
-		"        required: true\n" +
 		"output:\n" +
 		"    kind: change\n" +
 		"    summary_template: Restarted {pod} in {namespace}\n" +
@@ -55,7 +52,6 @@ func semanticYAML(name, description string) string {
 		"    roles:\n" +
 		"        - operator\n" +
 		"        - admin\n" +
-		"    environment_scoped: true\n" +
 		"ai:\n" +
 		"    description: " + description + "\n" +
 		"    examples:\n" +

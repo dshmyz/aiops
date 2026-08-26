@@ -42,7 +42,7 @@ func TestRunbooksListAllowsViewer(t *testing.T) {
 		execution.NewReadOnlyService(&readRunner{}, nil),
 		httpapi.WithRunbooks(seededRunbookStore()),
 	)
-	req := signedRequest(t, "/v1/runbooks", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/runbooks", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -88,7 +88,7 @@ func TestRunbooksListConfiguredFalse(t *testing.T) {
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		execution.NewReadOnlyService(&readRunner{}, nil),
 	)
-	req := signedRequest(t, "/v1/runbooks", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/runbooks", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)

@@ -37,9 +37,7 @@ func testDomainDefs() []tools.DynamicToolDefinition {
 	} {
 		defs = append(defs, tools.DynamicToolDefinition{
 			Tool: tools.Tool{Name: d.domain + ".test.read", Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
-			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
-			},
+			InputSchema: map[string]tools.DynamicInputField{},
 		})
 	}
 	return defs
@@ -71,12 +69,11 @@ func (f *fakeRunner) Run(_ context.Context, _ identity.CurrentUser, request diag
 	return pkg, nil
 }
 
-func samplePackage(domain, env string) diagnostics.Package {
+func samplePackage(domain string) diagnostics.Package {
 	return diagnostics.Package{
 		ID:          "diag-" + domain,
-		Environment: env,
 		Domains:     []string{domain},
-		Resources:   []diagnostics.ResourceRef{{Domain: domain, Type: "resource", ID: domain + ":resource:" + domain, Name: domain, Environment: env}},
+		Resources:   []diagnostics.ResourceRef{{Domain: domain, Type: "resource", ID: domain + ":resource:" + domain, Name: domain}},
 		Observations: []diagnostics.Observation{
 			{ID: "obs-" + domain, ResourceID: domain + ":resource:" + domain, Kind: domain + ".read", Severity: diagnostics.SeverityOK, Summary: domain + " healthy"},
 		},
@@ -91,7 +88,7 @@ func samplePackage(domain, env string) diagnostics.Package {
 }
 
 func testUser() identity.CurrentUser {
-	return identity.CurrentUser{Subject: "ops-alice", Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}}
+	return identity.CurrentUser{Subject: "ops-alice", Roles: []string{"admin"}}
 }
 
 // TestOrchestrateConcurrentMultiDomain verifies that Orchestrate runs multiple
@@ -101,18 +98,18 @@ func TestOrchestrateConcurrentMultiDomain(t *testing.T) {
 	t.Parallel()
 	runner := &fakeRunner{
 		packages: map[string]diagnostics.Package{
-			"kafka":   samplePackage("kafka", "prod"),
-			"minio":   samplePackage("minio", "prod"),
-			"gluster": samplePackage("gluster", "prod"),
+			"kafka":   samplePackage("kafka"),
+			"minio":   samplePackage("minio"),
+			"gluster": samplePackage("gluster"),
 		},
 	}
 	now := time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC)
 	orch := orchestrator.New(runner, 3, func() time.Time { return now })
 
 	requests := []diagnostics.Request{
-		{Domain: "kafka", Environment: "prod", Runbook: "health"},
-		{Domain: "minio", Environment: "prod", Runbook: "health"},
-		{Domain: "gluster", Environment: "prod", Runbook: "health"},
+		{Domain: "kafka", Runbook: "health"},
+		{Domain: "minio", Runbook: "health"},
+		{Domain: "gluster", Runbook: "health"},
 	}
 
 	pkg, err := orch.Orchestrate(context.Background(), testUser(), requests)
@@ -143,9 +140,6 @@ func TestOrchestrateConcurrentMultiDomain(t *testing.T) {
 	if len(pkg.Recommendations) != 3 {
 		t.Fatalf("Recommendations len = %d, want 3", len(pkg.Recommendations))
 	}
-	if pkg.Environment != "prod" {
-		t.Fatalf("Environment = %q, want prod", pkg.Environment)
-	}
 	if pkg.ID == "" {
 		t.Fatal("merged package ID is empty")
 	}
@@ -158,7 +152,7 @@ func TestOrchestratePartialFailureReturnsSuccessfulResults(t *testing.T) {
 	t.Parallel()
 	runner := &fakeRunner{
 		packages: map[string]diagnostics.Package{
-			"kafka": samplePackage("kafka", "prod"),
+			"kafka": samplePackage("kafka"),
 		},
 		errs: map[string]error{
 			"minio": errors.New("minio endpoint unreachable"),
@@ -168,8 +162,8 @@ func TestOrchestratePartialFailureReturnsSuccessfulResults(t *testing.T) {
 	orch := orchestrator.New(runner, 2, func() time.Time { return now })
 
 	requests := []diagnostics.Request{
-		{Domain: "kafka", Environment: "prod", Runbook: "health"},
-		{Domain: "minio", Environment: "prod", Runbook: "health"},
+		{Domain: "kafka", Runbook: "health"},
+		{Domain: "minio", Runbook: "health"},
 	}
 
 	pkg, err := orch.Orchestrate(context.Background(), testUser(), requests)
@@ -199,8 +193,8 @@ func TestOrchestrateAllFailsReturnsError(t *testing.T) {
 	orch := orchestrator.New(runner, 2, time.Now)
 
 	requests := []diagnostics.Request{
-		{Domain: "kafka", Environment: "prod", Runbook: "health"},
-		{Domain: "minio", Environment: "prod", Runbook: "health"},
+		{Domain: "kafka", Runbook: "health"},
+		{Domain: "minio", Runbook: "health"},
 	}
 
 	_, err := orch.Orchestrate(context.Background(), testUser(), requests)
@@ -215,8 +209,8 @@ func TestSplitMessageMultiDomain(t *testing.T) {
 	t.Parallel()
 	orch := orchestrator.New(nil, 3, time.Now)
 
-	base := diagnostics.Request{Environment: "prod", Runbook: "health"}
-	requests := orch.SplitMessage("检查 prod 环境的 kafka 和 minio 健康状态", base)
+	base := diagnostics.Request{Runbook: "health"}
+	requests := orch.SplitMessage("检查 kafka 和 minio 健康状态", base)
 
 	if len(requests) != 2 {
 		t.Fatalf("SplitMessage returned %d requests, want 2", len(requests))
@@ -225,9 +219,6 @@ func TestSplitMessageMultiDomain(t *testing.T) {
 	domains := map[string]bool{}
 	for _, req := range requests {
 		domains[req.Domain] = true
-		if req.Environment != "prod" {
-			t.Fatalf("Environment = %q, want prod", req.Environment)
-		}
 		if req.Runbook != "health" {
 			t.Fatalf("Runbook = %q, want health", req.Runbook)
 		}
@@ -243,8 +234,8 @@ func TestSplitMessageSingleDomainReturnsOne(t *testing.T) {
 	t.Parallel()
 	orch := orchestrator.New(nil, 3, time.Now)
 
-	base := diagnostics.Request{Environment: "prod", Runbook: "health"}
-	requests := orch.SplitMessage("检查 prod 环境的 kafka 健康状态", base)
+	base := diagnostics.Request{Runbook: "health"}
+	requests := orch.SplitMessage("检查 kafka 健康状态", base)
 
 	if len(requests) != 1 {
 		t.Fatalf("SplitMessage returned %d requests, want 1", len(requests))
@@ -264,12 +255,11 @@ func TestSplitMessageMultiDomainClearsInheritedResource(t *testing.T) {
 
 	// base 来自用户最先提到的 glusterfs 域：携带 volume / glusterfs-volume。
 	base := diagnostics.Request{
-		Environment:  "prod",
 		Runbook:      "health",
 		ResourceType: "volume",
 		ResourceName: "glusterfs-volume",
 	}
-	requests := orch.SplitMessage("检查 prod 环境的 glusterfs volume、minio bucket 和 kafka consumer group 健康状态", base)
+	requests := orch.SplitMessage("检查 glusterfs volume、minio bucket 和 kafka consumer group 健康状态", base)
 
 	if len(requests) != 3 {
 		t.Fatalf("SplitMessage returned %d requests, want 3", len(requests))
@@ -279,8 +269,8 @@ func TestSplitMessageMultiDomainClearsInheritedResource(t *testing.T) {
 			t.Fatalf("domain %q inherited resource (type=%q name=%q), want cleared on multi-domain fan-out",
 				req.Domain, req.ResourceType, req.ResourceName)
 		}
-		if req.Environment != "prod" || req.Runbook != "health" {
-			t.Fatalf("domain %q lost inherited context (env=%q runbook=%q)", req.Domain, req.Environment, req.Runbook)
+		if req.Runbook != "health" {
+			t.Fatalf("domain %q lost inherited runbook=%q", req.Domain, req.Runbook)
 		}
 	}
 }
@@ -292,12 +282,11 @@ func TestSplitMessageSingleDomainKeepsInheritedResource(t *testing.T) {
 	orch := orchestrator.New(nil, 3, time.Now)
 
 	base := diagnostics.Request{
-		Environment:  "prod",
 		Runbook:      "health",
 		ResourceType: "volume",
 		ResourceName: "data",
 	}
-	requests := orch.SplitMessage("检查 prod glusterfs data volume 健康状态", base)
+	requests := orch.SplitMessage("检查 glusterfs data volume 健康状态", base)
 
 	if len(requests) != 1 {
 		t.Fatalf("SplitMessage returned %d requests, want 1", len(requests))
@@ -314,8 +303,8 @@ func TestSplitMessageNoDomainReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	orch := orchestrator.New(nil, 3, time.Now)
 
-	base := diagnostics.Request{Environment: "prod", Runbook: "health"}
-	requests := orch.SplitMessage("检查 prod 环境的健康状态", base)
+	base := diagnostics.Request{Runbook: "health"}
+	requests := orch.SplitMessage("检查整体健康状态", base)
 
 	if len(requests) != 0 {
 		t.Fatalf("SplitMessage returned %d requests, want 0", len(requests))
@@ -329,9 +318,9 @@ func TestSplitMessageRejectsBareSubstringDomain(t *testing.T) {
 	t.Parallel()
 	orch := orchestrator.New(nil, 3, time.Now)
 
-	base := diagnostics.Request{Environment: "prod", Runbook: "health"}
+	base := diagnostics.Request{Runbook: "health"}
 	for _, message := range []string{
-		"查看 prod kafkax 状态",
+		"查看 kafkax 状态",
 		"检查 minioadmin 配置",
 		"glusterfsx 卷健康",
 	} {
@@ -348,8 +337,8 @@ func TestSplitMessagePreservesOrderAcrossMultipleDomains(t *testing.T) {
 	t.Parallel()
 	orch := orchestrator.New(nil, 3, time.Now)
 
-	base := diagnostics.Request{Environment: "prod", Runbook: "health"}
-	requests := orch.SplitMessage("检查 prod 环境的 kafka 和 minio 健康状态", base)
+	base := diagnostics.Request{Runbook: "health"}
+	requests := orch.SplitMessage("检查 kafka 和 minio 健康状态", base)
 
 	if len(requests) != 2 {
 		t.Fatalf("SplitMessage returned %d requests, want 2", len(requests))
@@ -364,11 +353,11 @@ func TestSplitMessagePreservesOrderAcrossMultipleDomains(t *testing.T) {
 func TestRunSingleDomainDelegates(t *testing.T) {
 	t.Parallel()
 	runner := &fakeRunner{
-		packages: map[string]diagnostics.Package{"kafka": samplePackage("kafka", "prod")},
+		packages: map[string]diagnostics.Package{"kafka": samplePackage("kafka")},
 	}
 	orch := orchestrator.New(runner, 3, time.Now)
 
-	request := diagnostics.Request{Domain: "kafka", Environment: "prod", Runbook: "health"}
+	request := diagnostics.Request{Domain: "kafka", Runbook: "health"}
 	ctx := orchestrator.WithMessage(context.Background(), "检查 kafka 健康状态")
 	pkg, err := orch.Run(ctx, testUser(), request)
 	if err != nil {
@@ -390,15 +379,15 @@ func TestRunMultiDomainOrchestrates(t *testing.T) {
 	t.Parallel()
 	runner := &fakeRunner{
 		packages: map[string]diagnostics.Package{
-			"kafka": samplePackage("kafka", "prod"),
-			"minio": samplePackage("minio", "prod"),
+			"kafka": samplePackage("kafka"),
+			"minio": samplePackage("minio"),
 		},
 	}
 	now := time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC)
 	orch := orchestrator.New(runner, 3, func() time.Time { return now })
 
-	request := diagnostics.Request{Environment: "prod", Runbook: "health"}
-	ctx := orchestrator.WithMessage(context.Background(), "检查 prod kafka 和 minio 健康状态")
+	request := diagnostics.Request{Runbook: "health"}
+	ctx := orchestrator.WithMessage(context.Background(), "检查 kafka 和 minio 健康状态")
 	pkg, err := orch.Run(ctx, testUser(), request)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -422,7 +411,7 @@ func TestOrchestrateMergedPackageCapped(t *testing.T) {
 	// 每个观察塞入远超预算的原始数据，多域合并后必然超限。
 	bigData := map[string]any{"blob": make([]byte, 256*1024)}
 	bigAlias := func(domain string) diagnostics.Package {
-		p := samplePackage(domain, "prod")
+		p := samplePackage(domain)
 		p.Observations[0].Data = bigData
 		return p
 	}
@@ -437,9 +426,9 @@ func TestOrchestrateMergedPackageCapped(t *testing.T) {
 	orch := orchestrator.New(runner, 3, func() time.Time { return now })
 
 	requests := []diagnostics.Request{
-		{Domain: "kafka", Environment: "prod", Runbook: "health"},
-		{Domain: "minio", Environment: "prod", Runbook: "health"},
-		{Domain: "gluster", Environment: "prod", Runbook: "health"},
+		{Domain: "kafka", Runbook: "health"},
+		{Domain: "minio", Runbook: "health"},
+		{Domain: "gluster", Runbook: "health"},
 	}
 
 	pkg, err := orch.Orchestrate(context.Background(), testUser(), requests)

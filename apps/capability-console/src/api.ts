@@ -51,6 +51,9 @@ import type {
   ScheduledTaskRun,
   UpdateScheduledTaskPayload,
   ValidationResult,
+  AdminTool,
+  AlertAction,
+  AlertActionRunOverview,
 } from './types';
 import { normalizeCapability } from './capability';
 import { ref } from 'vue';
@@ -263,17 +266,14 @@ export async function sendAssistantMessage(
   message: string,
   conversationID?: string,
   signal?: AbortSignal,
-  environment?: string,
-  pageContext?: { domain?: string; environment?: string; resource_type?: string; resource_name?: string },
+  pageContext?: { domain?: string; resource_type?: string; resource_name?: string },
 ): Promise<AssistantConsoleResponse> {
   const payload: Record<string, unknown> = { message };
   if (conversationID) {
     payload.conversation_id = conversationID;
   }
-  if (pageContext && (pageContext.domain || pageContext.environment || pageContext.resource_type || pageContext.resource_name)) {
+  if (pageContext && (pageContext.domain || pageContext.resource_type || pageContext.resource_name)) {
     payload.page_context = pageContext;
-  } else if (environment && environment !== 'none') {
-    payload.environment = environment;
   }
   return request<AssistantConsoleResponse>('/v1/assistant/messages', {
     method: 'POST',
@@ -564,7 +564,7 @@ export async function marketplaceDownload(id: string, versionID: string): Promis
 
 export async function marketplaceRate(
   id: string,
-  payload: { rating: number; review?: string; version_used?: string; environment?: string },
+  payload: { rating: number; review?: string; version_used?: string },
 ): Promise<void> {
   await request<void>(`/v1/marketplace/capabilities/${encodeURIComponent(id)}/ratings`, {
     method: 'POST',
@@ -590,7 +590,6 @@ function localPreviewCapabilities(): ManagedCapability[] {
         timeout_ms: 3000,
       },
       input_schema: {
-        environment: { type: 'string', required: true },
         cluster: { type: 'string', required: true },
         bucket: { type: 'string', required: true },
       },
@@ -876,7 +875,7 @@ export async function reloadMCPServers(): Promise<{ status: string }> {
 
 // ===== incident.view 告警全景（Phase 3） =====
 // 对应 POST /v1/tools/incident.view/read（通用工具读端点）。后端 incidentViewReadRunner
-// 按 (domain, resource_type, resource_name, environment) 软匹配各证据源，返回
+// 按 (domain, resource_type, resource_name) 软匹配各证据源，返回
 // { result: {...} }；此处解包 result。
 export async function viewIncident(pivot: IncidentViewPivot): Promise<IncidentViewResult> {
   const data = await request<{ result: IncidentViewResult }>('/v1/tools/incident.view/read', {
@@ -897,4 +896,65 @@ export async function executeRead(toolName: string, input: Record<string, unknow
     body: JSON.stringify(input ?? {}),
   });
   return data.result;
+}
+
+// ---------------------------------------------------------------------------
+// 告警→动作编排（AlertActions）
+// ---------------------------------------------------------------------------
+
+export interface AlertActionsListResponse {
+  configured?: boolean;
+  rules?: AlertAction[];
+  count?: number;
+  hint?: string;
+}
+
+export async function listAlertActions(): Promise<AlertActionsListResponse> {
+  const data = await request<AlertActionsListResponse>('/v1/admin/alert-actions', {});
+  return data;
+}
+
+export async function saveAlertAction(action: AlertAction): Promise<{ status: string; name: string }> {
+  const data = await request<{ status: string; name: string }>('/v1/admin/alert-actions', {
+    method: 'POST',
+    body: JSON.stringify(action),
+  });
+  return data;
+}
+
+export async function setAlertActionEnabled(
+  name: string,
+  enabled: boolean,
+): Promise<{ status: string; name: string; enabled: boolean }> {
+  const data = await request<{ status: string; name: string; enabled: boolean }>(
+    `/v1/admin/alert-actions/${encodeURIComponent(name)}`,
+    { method: 'PATCH', body: JSON.stringify({ enabled }) },
+  );
+  return data;
+}
+
+export async function deleteAlertAction(name: string): Promise<{ status: string; name: string }> {
+  const data = await request<{ status: string; name: string }>(
+    `/v1/admin/alert-actions/${encodeURIComponent(name)}`,
+    { method: 'DELETE' },
+  );
+  return data;
+}
+
+export async function listAlertActionRuns(name: string): Promise<AlertActionRunOverview> {
+  const data = await request<AlertActionRunOverview>(
+    `/v1/admin/alert-actions/${encodeURIComponent(name)}/runs`,
+    {},
+  );
+  return data;
+}
+
+export interface AdminToolsResponse {
+  tools: AdminTool[];
+  count?: number;
+}
+
+export async function listAdminTools(): Promise<AdminTool[]> {
+  const data = await request<AdminToolsResponse>('/v1/admin/tools', {});
+  return data.tools ?? [];
 }

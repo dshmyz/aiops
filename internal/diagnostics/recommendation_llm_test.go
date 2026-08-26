@@ -35,7 +35,7 @@ func TestLLMRecommendationGeneratorParsesModelOutput(t *testing.T) {
 	chat := &stubChatModel{content: `{"summary":"尽快扩容","rationale":"磁盘水位超过 85%"}`}
 	gen := NewLLMRecommendationGenerator(chat)
 
-	result, err := gen.Generate(context.Background(), "kafka", "vol-1", "prod", SeverityWarning,
+	result, err := gen.Generate(context.Background(), "kafka", "vol-1", SeverityWarning,
 		map[string]any{"capacity_pct": 88.5, "retention_hours": 24})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -54,7 +54,7 @@ func TestLLMRecommendationGeneratorParsesModelOutput(t *testing.T) {
 // 未配置模型即构造（chat 为 nil）时报明确错误，不静默退化为模板。
 func TestLLMRecommendationGeneratorRequiresModel(t *testing.T) {
 	gen := NewLLMRecommendationGenerator(nil)
-	if _, err := gen.Generate(context.Background(), "demo", "vol-1", "prod", SeverityWarning, nil); err == nil || !strings.Contains(err.Error(), "LLM") {
+	if _, err := gen.Generate(context.Background(), "demo", "vol-1", SeverityWarning, nil); err == nil || !strings.Contains(err.Error(), "LLM") {
 		t.Fatalf("want explicit no-model error, got %v", err)
 	}
 }
@@ -71,7 +71,7 @@ func TestLLMRecommendationGeneratorRejectsBadOutput(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			gen := NewLLMRecommendationGenerator(&stubChatModel{content: tc.content})
-			if _, err := gen.Generate(context.Background(), "demo", "vol-1", "prod", SeverityWarning, nil); err == nil {
+			if _, err := gen.Generate(context.Background(), "demo", "vol-1", SeverityWarning, nil); err == nil {
 				t.Fatalf("want error for %q", tc.content)
 			}
 		})
@@ -82,7 +82,7 @@ func TestLLMRecommendationGeneratorRejectsBadOutput(t *testing.T) {
 func TestHybridRecommendationGeneratorPrefersLLM(t *testing.T) {
 	gen := NewHybridRecommendationGenerator(&stubChatModel{content: `{"summary":"LLM 建议","rationale":"r"}`})
 
-	result, err := gen.Generate(context.Background(), "kafka", "vol-1", "prod", SeverityWarning, nil)
+	result, err := gen.Generate(context.Background(), "kafka", "vol-1", SeverityWarning, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestHybridRecommendationGeneratorFallsBackToTemplate(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			gen := NewHybridRecommendationGenerator(tc.chat)
-			result, err := gen.Generate(context.Background(), "kafka", "vol-1", "prod", SeverityWarning, nil)
+			result, err := gen.Generate(context.Background(), "kafka", "vol-1", SeverityWarning, nil)
 			if err != nil {
 				t.Fatalf("Generate: %v", err)
 			}

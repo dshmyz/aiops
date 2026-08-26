@@ -7,56 +7,51 @@ operation: write
 risk: medium
 
 backend:
-    adapter: http
-    method: DELETE
-    path: /api/v1/namespaces/{namespace}/pods/{pod_name}
-    timeout_ms: 10000
-    base_url: https://kubernetes.default.svc
+ adapter: http
+ method: DELETE
+ path: /api/v1/namespaces/{namespace}/pods/{pod_name}
+ timeout_ms: 10000
+ base_url: https://kubernetes.default.svc
 
 input_schema:
-    namespace:
-        type: string
-        required: true
-    pod_name:
-        type: string
-        required: true
-    environment:
-        type: string
-        required: true
-
+ namespace:
+ type: string
+ required: true
+ pod_name:
+ type: string
+ required: true
 output:
-    kind: action
-    severity_path: $.status
-    summary_template: "Pod {pod_name} in namespace {namespace} restarted"
-    fields:
-        deletion_timestamp: $.metadata.deletionTimestamp
-        status: $.status.phase
+ kind: action
+ severity_path: $.status
+ summary_template: "Pod {pod_name} in namespace {namespace} restarted"
+ fields:
+ deletion_timestamp: $.metadata.deletionTimestamp
+ status: $.status.phase
 
 governance:
-    requires_action_plan: true
-    requires_approval: true
-    precheck_tools:
-        - k8s.pod.status.read
-    rollback:
-        strategy: manual
-        source: "If pod fails to restart, check logs with k8s.logs.tail"
+ requires_action_plan: true
+ requires_approval: true
+ precheck_tools:
+ - k8s.pod.status.read
+ rollback:
+ strategy: manual
+ source: "If pod fails to restart, check logs with k8s.logs.tail"
 
 auth:
-    roles:
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - operator
+ - admin
 
 ai:
-    description: |
-        Restart a Kubernetes pod by deleting it (triggers ReplicaSet/Deployment recreation).
-        Use when a pod is stuck, OOMKilled, or needs a config reload.
+ description: |
+ Restart a Kubernetes pod by deleting it (triggers ReplicaSet/Deployment recreation).
+ Use when a pod is stuck, OOMKilled, or needs a config reload.
 
-        Caution: deleting a pod causes brief downtime. This only works for pods managed
-        by a Deployment/ReplicaSet/StatefulSet; a standalone pod will not be recreated.
-        Verify pod readiness before marking the operation as successful.
+ Caution: deleting a pod causes brief downtime. This only works for pods managed
+ by a Deployment/ReplicaSet/StatefulSet; a standalone pod will not be recreated.
+ Verify pod readiness before marking the operation as successful.
 
-    examples:
-        - 重启 prod namespace default 下的 pod api-server-5d7c8f9b-x7k2m
-        - restart pod nginx-ingress-controller in namespace ingress-nginx, environment staging
-        - 把 dev 环境 kube-system 命名空间的 coredns-7d9f8c-abc12 pod 重启一下
+ examples:
+ - 重启 namespace default 下的 pod api-server-5d7c8f9b-x7k2m
+ - restart pod nginx-ingress-controller in namespace ingress-nginx
+ - 把 kube-system 命名空间的 coredns-7d9f8c-abc12 pod 重启一下

@@ -53,7 +53,7 @@ func (d *LLMDiagnoser) WithAudit(auditSvc *audit.Service, modelName string) *LLM
 
 // buildDiagnosisPlanPrompt 构造诊断计划提示词。可用领域清单派生自工具注册表，
 // 不再硬编码具体中间件（kafka/minio/glusterfs/moonlightbox 等测试域）。
-func buildDiagnosisPlanPrompt(title, desc, severity, env, labels, resourceType, resourceName, firedAt string, maxSteps int) string {
+func buildDiagnosisPlanPrompt(title, desc, severity, labels, resourceType, resourceName, firedAt string, maxSteps int) string {
 	return fmt.Sprintf(`你是中间件运维的告警研判助手。分析以下告警，决定需要执行哪些诊断检查。
 
 ## 可用的诊断领域
@@ -62,7 +62,6 @@ func buildDiagnosisPlanPrompt(title, desc, severity, env, labels, resourceType, 
 标题: %s
 描述: %s
 严重级别: %s
-环境: %s
 标签: %s
 资源: %s/%s
 触发时间: %s
@@ -86,7 +85,7 @@ func buildDiagnosisPlanPrompt(title, desc, severity, env, labels, resourceType, 
 - 只选择告警相关的领域，不要盲目全查
 - 从告警标题/标签中识别涉及的中间件类型`,
 		diagnosisDomainList(),
-		title, desc, severity, env, labels, resourceType, resourceName, firedAt,
+		title, desc, severity, labels, resourceType, resourceName, firedAt,
 		diagnosisDomainEnum(),
 		maxSteps,
 	)
@@ -133,7 +132,6 @@ const llmDiagnosisReportPrompt = `你是中间件运维的告警研判助手。�
 标题: %s
 描述: %s
 严重级别: %s
-环境: %s
 资源: %s/%s
 
 ## 诊断计划
@@ -246,7 +244,6 @@ func (d *LLMDiagnoser) planDiagnosis(ctx context.Context, alert Alert) (diagnosi
 		alert.Title,
 		alert.Description,
 		string(alert.Severity),
-		alert.Environment,
 		formatLabels(alert.Labels),
 		alert.ResourceType,
 		alert.ResourceName,
@@ -276,14 +273,8 @@ func (d *LLMDiagnoser) planDiagnosis(ctx context.Context, alert Alert) (diagnosi
 // executePlan 执行诊断计划中的每个步骤，收集 Observations。
 func (d *LLMDiagnoser) executePlan(ctx context.Context, alert Alert, plan diagnosisPlan) []diagnostics.Observation {
 	user := identity.CurrentUser{
-		Subject:             "alert-llm-diag",
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{"prod", "staging", "dev"},
-	}
-
-	env := alert.Environment
-	if env == "" {
-		env = "prod"
+		Subject: "alert-llm-diag",
+		Roles:   []string{"admin"},
 	}
 
 	var observations []diagnostics.Observation
@@ -292,9 +283,8 @@ func (d *LLMDiagnoser) executePlan(ctx context.Context, alert Alert, plan diagno
 			continue
 		}
 		req := diagnostics.Request{
-			Domain:      step.Domain,
-			Environment: env,
-			Runbook:     step.Runbook,
+			Domain:  step.Domain,
+			Runbook: step.Runbook,
 		}
 		if alert.ResourceName != "" {
 			req.ResourceName = alert.ResourceName
@@ -319,7 +309,6 @@ func (d *LLMDiagnoser) generateReport(ctx context.Context, alert Alert, plan dia
 		alert.Title,
 		alert.Description,
 		alert.Severity,
-		alert.Environment,
 		alert.ResourceType,
 		alert.ResourceName,
 		string(planJSON),

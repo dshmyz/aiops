@@ -252,10 +252,9 @@ func fixedClock() plans.Clock {
 
 func user() identity.CurrentUser {
 	return identity.CurrentUser{
-		Subject:             "operator-1",
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{"prod"},
-		RequestID:           "req-task-3",
+		Subject:   "operator-1",
+		Roles:     []string{"admin"},
+		RequestID: "req-task-3",
 	}
 }
 
@@ -289,7 +288,7 @@ func ensureMiddlewareWriteTool(t *testing.T) {
 				SupportsDryRun:      true,
 			},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment":     {Type: "string", Required: true},
+
 				"topic":           {Type: "string", Required: true},
 				"retention_hours": {Type: "integer", Required: true},
 			},
@@ -304,7 +303,6 @@ func ensureMiddlewareWriteTool(t *testing.T) {
 
 func retentionInput() map[string]any {
 	return map[string]any{
-		"environment":     "prod",
 		"topic":           "orders",
 		"retention_hours": 72,
 	}

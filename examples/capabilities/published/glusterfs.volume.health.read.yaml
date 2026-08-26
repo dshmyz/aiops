@@ -6,41 +6,37 @@ resource_type: volume
 operation: read
 risk: low
 backend:
-    adapter: http
-    method: GET
-    path: /api/glusterfs/default/volumes/{name}/status
-    timeout_ms: 3000
-    base_url: http://127.0.0.1:19090
+ adapter: http
+ method: GET
+ path: /api/glusterfs/default/volumes/{name}/status
+ timeout_ms: 3000
+ base_url: http://127.0.0.1:19090
 input_schema:
-    environment:
-        type: string
-        required: true
-    name:
-        type: string
-        required: true
+ name:
+ type: string
+ required: true
 output:
-    kind: observation
-    severity_path: $.status
-    summary_template: Volume {name} has {online_bricks} online bricks and {heal_backlog} heal backlog
-    fields:
-        heal_backlog: $.data.heal_backlog
-        offline_bricks: $.data.offline_bricks
-        online_bricks: $.data.online_bricks
+ kind: observation
+ severity_path: $.status
+ summary_template: Volume {name} has {online_bricks} online bricks and {heal_backlog} heal backlog
+ fields:
+ heal_backlog: $.data.heal_backlog
+ offline_bricks: $.data.offline_bricks
+ online_bricks: $.data.online_bricks
 governance:
-    requires_action_plan: false
-    requires_approval: false
-    precheck_tools: []
-    rollback:
-        strategy: ""
-        source: ""
+ requires_action_plan: false
+ requires_approval: false
+ precheck_tools: []
+ rollback:
+ strategy: ""
+ source: ""
 auth:
-    roles:
-        - viewer
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - viewer
+ - operator
+ - admin
 ai:
-    description: Read GlusterFS volume health from the demo middleware backend.
-    examples:
-        - 检查 prod glusterfs data volume 的健康状态
-        - 查询 glusterfs 卷卷的健康
+ description: Read GlusterFS volume health from the demo middleware backend.
+ examples:
+ - 检查 glusterfs data volume 的健康状态
+ - 查询 glusterfs 卷卷的健康

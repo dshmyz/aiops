@@ -43,9 +43,7 @@ export function emptyCapability(): Capability {
       timeout_ms: 3000,
       base_url: '',
     },
-    input_schema: {
-      environment: { type: 'string', required: true },
-    },
+    input_schema: {},
     output: {
       kind: 'observation',
       severity_path: '',
@@ -54,7 +52,6 @@ export function emptyCapability(): Capability {
     },
     auth: {
       roles: ['viewer', 'operator', 'admin'],
-      environment_scoped: true,
     },
     ai: {
       description: '',

@@ -126,9 +126,9 @@ func TestApplyCandidateOverrideUsesAdminMetadata(t *testing.T) {
 			Operation:     tools.Read,
 			Risk:          tools.Low,
 			Backend:       capabilities.BackendSpec{Adapter: "http", Method: "GET", Path: "/api/middleware/status", TimeoutMS: 3000},
-			InputSchema:   map[string]capabilities.InputField{"environment": {Type: "string", Required: true}},
+			InputSchema:   map[string]capabilities.InputField{"cluster": {Type: "string", Required: true}},
 			Output:        capabilities.OutputSpec{Kind: "observation", SummaryTemplate: "Read status", Fields: map[string]string{"status": "$.status"}},
-			Auth:          capabilities.AuthSpec{Roles: []string{"viewer", "operator", "admin"}, EnvironmentScoped: true},
+			Auth:          capabilities.AuthSpec{Roles: []string{"viewer", "operator", "admin"}},
 			AI:            capabilities.AISpec{Description: "Read status"},
 		},
 	}
@@ -438,7 +438,7 @@ paths:
     summary: Topic retention operations
     description: Path-level description
     parameters:
-      - name: environment
+      - name: trace_id
         in: query
         required: false
         schema: {type: integer}
@@ -486,7 +486,7 @@ paths:
       tags: [kafka]
       summary: Rebuild topic index
       parameters:
-        - name: environment
+        - name: verbose
           in: query
           required: false
           schema: {type: integer}
@@ -507,9 +507,12 @@ paths:
 	if draft.Name != "kafka.topic.resource.action" {
 		t.Fatalf("name = %q, want action-style POST name", draft.Name)
 	}
-	environment, ok := draft.InputSchema["environment"]
-	if !ok || environment.Type != "string" || !environment.Required {
-		t.Fatalf("environment input = %+v, want required string", environment)
+	if _, ok := draft.InputSchema["verbose"]; ok {
+		t.Fatalf("verbose input present, want not injected (only path params become input): %+v", draft.InputSchema)
+	}
+	topic, ok := draft.InputSchema["topic"]
+	if !ok || topic.Type != "string" || !topic.Required {
+		t.Fatalf("topic input = %+v, want required string", topic)
 	}
 }
 
@@ -647,7 +650,7 @@ paths:
 	if field, ok := drafts[0].InputSchema["bucket"]; !ok || !field.Required {
 		t.Fatalf("bucket input = %+v, want required string", field)
 	}
-	if len(drafts[0].InputSchema) != 2 { // environment + bucket，无 body 字段
-		t.Fatalf("input_schema keys = %d, want 2 (environment + path var only)", len(drafts[0].InputSchema))
+	if len(drafts[0].InputSchema) != 1 { // bucket，无 body 字段
+		t.Fatalf("input_schema keys = %d, want 1 (path var only)", len(drafts[0].InputSchema))
 	}
 }

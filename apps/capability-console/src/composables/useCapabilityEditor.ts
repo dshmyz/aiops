@@ -39,21 +39,20 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
   const selected = ref<ManagedCapability>(normalizeCapability({}));
   const validation = ref<ValidationResult>({ valid: false, error: '未校验' });
   const preview = ref<NormalizedResult | null>(null);
-  const testInputText = ref('{"environment":"prod"}');
+  const testInputText = ref('{}');
   const aiPromptOverride = ref<string | null>(null);
   const aiResponse = ref<AssistantConsoleResponse | null>(null);
   const aiError = ref('');
   const aiLoading = ref(false);
 
   const derivedVariables = computed(() => pathVariables(selected.value.backend.path));
-  // 当前能力合法的测试字段名集合：schema 字段 ∪ 路径变量 ∪ environment。
+  // 当前能力合法的测试字段名集合：schema 字段 ∪ 路径变量。
   // testInputRows 与 pruneTestInput 都基于它，保证"字段是否合法"唯一出处。
   const testInputFieldNames = computed(() => {
     const names = new Set<string>(Object.keys(selected.value.input_schema));
     for (const name of derivedVariables.value) {
       names.add(name);
     }
-    names.add('environment');
     return names;
   });
   const validationLabel = computed(() => (validation.value.valid ? '校验通过' : validation.value.error ?? '未校验'));
@@ -118,9 +117,6 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
       if (!rows.has(name)) {
         rows.set(name, { name, type: 'string', required: true, source: 'path' });
       }
-    }
-    if (!rows.has('environment')) {
-      rows.set('environment', { name: 'environment', type: 'string', required: true, source: 'schema', description: '目标环境（prod/staging/dev）', examples: ['prod'] });
     }
     return Array.from(rows.values());
   });
@@ -279,7 +275,7 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     preview.value = null;
     resetAIPreflight();
     if (switching) {
-      testInputText.value = '{"environment":"prod"}';
+      testInputText.value = '{}';
     } else {
       // 先更新 selected 再裁剪，pruneTestInput 基于新能力的合法字段集合。
       pruneTestInput();
@@ -290,7 +286,7 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     selected.value = normalizeCapability({ ...emptyCapability(), source: 'discovered', validation: { valid: false } });
     validation.value = { valid: false, error: '未校验' };
     preview.value = null;
-    testInputText.value = '{"environment":"prod"}';
+    testInputText.value = '{}';
     resetAIPreflight();
     managementPhase.value = 'review';
   }
@@ -299,7 +295,7 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     selected.value = normalizeCapability({ ...capability, source: 'discovered', validation: { valid: false } });
     validation.value = { valid: false, error: '未校验' };
     preview.value = null;
-    testInputText.value = '{"environment":"prod"}';
+    testInputText.value = '{}';
     resetAIPreflight();
     managementPhase.value = 'review';
   }
@@ -408,9 +404,6 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
   }
 
   function removeInputField(name: string) {
-    if (name === 'environment') {
-      return;
-    }
     const next = { ...selected.value.input_schema };
     delete next[name];
     selected.value.input_schema = next;

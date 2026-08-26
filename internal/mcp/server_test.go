@@ -84,10 +84,6 @@ backend:
   timeout_ms: 3000
   base_url: http://127.0.0.1:19090
 input_schema:
-  environment:
-    type: string
-    required: true
-    description: 目标环境
   name:
     type: string
     required: true
@@ -131,9 +127,6 @@ backend:
   timeout_ms: 3000
   base_url: http://127.0.0.1:19090
 input_schema:
-  environment:
-    type: string
-    required: true
   cluster:
     type: string
     required: true
@@ -145,7 +138,6 @@ auth:
     - viewer
     - operator
     - admin
-  environment_scoped: true
 output:
   kind: observation
   summary_template: Bucket {name} usage
@@ -159,7 +151,7 @@ ai:
 	result, err := c.CallTool(t.Context(), mcpgo.CallToolRequest{
 		Params: mcpgo.CallToolParams{
 			Name:      "minio.bucket.capacity.read",
-			Arguments: map[string]any{"environment": "prod", "cluster": "default", "name": "archive"},
+			Arguments: map[string]any{"cluster": "default", "name": "archive"},
 		},
 	})
 	if err != nil {
@@ -187,9 +179,6 @@ backend:
   path: /api/kafka/default/topics/{topic}/retention
   timeout_ms: 5000
 input_schema:
-  environment:
-    type: string
-    required: true
   topic:
     type: string
     required: true
@@ -205,7 +194,7 @@ ai:
 	result, err := c.CallTool(t.Context(), mcpgo.CallToolRequest{
 		Params: mcpgo.CallToolParams{
 			Name:      "kafka.topic.retention.set",
-			Arguments: map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72},
+			Arguments: map[string]any{"topic": "orders", "retention_hours": 72},
 		},
 	})
 	if err != nil {
@@ -235,7 +224,7 @@ backend:
   timeout_ms: 1000
   base_url: http://127.0.0.1:19090
 input_schema:
-  environment: {type: string, required: true}
+  name: {type: string, required: true}
 ai:
   description: 测试工具 %d
 `, i, i, i, i, i))

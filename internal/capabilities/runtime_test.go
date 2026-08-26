@@ -37,10 +37,9 @@ func TestRegisterPublishedRegistersToolAndRolePermissions(t *testing.T) {
 	if !ok || tool.Operation != tools.Read {
 		t.Fatalf("Lookup = %+v, %v; want registered read tool", tool, ok)
 	}
-	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}}, tool, map[string]any{
-		"environment": "prod",
-		"cluster":     "m1",
-		"bucket":      "archive",
+	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}}, tool, map[string]any{
+		"cluster": "m1",
+		"bucket":  "archive",
 	})
 	if !decision.Allowed {
 		t.Fatalf("published viewer permission denied: %+v", decision)
@@ -61,10 +60,9 @@ func TestRegisterPublishedCapabilityAddsToolAndRolePermission(t *testing.T) {
 	if !ok || tool.Operation != tools.Read {
 		t.Fatalf("Lookup = %+v, %v; want hot-registered read tool", tool, ok)
 	}
-	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}}, tool, map[string]any{
-		"environment": "prod",
-		"cluster":     "m1",
-		"bucket":      "archive",
+	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}}, tool, map[string]any{
+		"cluster": "m1",
+		"bucket":  "archive",
 	})
 	if !decision.Allowed {
 		t.Fatalf("viewer permission denied after hot registration: %+v", decision)
@@ -95,10 +93,9 @@ func TestRegisterPublishedRegistersWriteCapabilityAsTool(t *testing.T) {
 	if writeTool.RollbackDescription == "" {
 		t.Fatalf("write tool rollback description must be populated from governance")
 	}
-	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}}, writeTool, map[string]any{
-		"environment": "prod",
-		"cluster":     "m1",
-		"bucket":      "archive",
+	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"admin"}}, writeTool, map[string]any{
+		"cluster": "m1",
+		"bucket":  "archive",
 	})
 	if !decision.Allowed || !decision.RequiresConfirmation {
 		t.Fatalf("published write decision = %+v, want allowed with confirmation", decision)
@@ -134,11 +131,10 @@ func TestRegisterPublishedCapabilityRegistersWriteTool(t *testing.T) {
 	if !ok || tool.Operation != tools.Write {
 		t.Fatalf("Lookup = %+v, %v; want hot-registered write tool", tool, ok)
 	}
-	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}}, tool, map[string]any{
-		"environment": "prod",
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"quota":       100,
+	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"admin"}}, tool, map[string]any{
+		"cluster": "m1",
+		"bucket":  "archive",
+		"quota":   100,
 	})
 	if !decision.Allowed || !decision.RequiresConfirmation {
 		t.Fatalf("hot-registered write decision = %+v, want allowed with confirmation", decision)
@@ -176,7 +172,7 @@ func TestCapabilityReadRunnerExecutesPublishedReadThroughHTTPAdapter(t *testing.
 		t.Fatal("published read fell through to static runner")
 		return nil, nil
 	}), loaded, capabilities.NewHTTPAdapter(http.DefaultClient))
-	result, err := runner.Read(context.Background(), tool, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := runner.Read(context.Background(), tool, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Read returned %v", err)
 	}
@@ -216,7 +212,7 @@ func TestCapabilityReadRunnerAddsPublishedCapabilityAfterStartup(t *testing.T) {
 		t.Fatal("hot-published tool was not registered")
 	}
 
-	result, err := runner.Read(context.Background(), tool, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := runner.Read(context.Background(), tool, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Read returned %v", err)
 	}
@@ -229,7 +225,7 @@ func TestCapabilityReadRunnerDelegatesStaticTools(t *testing.T) {
 	called := false
 	next := readRunnerFunc(func(_ context.Context, tool tools.Tool, input map[string]any) (map[string]any, error) {
 		called = true
-		return map[string]any{"tool": tool.Name, "environment": input["environment"]}, nil
+		return map[string]any{"tool": tool.Name}, nil
 	})
 	runner := capabilities.NewCapabilityReadRunner(next, []capabilities.Capability{{
 		Name:      tools.ClusterStatusRead,
@@ -237,7 +233,7 @@ func TestCapabilityReadRunnerDelegatesStaticTools(t *testing.T) {
 		Backend:   capabilities.BackendSpec{Method: "POST"},
 	}}, nil)
 
-	result, err := runner.Read(context.Background(), tools.Tool{Name: tools.ClusterStatusRead}, map[string]any{"environment": "prod"})
+	result, err := runner.Read(context.Background(), tools.Tool{Name: tools.ClusterStatusRead}, map[string]any{})
 	if err != nil {
 		t.Fatalf("Read returned %v", err)
 	}
@@ -270,7 +266,7 @@ func TestCapabilityReadRunnerSkipsPublishedWriteCapability(t *testing.T) {
 		t.Fatal("write tool was not registered")
 	}
 
-	result, err := runner.Read(context.Background(), tool, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive", "quota": 100})
+	result, err := runner.Read(context.Background(), tool, map[string]any{"cluster": "m1", "bucket": "archive", "quota": 100})
 	if err != nil {
 		t.Fatalf("Read returned %v", err)
 	}
@@ -330,20 +326,17 @@ func TestCapabilityReadRunnerDoesNotShadowStaticDomainToolFromBypassedLoader(t *
 			Path:      "/api/status",
 			TimeoutMS: 3000,
 		},
-		InputSchema: map[string]capabilities.InputField{
-			"environment": {Type: "string", Required: true},
-		},
+		InputSchema: map[string]capabilities.InputField{},
 		Output: capabilities.OutputSpec{
 			Kind:            "observation",
 			SummaryTemplate: "posture",
 		},
 		Auth: capabilities.AuthSpec{
-			Roles:             []string{"viewer"},
-			EnvironmentScoped: true,
+			Roles: []string{"viewer"},
 		},
 	}}, nil)
 
-	result, err := runner.Read(context.Background(), tools.Tool{Name: tools.ClusterStatusRead}, map[string]any{"environment": "prod"})
+	result, err := runner.Read(context.Background(), tools.Tool{Name: tools.ClusterStatusRead}, map[string]any{})
 	if err != nil {
 		t.Fatalf("Read returned %v", err)
 	}
@@ -393,7 +386,6 @@ func TestCapabilityWriteRunnerExecutesPublishedWriteThroughHTTPAdapter(t *testin
 		return nil, nil
 	}), []capabilities.Capability{capability}, capabilities.NewHTTPAdapter(http.DefaultClient))
 	result, err := runner.Execute(context.Background(), tool.Name, map[string]any{
-		"environment": "prod",
 		"cluster":     "m1",
 		"bucket":      "archive",
 		"quota":       100,
@@ -431,7 +423,6 @@ func TestCapabilityWriteRunnerAddsPublishedCapabilityAfterStartup(t *testing.T) 
 	}
 
 	result, err := runner.Execute(context.Background(), capability.Name, map[string]any{
-		"environment": "prod",
 		"cluster":     "m1",
 		"bucket":      "archive",
 		"quota":       200,
@@ -453,11 +444,11 @@ func TestCapabilityWriteRunnerDelegatesUnknownToolToNextExecutor(t *testing.T) {
 	called := false
 	fallback := writeExecutorFunc(func(_ context.Context, name string, input map[string]any) (map[string]any, error) {
 		called = true
-		return map[string]any{"tool": name, "environment": input["environment"]}, nil
+		return map[string]any{"tool": name}, nil
 	})
 	runner := capabilities.NewCapabilityWriteRunner(fallback, nil, nil)
 
-	result, err := runner.Execute(context.Background(), "topic.retention.set", map[string]any{"environment": "prod", "topic": "payments"})
+	result, err := runner.Execute(context.Background(), "topic.retention.set", map[string]any{"topic": "payments"})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
 	}
@@ -473,7 +464,7 @@ func TestCapabilityWriteRunnerRejectsUnknownToolWithoutFallback(t *testing.T) {
 	t.Cleanup(policy.ResetDynamicRolePermissionsForTest)
 
 	runner := capabilities.NewCapabilityWriteRunner(nil, nil, nil)
-	_, err := runner.Execute(context.Background(), "minio.bucket.quota.set", map[string]any{"environment": "prod"})
+	_, err := runner.Execute(context.Background(), "minio.bucket.quota.set", map[string]any{})
 	if err == nil {
 		t.Fatal("Execute accepted unregistered write tool without fallback")
 	}
@@ -490,9 +481,9 @@ func TestCapabilityWriteRunnerVerifyReturnsNilWhenCapabilityHasNoVerifySpec(t *t
 		t.Fatalf("RegisterPublishedCapability returned %v", err)
 	}
 	runner := capabilities.NewCapabilityWriteRunner(nil, []capabilities.Capability{writeCapability}, nil)
-	plan := planRecordForVerify(writeCapability.Name, "operator-1", map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive", "quota": 100})
+	plan := planRecordForVerify(writeCapability.Name, "operator-1", map[string]any{"cluster": "m1", "bucket": "archive", "quota": 100})
 
-	result, err := runner.Verify(context.Background(), plan, map[string]any{"environment": "prod"})
+	result, err := runner.Verify(context.Background(), plan, map[string]any{"cluster": "m1", "bucket": "archive", "quota": 100})
 	if err != nil {
 		t.Fatalf("Verify returned %v", err)
 	}
@@ -526,9 +517,8 @@ func TestCapabilityWriteRunnerVerifyCallsReadCapabilityAndReturnsSuccess(t *test
 	writeCapability.Backend.BaseURL = writeServer.URL
 	writeCapability.Verify.ReadCapability = "kafka.topic.retention.read"
 	writeCapability.Verify.InputMapping = map[string]string{
-		"environment": "{environment}",
-		"cluster":     "{cluster}",
-		"topic":       "{topic}",
+		"cluster": "{cluster}",
+		"topic":   "{topic}",
 	}
 	readCapability := kafkaRetentionReadCapability()
 	readCapability.Backend.BaseURL = readServer.URL
@@ -547,16 +537,14 @@ func TestCapabilityWriteRunnerVerifyCallsReadCapabilityAndReturnsSuccess(t *test
 	runner := capabilities.NewCapabilityWriteRunnerWithVerifier(nil, []capabilities.Capability{writeCapability}, capabilities.NewHTTPAdapter(http.DefaultClient), readRunner)
 
 	plan := planRecordForVerify(writeCapability.Name, "operator-1", map[string]any{
-		"environment":      "prod",
-		"cluster":          "k1",
-		"topic":            "orders",
-		"retention_hours":  72,
+		"cluster":         "k1",
+		"topic":           "orders",
+		"retention_hours": 72,
 	})
 	result, err := runner.Verify(context.Background(), plan, map[string]any{
-		"environment":      "prod",
-		"cluster":          "k1",
-		"topic":            "orders",
-		"retention_hours":  72,
+		"cluster":         "k1",
+		"topic":           "orders",
+		"retention_hours": 72,
 	})
 	if err != nil {
 		t.Fatalf("Verify returned %v", err)
@@ -593,13 +581,12 @@ func TestCapabilityWriteRunnerVerifyReturnsFailedWhenReadCapabilityNotRegistered
 
 	runner := capabilities.NewCapabilityWriteRunnerWithVerifier(nil, []capabilities.Capability{writeCapability}, nil, nil)
 	plan := planRecordForVerify(writeCapability.Name, "operator-1", map[string]any{
-		"environment":      "prod",
 		"cluster":          "k1",
 		"topic":            "orders",
 		"retention_hours":  72,
 	})
 
-	result, err := runner.Verify(context.Background(), plan, map[string]any{"environment": "prod", "cluster": "k1", "topic": "orders"})
+	result, err := runner.Verify(context.Background(), plan, map[string]any{"cluster": "k1", "topic": "orders"})
 	if err != nil {
 		t.Fatalf("Verify returned %v, want nil error", err)
 	}
@@ -642,16 +629,15 @@ func kafkaRetentionWriteCapabilityForVerify() capabilities.Capability {
 			TimeoutMS: 3000,
 		},
 		InputSchema: map[string]capabilities.InputField{
-			"environment":      {Type: "string", Required: true},
-			"cluster":          {Type: "string", Required: true},
-			"topic":            {Type: "string", Required: true},
+			"cluster":         {Type: "string", Required: true},
+			"topic":           {Type: "string", Required: true},
 			"retention_hours": {Type: "integer", Required: true},
 		},
 		Output: capabilities.OutputSpec{
 			Kind:            "confirmation",
 			SummaryTemplate: "Set topic {topic} retention to {retention_hours}h",
 		},
-		Auth: capabilities.AuthSpec{Roles: []string{"operator", "admin"}, EnvironmentScoped: true},
+		Auth: capabilities.AuthSpec{Roles: []string{"operator", "admin"}},
 		Governance: capabilities.GovernanceSpec{
 			RequiresActionPlan: true,
 			RequiresApproval:   true,
@@ -661,9 +647,8 @@ func kafkaRetentionWriteCapabilityForVerify() capabilities.Capability {
 		Verify: &capabilities.VerifySpec{
 			ReadCapability: "kafka.topic.retention.read",
 			InputMapping: map[string]string{
-				"environment": "{environment}",
-				"cluster":     "{cluster}",
-				"topic":       "{topic}",
+				"cluster": "{cluster}",
+				"topic":   "{topic}",
 			},
 			TimeoutMS: 3000,
 		},
@@ -686,16 +671,15 @@ func kafkaRetentionReadCapability() capabilities.Capability {
 			TimeoutMS: 3000,
 		},
 		InputSchema: map[string]capabilities.InputField{
-			"environment": {Type: "string", Required: true},
-			"cluster":     {Type: "string", Required: true},
-			"topic":       {Type: "string", Required: true},
+			"cluster": {Type: "string", Required: true},
+			"topic":   {Type: "string", Required: true},
 		},
 		Output: capabilities.OutputSpec{
 			Kind:            "observation",
 			SummaryTemplate: "Topic {topic} retention is {retention_hours}h",
 			Fields:          map[string]string{"retention_hours": "$.data.retention_hours"},
 		},
-		Auth: capabilities.AuthSpec{Roles: []string{"viewer", "operator", "admin"}, EnvironmentScoped: true},
+		Auth: capabilities.AuthSpec{Roles: []string{"viewer", "operator", "admin"}},
 	}
 }
 
@@ -722,7 +706,6 @@ func writeCapabilityForRegister() capabilities.Capability {
 			TimeoutMS: 3000,
 		},
 		InputSchema: map[string]capabilities.InputField{
-			"environment": {Type: "string", Required: true},
 			"cluster":     {Type: "string", Required: true},
 			"bucket":      {Type: "string", Required: true},
 			"quota":       {Type: "integer", Required: true},
@@ -738,8 +721,7 @@ func writeCapabilityForRegister() capabilities.Capability {
 			Rollback:           capabilities.RollbackSpec{Strategy: "restore_previous"},
 		},
 		Auth: capabilities.AuthSpec{
-			Roles:             []string{"operator", "admin"},
-			EnvironmentScoped: true,
+			Roles: []string{"operator", "admin"},
 		},
 	}
 }
@@ -774,10 +756,9 @@ func TestManagerUnpublishCleansUpRuntimeRegistration(t *testing.T) {
 	if !ok {
 		t.Fatalf("Lookup after publish: tool %q not registered", published.Name)
 	}
-	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}}, tool, map[string]any{
-		"environment": "prod",
-		"cluster":     "m1",
-		"bucket":      "archive",
+	decision := policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}}, tool, map[string]any{
+		"cluster": "m1",
+		"bucket":  "archive",
 	})
 	if !decision.Allowed {
 		t.Fatalf("viewer decision after publish = %+v, want allowed", decision)
@@ -792,10 +773,9 @@ func TestManagerUnpublishCleansUpRuntimeRegistration(t *testing.T) {
 		t.Fatalf("Lookup after unpublish: tool %q still registered", published.Name)
 	}
 	// 2) 策略层角色权限移除
-	if policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}}, tools.Tool{Name: published.Name, Operation: tools.Read, Risk: tools.Low}, map[string]any{
-		"environment": "prod",
-		"cluster":     "m1",
-		"bucket":      "archive",
+	if policy.Evaluate(identity.CurrentUser{Roles: []string{"viewer"}}, tools.Tool{Name: published.Name, Operation: tools.Read, Risk: tools.Low}, map[string]any{
+		"cluster": "m1",
+		"bucket":  "archive",
 	}).Allowed {
 		t.Fatal("viewer still allowed after unpublish")
 	}
@@ -835,7 +815,7 @@ func TestCapabilityReadRunnerExecutesDependencyChainInOrder(t *testing.T) {
 		return nil, nil
 	}), loaded, capabilities.NewHTTPAdapter(http.DefaultClient))
 
-	result, err := runner.Execute(context.Background(), "service.restart", map[string]any{"environment": "prod", "cluster": "k1", "bucket": "archive"})
+	result, err := runner.Execute(context.Background(), "service.restart", map[string]any{"cluster": "k1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Read returned %v", err)
 	}
@@ -885,7 +865,7 @@ func TestCapabilityWriteRunnerAbortsOnRequiredDependencyFailure(t *testing.T) {
 		return nil, nil
 	}), loaded, capabilities.NewHTTPAdapter(http.DefaultClient))
 
-	_, err := runner.Execute(context.Background(), "service.restart", map[string]any{"environment": "prod", "cluster": "k1", "bucket": "archive"})
+	_, err := runner.Execute(context.Background(), "service.restart", map[string]any{"cluster": "k1", "bucket": "archive"})
 	if err == nil {
 		t.Fatal("Execute succeeded, want required dependency failure to abort chain")
 	}

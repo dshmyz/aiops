@@ -12,7 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "015_capability_marketplace.sql", "016_scheduled_tasks_run_kind.sql", "017_autonomy_daily_limit.sql", "018_capabilities.sql", "019_alert_actions.sql", "020_diagnosis_history.sql", "021_inspection_reports.sql"}
+var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "015_capability_marketplace.sql", "016_scheduled_tasks_run_kind.sql", "017_autonomy_daily_limit.sql", "018_capabilities.sql", "019_alert_actions.sql", "020_diagnosis_history.sql", "021_inspection_reports.sql", "022_alert_action_runs.sql", "023_drop_environment_aliases.sql"}
 
 const defaultSQLiteDSN = "file:copilot-local.db?cache=shared&_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL"
 
@@ -375,15 +375,6 @@ var sqliteMigrations = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS copilot_inspection_reports_generated_at_idx ON copilot_inspection_reports (generated_at DESC)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS copilot_inspection_reports_window_start_idx ON copilot_inspection_reports (period, window_start)`,
-	`CREATE TABLE IF NOT EXISTS copilot_environment_aliases (
-		id TEXT NOT NULL PRIMARY KEY,
-		environment TEXT NOT NULL,
-		alias TEXT NOT NULL,
-		display_name TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`,
-	`CREATE INDEX IF NOT EXISTS copilot_environment_aliases_env_alias_idx ON copilot_environment_aliases (environment, alias)`,
-	`CREATE INDEX IF NOT EXISTS copilot_environment_aliases_alias_idx ON copilot_environment_aliases (alias)`,
 	`CREATE TABLE IF NOT EXISTS copilot_aiops_skills (
 		id TEXT NOT NULL PRIMARY KEY,
 		slug TEXT NOT NULL,
@@ -422,7 +413,6 @@ var sqliteMigrations = []string{
 		description TEXT NULL,
 		severity TEXT NOT NULL DEFAULT 'warning',
 		status TEXT NOT NULL DEFAULT 'firing',
-		environment TEXT NOT NULL DEFAULT '',
 		domain TEXT NOT NULL DEFAULT '',
 		resource_type TEXT NOT NULL DEFAULT '',
 		resource_name TEXT NOT NULL DEFAULT '',
@@ -435,7 +425,6 @@ var sqliteMigrations = []string{
 	)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS copilot_alerts_identity_idx ON copilot_alerts (source, external_id)`,
 	`CREATE INDEX IF NOT EXISTS copilot_alerts_status_severity_idx ON copilot_alerts (status, severity)`,
-	`CREATE INDEX IF NOT EXISTS copilot_alerts_environment_status_idx ON copilot_alerts (environment, status)`,
 	`CREATE INDEX IF NOT EXISTS copilot_alerts_updated_at_idx ON copilot_alerts (updated_at)`,
 	`CREATE TABLE IF NOT EXISTS copilot_runbooks (
 		id TEXT NOT NULL PRIMARY KEY,
@@ -517,7 +506,6 @@ var sqliteMigrations = []string{
 		rating INTEGER NOT NULL,
 		review TEXT NULL,
 		version_used TEXT NULL,
-		environment TEXT NULL,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE (capability_id, user_id),
@@ -530,7 +518,6 @@ var sqliteMigrations = []string{
 		version_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
 		organization_id TEXT NULL,
-		environment TEXT NULL,
 		download_source TEXT NOT NULL DEFAULT 'api',
 		ip_address TEXT NULL,
 		user_agent TEXT NULL,
@@ -544,7 +531,6 @@ var sqliteMigrations = []string{
 		version_id TEXT NULL,
 		user_id TEXT NOT NULL,
 		organization_id TEXT NULL,
-		environment TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL DEFAULT '',
 		execution_time_ms INTEGER NULL,
 		error_category TEXT NULL,
@@ -602,4 +588,17 @@ var sqliteMigrations = []string{
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`,
+	// 告警→动作编排执行历史（mirrors migrations/022_alert_action_runs.sql for SQLite）。
+	`CREATE TABLE IF NOT EXISTS alert_action_runs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		rule_name TEXT NOT NULL,
+		alert_id TEXT NOT NULL DEFAULT '',
+		alert_title TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'success',
+		steps TEXT NOT NULL DEFAULT '[]',
+		summary TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE INDEX IF NOT EXISTS alert_action_runs_rule_idx ON alert_action_runs (rule_name, created_at)`,
+	`CREATE INDEX IF NOT EXISTS alert_action_runs_alert_idx ON alert_action_runs (alert_id)`,
 }

@@ -9,7 +9,7 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     name: 'minio 巡检',
     subject: 'admin-1',
     capability_name: 'minio.bucket.capacity.read',
-    input: { environment: 'prod' },
+    input: { cluster: 'm1', bucket: 'archive' },
     schedule_kind: 'preset',
     preset: 'daily',
     cron_expr: null,

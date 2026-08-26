@@ -28,7 +28,7 @@ func docsRouter(t *testing.T) http.Handler {
 
 func docsGet(t *testing.T, router http.Handler, path, role string, hasRole bool) *httptest.ResponseRecorder {
 	t.Helper()
-	payload := map[string]any{"sub": "admin-1", "allowed_environments": []string{"prod"}}
+	payload := map[string]any{"sub": "admin-1"}
 	if hasRole {
 		payload["roles"] = []string{role}
 	}

@@ -147,7 +147,7 @@ func DomainsInText(message string) []string {
 }
 
 // SplitMessage 从用户消息中检测涉及的诊断域，为每个域生成一个子请求。
-// baseRequest 的 Environment/Runbook 等字段被继承到每个子请求。
+// baseRequest 的 Runbook 等字段被继承到每个子请求。
 // 返回 nil 表示消息中未识别到任何域；返回 1 个元素表示单域（无需编排）。
 //
 // 多域扇出时（len(found) > 1），每个子请求会清空 ResourceType/ResourceName：
@@ -242,9 +242,6 @@ func mergePackages(packages []diagnostics.Package, now time.Time) diagnostics.Pa
 
 	domainSet := make(map[string]struct{})
 	for _, pkg := range packages {
-		if merged.Environment == "" {
-			merged.Environment = pkg.Environment
-		}
 		for _, d := range pkg.Domains {
 			if _, ok := domainSet[d]; !ok {
 				domainSet[d] = struct{}{}

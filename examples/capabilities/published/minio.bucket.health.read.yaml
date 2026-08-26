@@ -6,40 +6,36 @@ resource_type: bucket
 operation: read
 risk: low
 backend:
-    adapter: http
-    method: GET
-    path: /api/minio/default/buckets/{name}/capacity
-    timeout_ms: 3000
-    base_url: http://127.0.0.1:19090
+ adapter: http
+ method: GET
+ path: /api/minio/default/buckets/{name}/capacity
+ timeout_ms: 3000
+ base_url: http://127.0.0.1:19090
 input_schema:
-    environment:
-        type: string
-        required: true
-    name:
-        type: string
-        required: true
+ name:
+ type: string
+ required: true
 output:
-    kind: observation
-    severity_path: $.status
-    summary_template: Bucket {name} usage is {usage_pct}%
-    fields:
-        limit_gb: $.data.limit_gb
-        usage_pct: $.data.usage_pct
-        used_gb: $.data.used_gb
+ kind: observation
+ severity_path: $.status
+ summary_template: Bucket {name} usage is {usage_pct}%
+ fields:
+ limit_gb: $.data.limit_gb
+ usage_pct: $.data.usage_pct
+ used_gb: $.data.used_gb
 governance:
-    requires_action_plan: false
-    requires_approval: false
-    precheck_tools: []
-    rollback:
-        strategy: ""
-        source: ""
+ requires_action_plan: false
+ requires_approval: false
+ precheck_tools: []
+ rollback:
+ strategy: ""
+ source: ""
 auth:
-    roles:
-        - viewer
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - viewer
+ - operator
+ - admin
 ai:
-    description: Read MinIO bucket health from the demo middleware backend.
-    examples:
-        - 检查 prod minio archive bucket 的健康状态
+ description: Read MinIO bucket health from the demo middleware backend.
+ examples:
+ - 检查 minio archive bucket 的健康状态

@@ -25,8 +25,8 @@ func registerTestDomain(t *testing.T) {
 	t.Helper()
 	tools.ResetDynamicToolsForTest()
 	err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{
-		{Tool: tools.Tool{Name: "demo.domain.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "demo", ResourceType: "volume"}, InputSchema: map[string]tools.DynamicInputField{"environment": {Type: "string", Required: true}, "name": {Type: "string", Required: true}}},
-		{Tool: tools.Tool{Name: "demo.domain.retention.set", Operation: tools.Write, Risk: tools.Medium, Domain: "demo", ResourceType: "volume", SupportsDryRun: true, RollbackDescription: "reset_to_previous"}, InputSchema: map[string]tools.DynamicInputField{"environment": {Type: "string", Required: true}, "name": {Type: "string", Required: true}, "retention_hours": {Type: "integer", Required: true}}},
+		{Tool: tools.Tool{Name: "demo.domain.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "demo", ResourceType: "volume"}, InputSchema: map[string]tools.DynamicInputField{"name": {Type: "string", Required: true}}},
+		{Tool: tools.Tool{Name: "demo.domain.retention.set", Operation: tools.Write, Risk: tools.Medium, Domain: "demo", ResourceType: "volume", SupportsDryRun: true, RollbackDescription: "reset_to_previous"}, InputSchema: map[string]tools.DynamicInputField{"name": {Type: "string", Required: true}, "retention_hours": {Type: "integer", Required: true}}},
 	})
 	if err != nil {
 		t.Fatalf("register test domain: %v", err)

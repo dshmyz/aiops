@@ -163,16 +163,13 @@ type Planner interface {
 // (缺口-3: 页面上下文带入). The planner uses it to fill in missing fields
 // when the message itself does not mention them — e.g. when the user is on
 // the GlusterFS page and asks "这个 volume 健康吗", PageContext supplies
-// domain=glusterfs, environment=prod, resource_name=data without the user
-// repeating them.
+// domain=glusterfs, resource_name=data without the user repeating them.
 //
-// Message tokens always take precedence over PageContext: when the user
-// explicitly says "staging", that wins over PageContext.Environment="prod".
+// Message tokens always take precedence over PageContext.
 // A zero-value PageContext (no fields set) preserves the pre-context behavior
 // — the planner relies solely on the message text.
 type PageContext struct {
 	Domain       string `json:"domain,omitempty"`
-	Environment  string `json:"environment,omitempty"`
 	ResourceType string `json:"resource_type,omitempty"`
 	ResourceName string `json:"resource_name,omitempty"`
 }
@@ -183,10 +180,10 @@ type DeterministicPlanner struct{}
 // to previous turns. Implementations that need history (EinoPlanner) handle it
 // in their own loop.
 //
-// pageContext supplies page-level defaults (environment, domain, resource)
-// that fill in missing fields when the message does not mention them. Message
-// tokens always override pageContext. A zero pageContext preserves the old
-// message-only behavior.
+// pageContext supplies page-level defaults (domain, resource) that fill in
+// missing fields when the message does not mention them. Message tokens always
+// override pageContext. A zero pageContext preserves the old message-only
+// behavior.
 //
 // 工具选择是数据驱动而非写死关键词：
 //   - 确定性模式只处理**中间件域诊断**：消息点名已注册域（域清单由工具注册表
@@ -201,20 +198,13 @@ type DeterministicPlanner struct{}
 func (DeterministicPlanner) Plan(_ context.Context, _ identity.CurrentUser, message string, _ []Turn, pageContext PageContext) (Intent, error) {
 	userMessage := message
 	text := strings.ToLower(strings.TrimSpace(userMessage))
-	environment, ok := extractEnvironment(text)
-	if !ok {
-		environment = strings.TrimSpace(pageContext.Environment)
-		if environment == "" {
-			environment = "prod"
-		}
-	}
 	// 中间件域诊断（注册表驱动）：消息点名已注册域（如 "kafka 状态如何"、
 	// "minio 健康吗"）→ 该域诊断。域清单来自工具注册表（ResourceTypeForDomain
 	// 门控），不写死任何组件关键词。平台意图不在此判定——无 LLM 时无法靠关键词
 	// 区分，统一澄清。
 	if domain, ok := extractDomain(text); ok {
 		if tools.ResourceTypeForDomain(domain) != "" {
-			return domainDiagnosticIntent(domain, environment, defaultResourceType(domain), extractResourceName(text, domain), "diagnostic from named domain"), nil
+			return domainDiagnosticIntent(domain, defaultResourceType(domain), extractResourceName(text, domain), "diagnostic from named domain"), nil
 		}
 	}
 	// 页面上下文兜底：消息未点名域，但在某已注册域的页面上下文内提问
@@ -229,7 +219,7 @@ func (DeterministicPlanner) Plan(_ context.Context, _ identity.CurrentUser, mess
 		if resourceType == "" {
 			resourceType = defaultResourceType(pageContext.Domain)
 		}
-		return domainDiagnosticIntent(pageContext.Domain, environment, resourceType, resourceName, "diagnostic from page context"), nil
+		return domainDiagnosticIntent(pageContext.Domain, resourceType, resourceName, "diagnostic from page context"), nil
 	}
 	// 平台意图与中间件写意图都不在确定性路径处理：写能力外置为 YAML published
 	// 能力，平台意图由 LLM 语义分类解析（见 agent_executor.go）。确定性模式对
@@ -237,17 +227,6 @@ func (DeterministicPlanner) Plan(_ context.Context, _ identity.CurrentUser, mess
 	return Intent{}, ErrClarificationNeeded
 }
 
-func extractEnvironment(text string) (string, bool) {
-	for _, environment := range []string{"prod", "staging", "dev"} {
-		if tokenExists(text, environment) {
-			return environment, true
-		}
-	}
-	return "", false
-}
-
-// extractDomain 从消息文本中提取中间件领域（glusterfs/minio/kafka）。
-// 委托给 tools.MatchDomainBounded，保持全局唯一的边界检测实现。
 func extractDomain(text string) (string, bool) {
 	return tools.MatchDomainBounded(text)
 }
@@ -263,10 +242,9 @@ func defaultResourceType(domain string) string {
 // domainDiagnosticIntent 构建指向某域健康诊断（runbook=health）的 Intent。
 // 域选择已由调用方按注册表门控（ResourceTypeForDomain 非空），此处只负责
 // 组装，供文本点名域与页面上下文两个域分支复用。
-func domainDiagnosticIntent(domain, environment, resourceType, resourceName, explanation string) Intent {
+func domainDiagnosticIntent(domain, resourceType, resourceName, explanation string) Intent {
 	return Intent{Diagnostic: &diagnostics.Request{
 		Domain:       domain,
-		Environment:  environment,
 		ResourceType: resourceType,
 		ResourceName: resourceName,
 		Runbook:      "health",

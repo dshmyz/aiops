@@ -66,14 +66,8 @@ func (d *Diagnoser) Diagnose(ctx context.Context, alert Alert) {
 		return // 没有 domain 无法诊断
 	}
 
-	env := alert.Environment
-	if env == "" {
-		env = "prod"
-	}
-
 	req := diagnostics.Request{
-		Domain:      domain,
-		Environment: env,
+		Domain: domain,
 	}
 	if alert.ResourceType != "" {
 		req.ResourceType = alert.ResourceType
@@ -134,9 +128,8 @@ func (d *Diagnoser) Diagnose(ctx context.Context, alert Alert) {
 // plan，写操作仍需人工确认），用系统身份而非借用真实用户身份。
 func (d *Diagnoser) autodiagUser() identity.CurrentUser {
 	return identity.CurrentUser{
-		Subject:             "alert-autodiag",
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{"prod", "staging", "dev"},
+		Subject: "alert-autodiag",
+		Roles:   []string{"admin"},
 	}
 }
 

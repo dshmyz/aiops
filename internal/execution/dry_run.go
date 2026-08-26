@@ -224,8 +224,7 @@ func TemplateDryRunHandler(tmpl DryRunTemplate) DryRunHandler {
 
 		if tmpl.ResourceKey != "" {
 			if resourceName, ok := input[tmpl.ResourceKey].(string); ok && resourceName != "" {
-				environment, _ := input["environment"].(string)
-				result.AffectedResources = []string{fmt.Sprintf("%s:%s@%s", tmpl.ResourceType, resourceName, environment)}
+				result.AffectedResources = []string{fmt.Sprintf("%s:%s", tmpl.ResourceType, resourceName)}
 			}
 		}
 		return result, nil

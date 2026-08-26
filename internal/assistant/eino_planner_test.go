@@ -15,14 +15,14 @@ import (
 
 func TestEinoPlannerParsesModelJSONIntent(t *testing.T) {
 	t.Parallel()
-	chat := fakeEinoChatModel{content: `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.91,"explanation":"read cluster status"}`}
+	chat := fakeEinoChatModel{content: `{"tool_name":"cluster.status.read","input":{},"confidence":0.91,"explanation":"read cluster status"}`}
 	planner := assistant.NewEinoPlanner(&chat)
 
-	intent, err := planner.Plan(context.Background(), user(), "查看 prod 集群状态", nil, assistant.PageContext{})
+	intent, err := planner.Plan(context.Background(), user(), "查看 集群状态", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	if intent.ToolName != tools.ClusterStatusRead || intent.Input["environment"] != "prod" || intent.Confidence != 0.91 {
+	if intent.ToolName != tools.ClusterStatusRead || intent.Confidence != 0.91 {
 		t.Fatalf("intent = %+v, want cluster read intent", intent)
 	}
 	if len(chat.input) != 2 || chat.input[0].Role != schema.System || chat.input[1].Role != schema.User {
@@ -82,18 +82,18 @@ func TestEinoPlannerFinalAnswerWinsOverConfidenceThreshold(t *testing.T) {
 
 func TestEinoPlannerParsesModelJSONDiagnosticIntent(t *testing.T) {
 	t.Parallel()
-	chat := fakeEinoChatModel{content: `{"tool_name":"","input":{},"diagnostic":{"domain":"glusterfs","environment":"prod","resource_type":"volume","resource_name":"data","runbook":"health"},"confidence":0.88,"explanation":"check volume health"}`}
+	chat := fakeEinoChatModel{content: `{"tool_name":"","input":{},"diagnostic":{"domain":"glusterfs","resource_type":"volume","resource_name":"data","runbook":"health"},"confidence":0.88,"explanation":"check volume health"}`}
 	planner := assistant.NewEinoPlanner(&chat)
 
-	intent, err := planner.Plan(context.Background(), user(), "检查 prod glusterfs data volume 健康", nil, assistant.PageContext{})
+	intent, err := planner.Plan(context.Background(), user(), "检查 glusterfs data volume 健康", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
 	if intent.Diagnostic == nil {
 		t.Fatalf("intent = %+v, want diagnostic intent", intent)
 	}
-	if intent.Diagnostic.Domain != "glusterfs" || intent.Diagnostic.Environment != "prod" || intent.Diagnostic.ResourceName != "data" {
-		t.Fatalf("diagnostic = %+v, want glusterfs prod data request", intent.Diagnostic)
+	if intent.Diagnostic.Domain != "glusterfs" || intent.Diagnostic.ResourceName != "data" {
+		t.Fatalf("diagnostic = %+v, want glusterfs data request", intent.Diagnostic)
 	}
 	if intent.ToolName != "" || intent.Confidence != 0.88 {
 		t.Fatalf("intent = %+v, want diagnostic-only candidate", intent)
@@ -116,7 +116,7 @@ func TestEinoPlannerIsCandidateOnlyAndMayReturnUnknownTool(t *testing.T) {
 
 func TestEinoPlannerClarifiesWhenConfidenceBelowThreshold(t *testing.T) {
 	t.Parallel()
-	chat := fakeEinoChatModel{content: `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.5,"explanation":"unclear request"}`}
+	chat := fakeEinoChatModel{content: `{"tool_name":"cluster.status.read","input":{},"confidence":0.5,"explanation":"unclear request"}`}
 	planner := assistant.NewEinoPlanner(&chat)
 
 	_, err := planner.Plan(context.Background(), user(), "帮我看看集群", nil, assistant.PageContext{})
@@ -159,7 +159,7 @@ func TestEinoPlannerPlanStreamForwardsDeltasAndTerminalIntent(t *testing.T) {
 	t.Parallel()
 	// Split the JSON across three chunks to verify deltas are forwarded
 	// verbatim and the concatenated text parses to the same intent as Plan.
-	json := `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.91,"explanation":"read cluster status"}`
+	json := `{"tool_name":"cluster.status.read","input":{},"confidence":0.91,"explanation":"read cluster status"}`
 	chunks := []*schema.Message{
 		schema.AssistantMessage(json[:15], nil),
 		schema.AssistantMessage(json[15:60], nil),
@@ -168,7 +168,7 @@ func TestEinoPlannerPlanStreamForwardsDeltasAndTerminalIntent(t *testing.T) {
 	chat := fakeEinoChatModel{streamChunks: chunks}
 	planner := assistant.NewEinoPlanner(&chat)
 
-	events, err := planner.PlanStream(context.Background(), user(), "查看 prod 集群状态", nil, assistant.PageContext{})
+	events, err := planner.PlanStream(context.Background(), user(), "查看 集群状态", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("PlanStream start: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestEinoPlannerPlanStreamForwardsDeltasAndTerminalIntent(t *testing.T) {
 	if lastErr != nil {
 		t.Fatalf("terminal err = %v, want nil", lastErr)
 	}
-	if intent == nil || intent.ToolName != tools.ClusterStatusRead || intent.Input["environment"] != "prod" || intent.Confidence != 0.91 {
+	if intent == nil || intent.ToolName != tools.ClusterStatusRead || intent.Confidence != 0.91 {
 		t.Fatalf("intent = %+v, want cluster read intent", intent)
 	}
 	if got, want := strings.Join(deltas, ""), json; got != want {
@@ -207,12 +207,12 @@ func TestEinoPlannerPlanStreamDegradedToPlanWhenStreamErrors(t *testing.T) {
 	// chat.Stream returns an error; PlanStream must fall back to Plan
 	// (chat.Generate) and emit a single terminal Done event with the intent.
 	chat := fakeEinoChatModel{
-		content:   `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.91,"explanation":"ok"}`,
+		content:   `{"tool_name":"cluster.status.read","input":{},"confidence":0.91,"explanation":"ok"}`,
 		streamErr: errors.New("stream unavailable"),
 	}
 	planner := assistant.NewEinoPlanner(&chat)
 
-	events, err := planner.PlanStream(context.Background(), user(), "查看 prod 集群状态", nil, assistant.PageContext{})
+	events, err := planner.PlanStream(context.Background(), user(), "查看 集群状态", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("PlanStream start: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestEinoPlannerPlanStreamForwardsReasoningAsThinking(t *testing.T) {
 	// PlanStream must forward reasoning chunks as Thinking events and
 	// answer chunks as Delta events.
 	reasoning := "用户想查看集群状态，需要调用 cluster.status.read 工具"
-	json := `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.91,"explanation":"read cluster status"}`
+	json := `{"tool_name":"cluster.status.read","input":{},"confidence":0.91,"explanation":"read cluster status"}`
 	chunks := []*schema.Message{
 		{Role: schema.Assistant, ReasoningContent: reasoning[:10]},
 		{Role: schema.Assistant, ReasoningContent: reasoning[10:]},
@@ -262,7 +262,7 @@ func TestEinoPlannerPlanStreamForwardsReasoningAsThinking(t *testing.T) {
 	chat := fakeEinoChatModel{streamChunks: chunks}
 	planner := assistant.NewEinoPlanner(&chat)
 
-	events, err := planner.PlanStream(context.Background(), user(), "查看 prod 集群状态", nil, assistant.PageContext{})
+	events, err := planner.PlanStream(context.Background(), user(), "查看 集群状态", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("PlanStream start: %v", err)
 	}
@@ -302,11 +302,11 @@ func TestEinoPlannerPlanStreamNoReasoningWhenModelDoesNotReturnIt(t *testing.T) 
 	t.Parallel()
 	// When the model does not return reasoning content, no Thinking events
 	// should be emitted.
-	json := `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.91,"explanation":"ok"}`
+	json := `{"tool_name":"cluster.status.read","input":{},"confidence":0.91,"explanation":"ok"}`
 	chat := fakeEinoChatModel{content: json}
 	planner := assistant.NewEinoPlanner(&chat)
 
-	events, err := planner.PlanStream(context.Background(), user(), "查看 prod 集群状态", nil, assistant.PageContext{})
+	events, err := planner.PlanStream(context.Background(), user(), "查看 集群状态", nil, assistant.PageContext{})
 	if err != nil {
 		t.Fatalf("PlanStream start: %v", err)
 	}

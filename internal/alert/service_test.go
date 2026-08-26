@@ -109,7 +109,7 @@ func TestQueryFilters(t *testing.T) {
 		}
 	}
 
-	firing, err := svc.Query(context.Background(), store.AlertFilter{Status: "firing", Environment: "prod"})
+	firing, err := svc.Query(context.Background(), store.AlertFilter{Status: "firing"})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestQueryFilters(t *testing.T) {
 		t.Errorf("firing alerts = %d (want 1 a1), got %+v", len(firing), firing)
 	}
 
-	criticalOnly, err := svc.Query(context.Background(), store.AlertFilter{Severity: "critical", Environment: "prod"})
+	criticalOnly, err := svc.Query(context.Background(), store.AlertFilter{Severity: "critical"})
 	if err != nil {
 		t.Fatalf("Query critical: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestListActive(t *testing.T) {
 			t.Fatalf("Ingest: %v", err)
 		}
 	}
-	active, err := svc.ListActive(context.Background(), "prod", 50)
+	active, err := svc.ListActive(context.Background(), 50)
 	if err != nil {
 		t.Fatalf("ListActive: %v", err)
 	}

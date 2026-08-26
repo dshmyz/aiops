@@ -36,7 +36,7 @@ func TestReadOnlyToolEndpointUsesSQLiteAuditStore(t *testing.T) {
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		execution.NewReadOnlyService(e2eReadRunner{}, audit.NewService(repository)),
 	)
-	req := httptest.NewRequest(http.MethodPost, "/v1/tools/cluster.status.read/read", strings.NewReader(`{"environment":"prod"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/tools/cluster.status.read/read", strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t))
 	req.Header.Set("X-Request-ID", "e2e-request")
 	res := httptest.NewRecorder()
@@ -58,16 +58,15 @@ func TestReadOnlyToolEndpointUsesSQLiteAuditStore(t *testing.T) {
 type e2eReadRunner struct{}
 
 func (e2eReadRunner) Read(_ context.Context, tool tools.Tool, input map[string]any) (map[string]any, error) {
-	return map[string]any{"tool": tool.Name, "environment": input["environment"], "status": "green"}, nil
+	return map[string]any{"tool": tool.Name, "status": "green"}, nil
 }
 
 func signedJWT(t *testing.T) string {
 	t.Helper()
 	header := encodeSegment(t, map[string]any{"alg": "HS256", "typ": "JWT"})
 	claims := encodeSegment(t, map[string]any{
-		"sub":                  "operator-1",
-		"roles":                []string{"viewer"},
-		"allowed_environments": []string{"prod"},
+		"sub":   "operator-1",
+		"roles": []string{"viewer"},
 	})
 	unsigned := header + "." + claims
 	mac := hmac.New(sha256.New, []byte("test-secret"))

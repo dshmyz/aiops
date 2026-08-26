@@ -19,14 +19,14 @@ func TestServiceRunsGlusterReadToolIntoDiagnosticPackage(t *testing.T) {
 		return time.Date(2026, time.July, 22, 9, 0, 0, 0, time.UTC)
 	}))
 
-	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "glusterfs", Environment: "prod", ResourceType: "volume", ResourceName: "data", Runbook: "health"})
+	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "glusterfs", ResourceType: "volume", ResourceName: "data", Runbook: "health"})
 	if err != nil {
 		t.Fatalf("Run returned %v", err)
 	}
 	if reads.toolName != "glusterfs.volume.health.read" {
 		t.Fatalf("tool = %q, want %q", reads.toolName, "glusterfs.volume.health.read")
 	}
-	if pkg.ID == "" || pkg.Environment != "prod" || len(pkg.Resources) != 1 || len(pkg.Observations) != 1 || len(pkg.Findings) != 1 || len(pkg.Recommendations) != 1 {
+	if pkg.ID == "" || len(pkg.Resources) != 1 || len(pkg.Observations) != 1 || len(pkg.Findings) != 1 || len(pkg.Recommendations) != 1 {
 		t.Fatalf("package = %+v, want populated diagnostic", pkg)
 	}
 	if pkg.Resources[0].Domain != "glusterfs" || pkg.Resources[0].Name != "data" {
@@ -44,7 +44,7 @@ func TestServiceReturnsGenericFrameworkForUnknownDomain(t *testing.T) {
 		return time.Date(2026, time.July, 22, 9, 0, 0, 0, time.UTC)
 	}))
 
-	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "shell", Environment: "prod", ResourceName: "root", Runbook: "health"})
+	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "shell", ResourceName: "root", Runbook: "health"})
 	if err != nil {
 		t.Fatalf("Run returned %v, want graceful generic framework", err)
 	}
@@ -74,7 +74,7 @@ func TestServiceGenericFrameworkPerRunbook(t *testing.T) {
 	for _, rb := range []string{"health", "capacity", "consumer_lag"} {
 		reads := &fakeReads{}
 		service := diagnostics.NewService(reads, nil)
-		pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "redis", Environment: "prod", ResourceName: "cache", Runbook: rb})
+		pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "redis", ResourceName: "cache", Runbook: rb})
 		if err != nil {
 			t.Fatalf("Run(runbook=%s) = %v, want generic framework", rb, err)
 		}
@@ -97,9 +97,9 @@ func TestServiceAcceptsSchemaRunbookValues(t *testing.T) {
 		name    string
 		request diagnostics.Request
 	}{
-		{name: "capacity", request: diagnostics.Request{Domain: "minio", Environment: "prod", ResourceType: "bucket", ResourceName: "archive", Runbook: "capacity"}},
-		{name: "consumer_lag", request: diagnostics.Request{Domain: "kafka", Environment: "prod", ResourceType: "consumer_group", ResourceName: "orders", Runbook: "consumer_lag"}},
-		{name: "empty", request: diagnostics.Request{Domain: "minio", Environment: "prod", ResourceType: "bucket", ResourceName: "archive", Runbook: ""}},
+		{name: "capacity", request: diagnostics.Request{Domain: "minio", ResourceType: "bucket", ResourceName: "archive", Runbook: "capacity"}},
+		{name: "consumer_lag", request: diagnostics.Request{Domain: "kafka", ResourceType: "consumer_group", ResourceName: "orders", Runbook: "consumer_lag"}},
+		{name: "empty", request: diagnostics.Request{Domain: "minio", ResourceType: "bucket", ResourceName: "archive", Runbook: ""}},
 	}
 
 	for _, testCase := range cases {
@@ -127,7 +127,7 @@ func TestServiceTruncatesLargeReadResultBeforePackaging(t *testing.T) {
 	}}
 	service := diagnostics.NewService(reads, nil)
 
-	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "glusterfs", Environment: "prod", ResourceName: "data"})
+	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{Domain: "glusterfs", ResourceName: "data"})
 	if err != nil {
 		t.Fatalf("Run returned %v", err)
 	}
@@ -152,11 +152,9 @@ func TestServiceRejectsInvalidDiagnosticCandidatesBeforeRead(t *testing.T) {
 		name    string
 		request diagnostics.Request
 	}{
-		{name: "invalid runbook", request: diagnostics.Request{Domain: "glusterfs", Environment: "prod", Runbook: "repair"}},
-		{name: "invalid resource type", request: diagnostics.Request{Domain: "glusterfs", Environment: "prod", ResourceType: "bucket"}},
-		{name: "missing environment", request: diagnostics.Request{Domain: "glusterfs", Environment: "   "}},
-		{name: "oversized environment", request: diagnostics.Request{Domain: "glusterfs", Environment: strings.Repeat("e", 128)}},
-		{name: "oversized resource name", request: diagnostics.Request{Domain: "glusterfs", Environment: "prod", ResourceName: strings.Repeat("r", 128)}},
+		{name: "invalid runbook", request: diagnostics.Request{Domain: "glusterfs", Runbook: "repair"}},
+		{name: "invalid resource type", request: diagnostics.Request{Domain: "glusterfs", ResourceType: "bucket"}},
+		{name: "oversized resource name", request: diagnostics.Request{Domain: "glusterfs", ResourceName: strings.Repeat("r", 128)}},
 	}
 
 	for _, testCase := range cases {
@@ -187,7 +185,6 @@ func TestServiceBoundsSerializedPackageWithEscapedMultibyteRequestStrings(t *tes
 
 	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{
 		Domain:       "glusterfs",
-		Environment:  "prod",
 		ResourceName: "data",
 	})
 	if err != nil {
@@ -224,7 +221,7 @@ func (f *fakeReads) ExecuteRead(_ context.Context, _ identity.CurrentUser, toolN
 }
 
 func user() identity.CurrentUser {
-	return identity.CurrentUser{Subject: "operator-1", Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}, RequestID: "request-1"}
+	return identity.CurrentUser{Subject: "operator-1", Roles: []string{"viewer"}, RequestID: "request-1"}
 }
 
 type mockCapabilityResolver struct {
@@ -250,14 +247,13 @@ func TestServicePrefersCapabilityResolverOverHardcodedSwitch(t *testing.T) {
 	resolver := &mockCapabilityResolver{
 		toolName:     "custom.domain.health.read",
 		resourceType: "custom-resource",
-		schema:       map[string]any{"environment": "string", "name": "string"},
+		schema:       map[string]any{"name": "string"},
 		ok:           true,
 	}
 	service := diagnostics.NewService(reads, nil).WithCapabilityResolver(resolver)
 
 	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{
 		Domain:       "custom-domain",
-		Environment:  "prod",
 		ResourceType: "custom-resource",
 		ResourceName: "my-resource",
 	})
@@ -270,8 +266,8 @@ func TestServicePrefersCapabilityResolverOverHardcodedSwitch(t *testing.T) {
 	if reads.calls != 1 {
 		t.Fatalf("read calls = %d, want 1", reads.calls)
 	}
-	if reads.input["environment"] != "prod" || reads.input["name"] != "my-resource" {
-		t.Fatalf("input = %#v, want environment=prod and name=my-resource", reads.input)
+	if reads.input["name"] != "my-resource" {
+		t.Fatalf("input = %#v, want name=my-resource", reads.input)
 	}
 	if resolver.callDomain != "custom-domain" {
 		t.Fatalf("resolver domain = %q, want custom-domain", resolver.callDomain)
@@ -293,14 +289,13 @@ func TestServiceCapabilityResolverOverridesKnownDomainTool(t *testing.T) {
 	resolver := &mockCapabilityResolver{
 		toolName:     "kafka.enhanced.health.read",
 		resourceType: "consumer_group",
-		schema:       map[string]any{"environment": "string", "name": "string"},
+		schema:       map[string]any{"name": "string"},
 		ok:           true,
 	}
 	service := diagnostics.NewService(reads, nil).WithCapabilityResolver(resolver)
 
 	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{
 		Domain:       "kafka",
-		Environment:  "prod",
 		ResourceType: "consumer_group",
 		ResourceName: "orders-consumer",
 	})
@@ -323,7 +318,6 @@ func TestServiceFallsBackToSwitchWhenResolverMisses(t *testing.T) {
 
 	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{
 		Domain:       "kafka",
-		Environment:  "prod",
 		ResourceName: "orders-consumer",
 	})
 	if err != nil {
@@ -343,22 +337,18 @@ func TestServiceUsesCapabilityInputSchemaToBuildReadInput(t *testing.T) {
 	resolver := &mockCapabilityResolver{
 		toolName:     "custom.domain.health.read",
 		resourceType: "custom-resource",
-		schema:       map[string]any{"environment": "string", "volume": "string"},
+		schema:       map[string]any{"volume": "string"},
 		ok:           true,
 	}
 	service := diagnostics.NewService(reads, nil).WithCapabilityResolver(resolver)
 
 	_, err := service.Run(context.Background(), user(), diagnostics.Request{
 		Domain:       "custom-domain",
-		Environment:  "prod",
 		ResourceType: "custom-resource",
 		ResourceName: "my-vol",
 	})
 	if err != nil {
 		t.Fatalf("Run returned %v", err)
-	}
-	if reads.input["environment"] != "prod" {
-		t.Fatalf("input environment = %#v, want prod", reads.input["environment"])
 	}
 	if reads.input["volume"] != "my-vol" {
 		t.Fatalf("input volume = %#v, want my-vol (resource name mapped to schema field)", reads.input["volume"])
@@ -375,7 +365,6 @@ func TestServiceFillsRecommendationToolNameForKafkaCritical(t *testing.T) {
 
 	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{
 		Domain:       "kafka",
-		Environment:  "prod",
 		ResourceName: "orders-consumer",
 	})
 	if err != nil {
@@ -391,9 +380,6 @@ func TestServiceFillsRecommendationToolNameForKafkaCritical(t *testing.T) {
 	}
 	if !rec.Actionable {
 		t.Fatal("expected actionable recommendation")
-	}
-	if rec.CandidateInput["environment"] != "prod" {
-		t.Fatalf("candidate input environment = %#v, want prod", rec.CandidateInput["environment"])
 	}
 	if rec.CandidateInput["topic"] != "orders-consumer" {
 		t.Fatalf("candidate input topic = %#v, want orders-consumer", rec.CandidateInput["topic"])
@@ -417,7 +403,6 @@ func TestServiceFillsRecommendationToolNameForKafkaWarning(t *testing.T) {
 
 	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{
 		Domain:       "kafka",
-		Environment:  "staging",
 		ResourceName: "events-consumer",
 	})
 	if err != nil {
@@ -439,7 +424,6 @@ func TestServiceLeavesToolNameEmptyForNonKafkaDomains(t *testing.T) {
 
 	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{
 		Domain:       "glusterfs",
-		Environment:  "prod",
 		ResourceName: "data",
 	})
 	if err != nil {
@@ -474,11 +458,11 @@ func TestRecommendationToPlanInput(t *testing.T) {
 			name: "actionable recommendation",
 			rec: diagnostics.Recommendation{
 				ToolName:       "topic.retention.set",
-				CandidateInput: map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 24},
+				CandidateInput: map[string]any{"topic": "orders", "retention_hours": 24},
 			},
 			wantTool:   "topic.retention.set",
 			wantAction: true,
-			wantInput:  map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 24},
+			wantInput:  map[string]any{"topic": "orders", "retention_hours": 24},
 		},
 		{
 			name:       "empty tool name",

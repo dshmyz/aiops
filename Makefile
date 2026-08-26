@@ -1,4 +1,4 @@
-.PHONY: test test-integration lint vet cover build docker-build web-build web-test web-typecheck web-check e2e all-checks dev-up dev-down dev-logs dev-verify-trace dev-verify-verification eval gen-token compose-up compose-down compose-logs scripts-build scripts-start scripts-stop scripts-status scripts-logs scripts-health scripts-token scripts-nginx dev-enrich
+.PHONY: test test-integration lint vet cover build docker-build web-build web-test web-typecheck web-check e2e all-checks dev-up dev-down dev-logs dev-verify-trace dev-verify-verification gen-token compose-up compose-down compose-logs scripts-build scripts-start scripts-stop scripts-status scripts-logs scripts-health scripts-token scripts-nginx dev-enrich
 
 test:
 	go test -race ./...
@@ -21,10 +21,6 @@ lint:
 
 vet:
 	go vet ./...
-
-# EinoPlanner 评估套件（build tag 隔离，手动跑）：生成 internal/assistant/eval/report.md
-eval:
-	go test -tags=eval ./internal/assistant/eval/...
 
 cover:
 	go test -race -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -1

@@ -146,9 +146,8 @@ func TestRateLimitMiddlewareWithAuth(t *testing.T) {
 
 	// First request with valid JWT → subject limiting.
 	token := signedJWT(t, map[string]any{
-		"sub":                  "user-1",
-		"roles":                []string{"viewer"},
-		"allowed_environments": []string{"prod"},
+		"sub":   "user-1",
+		"roles": []string{"viewer"},
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -169,9 +168,8 @@ func TestRateLimitMiddlewareWithAuth(t *testing.T) {
 
 	// Request from a different subject should still pass (independent bucket).
 	token2 := signedJWT(t, map[string]any{
-		"sub":                  "user-2",
-		"roles":                []string{"viewer"},
-		"allowed_environments": []string{"prod"},
+		"sub":   "user-2",
+		"roles": []string{"viewer"},
 	})
 	req2 := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
 	req2.Header.Set("Authorization", "Bearer "+token2)

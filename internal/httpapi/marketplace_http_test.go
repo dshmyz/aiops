@@ -47,18 +47,18 @@ func (f *fakeMarketplaceService) GetVersion(_ context.Context, _, versionID stri
 	return &marketplace.Version{ID: versionID, Version: "1.0.0", YAMLContent: "schema_version: 1\n", YAMLHash: "abc"}, nil
 }
 
-func (f *fakeMarketplaceService) Rate(_ context.Context, _, _ string, _ int, _, _, _ *string) error { return nil }
+func (f *fakeMarketplaceService) Rate(_ context.Context, _, _ string, _ int, _, _ *string) error { return nil }
 
 func (f *fakeMarketplaceService) ListRatings(_ context.Context, _ string, _, _ int) ([]marketplace.Rating, int, error) {
 	return nil, 0, nil
 }
 
-func (f *fakeMarketplaceService) RecordDownload(_ context.Context, _, _, _ string, _, _ *string, _ string) error {
+func (f *fakeMarketplaceService) RecordDownload(_ context.Context, _, _, _ string, _ *string, _ string) error {
 	return nil
 }
 
 func (f *fakeMarketplaceService) Stats(_ context.Context, _ string) (*marketplace.Stats, error) {
-	return &marketplace.Stats{CapabilityID: "reg-1", ByEnvironment: map[string]int{}}, nil
+	return &marketplace.Stats{CapabilityID: "reg-1"}, nil
 }
 
 func marketplaceRouter(t *testing.T, svc httpapi.MarketplaceService) http.Handler {
@@ -80,7 +80,7 @@ func TestMarketplaceRequiresAuthentication(t *testing.T) {
 	svc := &fakeMarketplaceService{}
 	router := marketplaceRouter(t, svc)
 
-	req := signedRequest(t, "/v1/marketplace/capabilities?query=restart", "", "nobody-1", nil, []string{"prod"})
+	req := signedRequest(t, "/v1/marketplace/capabilities?query=restart", "", "nobody-1", nil)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -97,7 +97,7 @@ func TestMarketplaceSearchViewerAllowed(t *testing.T) {
 	svc := &fakeMarketplaceService{searchTotal: 1}
 	router := marketplaceRouter(t, svc)
 
-	req := signedRequest(t, "/v1/marketplace/capabilities?query=restart", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/marketplace/capabilities?query=restart", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -119,7 +119,7 @@ func TestMarketplacePublishRequiresAdmin(t *testing.T) {
 	svc := &fakeMarketplaceService{}
 	router := marketplaceRouter(t, svc)
 
-	req := signedRequest(t, "/v1/marketplace/capabilities", publishBody, "operator-1", []string{"operator"}, []string{"prod"})
+	req := signedRequest(t, "/v1/marketplace/capabilities", publishBody, "operator-1", []string{"operator"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -139,7 +139,7 @@ func TestMarketplacePublishForcesOwnerFromSubject(t *testing.T) {
 	svc := &fakeMarketplaceService{}
 	router := marketplaceRouter(t, svc)
 
-	req := signedRequest(t, "/v1/marketplace/capabilities", publishBody, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/marketplace/capabilities", publishBody, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -156,7 +156,7 @@ func TestMarketplaceStatsViewerAllowed(t *testing.T) {
 	svc := &fakeMarketplaceService{}
 	router := marketplaceRouter(t, svc)
 
-	req := signedRequest(t, "/v1/marketplace/capabilities/reg-1/stats", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/marketplace/capabilities/reg-1/stats", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -177,7 +177,7 @@ func TestMarketplaceUnconfiguredReturns503(t *testing.T) {
 		nil,
 	)
 
-	req := signedRequest(t, "/v1/marketplace/capabilities", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/marketplace/capabilities", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -194,7 +194,7 @@ func TestMarketplaceSemanticUnconfiguredReturns503(t *testing.T) {
 	svc := &fakeMarketplaceService{}
 	router := marketplaceRouter(t, svc)
 
-	req := signedRequest(t, "/v1/marketplace/capabilities?semantic=true&query=restart%20kafka", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/marketplace/capabilities?semantic=true&query=restart%20kafka", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 

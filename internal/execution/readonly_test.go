@@ -34,7 +34,7 @@ func (i immediateReadRunner) Read(_ context.Context, _ tools.Tool, _ map[string]
 }
 
 func viewerUser() identity.CurrentUser {
-	return identity.CurrentUser{Subject: "viewer-1", Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}, RequestID: "req-readonly"}
+	return identity.CurrentUser{Subject: "viewer-1", Roles: []string{"viewer"}, RequestID: "req-readonly"}
 }
 
 func TestExecuteReadTimesOutBlockingRunner(t *testing.T) {
@@ -44,7 +44,7 @@ func TestExecuteReadTimesOutBlockingRunner(t *testing.T) {
 	service := execution.NewReadOnlyService(blockingReadRunner{}, auditService).WithTimeout(50 * time.Millisecond)
 
 	started := time.Now()
-	_, err := service.ExecuteRead(context.Background(), viewerUser(), tools.ClusterStatusRead, map[string]any{"environment": "prod"})
+	_, err := service.ExecuteRead(context.Background(), viewerUser(), tools.ClusterStatusRead, map[string]any{})
 	elapsed := time.Since(started)
 
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -75,7 +75,7 @@ func TestExecuteTrustedReadTimesOut(t *testing.T) {
 	service := execution.NewReadOnlyService(blockingReadRunner{}, nil).WithTimeout(50 * time.Millisecond)
 
 	started := time.Now()
-	_, err := service.ExecuteTrustedRead(context.Background(), tools.ClusterStatusRead, map[string]any{"environment": "prod"})
+	_, err := service.ExecuteTrustedRead(context.Background(), tools.ClusterStatusRead, map[string]any{})
 	elapsed := time.Since(started)
 
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -96,7 +96,7 @@ func TestExecuteReadRespectsExistingShorterDeadline(t *testing.T) {
 	parent, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err := service.ExecuteRead(parent, viewerUser(), tools.ClusterStatusRead, map[string]any{"environment": "prod"})
+	_, err := service.ExecuteRead(parent, viewerUser(), tools.ClusterStatusRead, map[string]any{})
 	elapsed := time.Since(started)
 
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -113,7 +113,7 @@ func TestExecuteReadCompletesWithinTimeout(t *testing.T) {
 	auditService := audit.NewService(repository)
 	service := execution.NewReadOnlyService(immediateReadRunner{result: map[string]any{"status": "ok"}}, auditService)
 
-	result, err := service.ExecuteRead(context.Background(), viewerUser(), tools.ClusterStatusRead, map[string]any{"environment": "prod"})
+	result, err := service.ExecuteRead(context.Background(), viewerUser(), tools.ClusterStatusRead, map[string]any{})
 	if err != nil {
 		t.Fatalf("ExecuteRead: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestExecuteReadCompletesWithinTimeout(t *testing.T) {
 func TestExecuteReadNoTimeoutWhenDisabled(t *testing.T) {
 	t.Parallel()
 	service := execution.NewReadOnlyService(immediateReadRunner{result: map[string]any{"status": "ok"}}, nil).WithTimeout(0)
-	result, err := service.ExecuteRead(context.Background(), viewerUser(), tools.ClusterStatusRead, map[string]any{"environment": "prod"})
+	result, err := service.ExecuteRead(context.Background(), viewerUser(), tools.ClusterStatusRead, map[string]any{})
 	if err != nil {
 		t.Fatalf("ExecuteRead: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestExecuteTrustedReadAsRecordsAudit(t *testing.T) {
 	auditService := audit.NewService(repository)
 	service := execution.NewReadOnlyService(immediateReadRunner{result: map[string]any{"status": "ok"}}, auditService)
 
-	_, err := service.ExecuteTrustedReadAs(context.Background(), viewerUser(), tools.ClusterStatusRead, map[string]any{"environment": "prod"})
+	_, err := service.ExecuteTrustedReadAs(context.Background(), viewerUser(), tools.ClusterStatusRead, map[string]any{})
 	if err != nil {
 		t.Fatalf("ExecuteTrustedReadAs: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestExecuteTrustedReadAsRejectsUnregistered(t *testing.T) {
 	auditService := audit.NewService(repository)
 	service := execution.NewReadOnlyService(immediateReadRunner{result: map[string]any{"status": "ok"}}, auditService)
 
-	_, err := service.ExecuteTrustedReadAs(context.Background(), viewerUser(), "ghost.capability.read", map[string]any{"environment": "prod"})
+	_, err := service.ExecuteTrustedReadAs(context.Background(), viewerUser(), "ghost.capability.read", map[string]any{})
 	if err != nil {
 		t.Fatalf("ExecuteTrustedReadAs: %v", err)
 	}

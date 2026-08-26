@@ -491,7 +491,7 @@ func intentAdvisoryKey(intent Intent) (string, bool) {
 	if intent.Diagnostic != nil {
 		d := intent.Diagnostic
 		return "diag:" + strings.Join([]string{
-			d.Domain, d.Environment, d.ResourceType, d.ResourceName,
+			d.Domain, d.ResourceType, d.ResourceName,
 		}, "\x00"), true
 	}
 	if intent.ToolName == "" {

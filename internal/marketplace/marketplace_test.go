@@ -43,9 +43,6 @@ input_schema:
     pod_name:
         type: string
         required: true
-    environment:
-        type: string
-        required: true
 output:
     kind: change
     summary_template: Restarted pod {pod_name} in {namespace}
@@ -61,11 +58,10 @@ auth:
     roles:
         - operator
         - admin
-    environment_scoped: true
 ai:
     description: Restart a Kubernetes pod.
     examples:
-        - 重启 prod 环境 default 命名空间的 test-pod
+        - 重启 default 命名空间的 test-pod
 `
 
 func TestPublishAndSearch(t *testing.T) {
@@ -146,10 +142,10 @@ func TestRateUpsertRecalculatesAverage(t *testing.T) {
 		t.Fatalf("publish: %v", err)
 	}
 
-	if err := svc.Rate(ctx, registry.ID, "user-a", 5, nil, nil, nil); err != nil {
+	if err := svc.Rate(ctx, registry.ID, "user-a", 5, nil, nil); err != nil {
 		t.Fatalf("rate 5: %v", err)
 	}
-	if err := svc.Rate(ctx, registry.ID, "user-b", 3, nil, nil, nil); err != nil {
+	if err := svc.Rate(ctx, registry.ID, "user-b", 3, nil, nil); err != nil {
 		t.Fatalf("rate 3: %v", err)
 	}
 
@@ -165,7 +161,7 @@ func TestRateUpsertRecalculatesAverage(t *testing.T) {
 	}
 
 	// user-a re-rates 5 -> 2; the average becomes (2+3)/2 = 2.5.
-	if err := svc.Rate(ctx, registry.ID, "user-a", 2, nil, nil, nil); err != nil {
+	if err := svc.Rate(ctx, registry.ID, "user-a", 2, nil, nil); err != nil {
 		t.Fatalf("re-rate user-a: %v", err)
 	}
 	got, err = svc.Get(ctx, registry.ID)
@@ -205,16 +201,15 @@ func TestRecordDownloadAndUsageAndStats(t *testing.T) {
 		t.Fatalf("publish: %v", err)
 	}
 
-	env := "prod"
-	if err := svc.RecordDownload(ctx, registry.ID, version.ID, "user-a", nil, &env, "cli"); err != nil {
+	if err := svc.RecordDownload(ctx, registry.ID, version.ID, "user-a", nil, "cli"); err != nil {
 		t.Fatalf("record download: %v", err)
 	}
 
 	ms := 3200
-	if err := svc.RecordUsage(ctx, registry.ID, &version.ID, "user-a", nil, "prod", "success", &ms, nil); err != nil {
+	if err := svc.RecordUsage(ctx, registry.ID, &version.ID, "user-a", nil, "success", &ms, nil); err != nil {
 		t.Fatalf("record usage: %v", err)
 	}
-	if err := svc.RecordUsage(ctx, registry.ID, &version.ID, "user-b", nil, "prod", "failed", &ms, nil); err != nil {
+	if err := svc.RecordUsage(ctx, registry.ID, &version.ID, "user-b", nil, "failed", &ms, nil); err != nil {
 		t.Fatalf("record usage failed: %v", err)
 	}
 
@@ -230,9 +225,6 @@ func TestRecordDownloadAndUsageAndStats(t *testing.T) {
 	}
 	if stats.SuccessRate != 0.5 {
 		t.Errorf("success_rate = %v, want 0.5", stats.SuccessRate)
-	}
-	if stats.ByEnvironment["prod"] != 2 {
-		t.Errorf("executions in prod = %d, want 2", stats.ByEnvironment["prod"])
 	}
 }
 

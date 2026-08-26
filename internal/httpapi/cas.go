@@ -35,9 +35,6 @@ type CASConfig struct {
 	// DefaultRoles are assigned to CAS users whose CAS attributes do not
 	// include a "roles" attribute. Defaults to ["operator"].
 	DefaultRoles []string
-	// DefaultEnvironments are the allowed environments for CAS users.
-	// Defaults to ["prod", "staging", "dev"].
-	DefaultEnvironments []string
 	// HTTPClient is used for ticket validation calls. Defaults to http.DefaultClient.
 	HTTPClient *http.Client
 	// InsecureSkipVerify 为 true 时，CAS ticket 校验请求跳过 TLS 证书校验，用于
@@ -55,8 +52,7 @@ const (
 // management. It satisfies the Authenticator interface: requests carrying a
 // valid session cookie are authenticated without contacting the CAS server.
 type CASAuthenticator struct {
-	config        CASConfig
-	aliasExpander AliasExpander
+	config CASConfig
 }
 
 // NewCASAuthenticator creates a CAS authenticator. Returns an error if the
@@ -79,9 +75,6 @@ func NewCASAuthenticator(config CASConfig) (*CASAuthenticator, error) {
 	if len(config.DefaultRoles) == 0 {
 		config.DefaultRoles = []string{"operator"}
 	}
-	if len(config.DefaultEnvironments) == 0 {
-		config.DefaultEnvironments = []string{"prod", "staging", "dev"}
-	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{Timeout: 10 * time.Second}
 	}
@@ -102,14 +95,6 @@ func NewCASAuthenticator(config CASConfig) (*CASAuthenticator, error) {
 	return &CASAuthenticator{config: config}, nil
 }
 
-// WithAliasExpander wires an alias expander that expands canonical environment
-// identifiers with their aliases during CAS authentication. A nil expander is
-// a no-op.
-func (c *CASAuthenticator) WithAliasExpander(expander AliasExpander) *CASAuthenticator {
-	c.aliasExpander = expander
-	return c
-}
-
 // Authenticate checks for a valid CAS session cookie. If absent or invalid,
 // it returns an error. Callers that want CAS login redirect behaviour should
 // use the Router-level CAS handling (which issues 302 to the CAS login page).
@@ -126,14 +111,9 @@ func (c *CASAuthenticator) Authenticate(request *http.Request) (identity.Current
 	if requestID == "" {
 		requestID = newRequestID()
 	}
-	envs := claims.AllowedEnvironments
-	if c.aliasExpander != nil {
-		envs = c.aliasExpander.Expand(request.Context(), envs)
-	}
 	return identity.Project(identity.TrustedClaims{
-		Subject:             claims.Subject,
-		Roles:               claims.Roles,
-		AllowedEnvironments: envs,
+		Subject: claims.Subject,
+		Roles:   claims.Roles,
 	}, requestID)
 }
 
@@ -174,16 +154,15 @@ func (c *CASAuthenticator) ValidateTicket(ticket string) (identity.CurrentUser, 
 		return identity.CurrentUser{}, "", fmt.Errorf("read CAS response: %w", err)
 	}
 
-	user, err := parseCASValidationResponse(body, c.config.DefaultRoles, c.config.DefaultEnvironments)
+	user, err := parseCASValidationResponse(body, c.config.DefaultRoles)
 	if err != nil {
 		return identity.CurrentUser{}, "", err
 	}
 
 	cookieValue, err := c.signSessionCookie(casSessionClaims{
-		Subject:             user.Subject,
-		Roles:               user.Roles,
-		AllowedEnvironments: user.AllowedEnvironments,
-		ExpiresAt:           time.Now().Add(c.config.SessionTTL).Unix(),
+		Subject:   user.Subject,
+		Roles:     user.Roles,
+		ExpiresAt: time.Now().Add(c.config.SessionTTL).Unix(),
 	})
 	if err != nil {
 		return identity.CurrentUser{}, "", err
@@ -191,9 +170,8 @@ func (c *CASAuthenticator) ValidateTicket(ticket string) (identity.CurrentUser, 
 
 	requestID := newRequestID()
 	projected, err := identity.Project(identity.TrustedClaims{
-		Subject:             user.Subject,
-		Roles:               user.Roles,
-		AllowedEnvironments: user.AllowedEnvironments,
+		Subject: user.Subject,
+		Roles:   user.Roles,
 	}, requestID)
 	if err != nil {
 		return identity.CurrentUser{}, "", err
@@ -246,12 +224,11 @@ type casServiceResponse struct {
 
 // casUser is the intermediate parsed user before identity projection.
 type casUser struct {
-	Subject             string
-	Roles               []string
-	AllowedEnvironments []string
+	Subject string
+	Roles   []string
 }
 
-func parseCASValidationResponse(body []byte, defaultRoles, defaultEnvs []string) (casUser, error) {
+func parseCASValidationResponse(body []byte, defaultRoles []string) (casUser, error) {
 	var resp casServiceResponse
 	if err := xml.Unmarshal(body, &resp); err != nil {
 		return casUser{}, fmt.Errorf("parse CAS XML response: %w", err)
@@ -271,9 +248,8 @@ func parseCASValidationResponse(body []byte, defaultRoles, defaultEnvs []string)
 	}
 
 	return casUser{
-		Subject:             username,
-		Roles:               roles,
-		AllowedEnvironments: defaultEnvs,
+		Subject: username,
+		Roles:   roles,
 	}, nil
 }
 
@@ -295,10 +271,9 @@ func splitComma(s string) []string {
 // --- Session cookie signing ---
 
 type casSessionClaims struct {
-	Subject             string   `json:"sub"`
-	Roles               []string `json:"roles"`
-	AllowedEnvironments []string `json:"envs"`
-	ExpiresAt           int64    `json:"exp"`
+	Subject   string   `json:"sub"`
+	Roles     []string `json:"roles"`
+	ExpiresAt int64    `json:"exp"`
 }
 
 func (c *CASAuthenticator) signSessionCookie(claims casSessionClaims) (string, error) {

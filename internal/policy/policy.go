@@ -18,7 +18,6 @@ const (
 	ToolNotRegistered Reason = "tool_not_registered"
 	PermissionDenied  Reason = "permission_denied"
 	InvalidInput      Reason = "invalid_input"
-	EnvironmentDenied Reason = "environment_denied"
 	ParameterDenied   Reason = "parameter_denied"
 	RiskDenied        Reason = "risk_denied"
 )
@@ -106,7 +105,7 @@ func ResetDynamicRolePermissionsForTest() {
 }
 
 // Evaluate applies the fixed allowlist, role-to-tool mapping, input schema,
-// environment, parameter, and risk controls. It resolves requestedTool by
+// parameter, and risk controls. It resolves requestedTool by
 // name again so caller-supplied metadata can never alter the decision.
 func Evaluate(user identity.CurrentUser, requestedTool tools.Tool, input map[string]any) Decision {
 	tool, ok := tools.Lookup(requestedTool.Name)
@@ -122,15 +121,10 @@ func Evaluate(user identity.CurrentUser, requestedTool tools.Tool, input map[str
 		return deny(InvalidInput)
 	}
 
-	// environment 可能缺失或类型错误（LLM 生成），安全处理
-	environment, _ := input["environment"].(string)
-	if !contains(user.AllowedEnvironments, environment) {
-		return deny(EnvironmentDenied)
-	}
-	if err := validateParameters(tool, environment, input); err != nil {
+	if err := validateParameters(tool, input); err != nil {
 		return deny(ParameterDenied)
 	}
-	if !riskAllowed(user.Roles, environment, tool.Risk) {
+	if !riskAllowed(user.Roles, tool.Risk) {
 		return deny(RiskDenied)
 	}
 
@@ -142,8 +136,8 @@ func Evaluate(user identity.CurrentUser, requestedTool tools.Tool, input map[str
 	}
 }
 
-// productionParameterFloors are the minimum values a parameter may take in
-// production, keyed by parameter name. They are matched on the parameter, not
+// parameterFloors are the minimum values a parameter may take on any route,
+// keyed by parameter name. They are matched on the parameter, not
 // on the tool: the same operation is reachable both through a built-in static
 // tool and through an equivalent published capability, and a tool-name check
 // silently stops applying the moment the planner routes to the capability
@@ -153,48 +147,16 @@ func Evaluate(user identity.CurrentUser, requestedTool tools.Tool, input map[str
 //
 // Upper bounds and non-production limits stay in each tool's input schema
 // (tools.ValidateInput for static tools, input_schema min/max for
-// capabilities); this table is only the production floor that must not depend
+// capabilities); this table is only the safety floor that must not depend
 // on which implementation happens to serve the request. Only writes are
 // checked — the same name on a read is a filter ("topics under N hours"), not
 // a value being set.
-var productionParameterFloors = map[string]int64{
+var parameterFloors = map[string]int64{
 	"retention_hours": 24,
 }
 
 func deny(reason Reason) Decision {
 	return Decision{Reason: reason}
-}
-
-// DefaultEnvironmentValue returns env when it is non-empty and allowed for the
-// user; otherwise it returns the user's first allowed environment (or env
-// unchanged when the user has no allowed environments). It defaults LLM-generated
-// environment values on read paths so a stray variant cannot cause a spurious
-// EnvironmentDenied. Writes never pass through here — their environment is part
-// of a human-confirmed plan and stays strict.
-func DefaultEnvironmentValue(user identity.CurrentUser, env string) string {
-	if env != "" {
-		for _, allowed := range user.AllowedEnvironments {
-			if env == allowed {
-				return env
-			}
-		}
-	}
-	if len(user.AllowedEnvironments) == 0 {
-		return env
-	}
-	return user.AllowedEnvironments[0]
-}
-
-// DefaultEnvironment returns a copy of input with environment defaulted via
-// DefaultEnvironmentValue. The original map is never mutated.
-func DefaultEnvironment(user identity.CurrentUser, input map[string]any) map[string]any {
-	copied := make(map[string]any, len(input)+1)
-	for key, value := range input {
-		copied[key] = value
-	}
-	env, _ := input["environment"].(string)
-	copied["environment"] = DefaultEnvironmentValue(user, env)
-	return copied
 }
 
 func hasToolPermission(roles []string, toolName string) bool {
@@ -211,42 +173,42 @@ func hasToolPermission(roles []string, toolName string) bool {
 	return false
 }
 
-func validateParameters(tool tools.Tool, environment string, input map[string]any) error {
-	if environment != "prod" || tool.Operation != tools.Write {
+func validateParameters(tool tools.Tool, input map[string]any) error {
+	if tool.Operation != tools.Write {
 		return nil
 	}
-	for name, floor := range productionParameterFloors {
+	for name, floor := range parameterFloors {
 		value, present := input[name]
 		if !present {
 			continue
 		}
 		number, ok := integer(value)
 		if !ok || number < floor {
-			return fmt.Errorf("production %s must be at least %d", name, floor)
+			return fmt.Errorf("%s must be at least %d", name, floor)
 		}
 	}
 	return nil
 }
 
-func riskAllowed(roles []string, environment string, requested tools.RiskLevel) bool {
+func riskAllowed(roles []string, requested tools.RiskLevel) bool {
 	requestedRank := riskRank(requested)
 	for _, role := range roles {
-		if riskRank(maximumRisk(role, environment)) >= requestedRank {
+		if riskRank(maximumRisk(role)) >= requestedRank {
 			return true
 		}
 	}
 	return false
 }
 
-func maximumRisk(role, environment string) tools.RiskLevel {
+// maximumRisk 返回角色在任何请求上可承担的最大风险。环境概念移除后，
+// 所有请求都视为生产操作（原 prod 分支语义），operator 保持保守：生产
+// 写入（medium 及以上）仅 admin 可发起。
+func maximumRisk(role string) tools.RiskLevel {
 	switch role {
 	case "admin":
 		return tools.High
 	case "operator":
-		if environment == "prod" {
-			return tools.Low
-		}
-		return tools.Medium
+		return tools.Low
 	case "viewer":
 		return tools.Low
 	default:
@@ -265,15 +227,6 @@ func riskRank(risk tools.RiskLevel) int {
 	default:
 		return 0
 	}
-}
-
-func contains(values []string, wanted string) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
 }
 
 func integer(value any) (int64, bool) {

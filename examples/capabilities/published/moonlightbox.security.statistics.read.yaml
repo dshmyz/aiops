@@ -1,61 +1,50 @@
 ai:
-  description: 查询 Moonlight Box 安全漏洞扫描统计，包括各严重级别（critical/high/medium/low）的漏洞计数和总扫描次数。
-  examples:
-  - 查看制品仓库安全漏洞统计
-  - Moonlight Box 有多少高危漏洞
-  - 检查安全扫描结果
+ description: 查询 Moonlight Box 安全漏洞扫描统计，包括各严重级别（critical/high/medium/low）的漏洞计数和总扫描次数。
+ examples:
+ - 查看制品仓库安全漏洞统计
+ - Moonlight Box 有多少高危漏洞
+ - 检查安全扫描结果
 auth:
-  environment_scoped: true
-  roles:
-  - viewer
-  - operator
-  - admin
+ roles:
+ - viewer
+ - operator
+ - admin
 backend:
-  adapter: http
-  auth_config:
-    token: ${COPILOT_MOONLIGHTBOX_TOKEN}
-    type: bearer
-  base_url: http://localhost:9081
-  method: GET
-  path: /api/v1/security/statistics
-  timeout_ms: 5000
+ adapter: http
+ auth_config:
+ token: ${COPILOT_MOONLIGHTBOX_TOKEN}
+ type: bearer
+ base_url: http://localhost:9081
+ method: GET
+ path: /api/v1/security/statistics
+ timeout_ms: 5000
 domain: moonlightbox
 governance:
-  precheck_tools: []
-  requires_action_plan: false
-  requires_approval: false
-  rollback:
-    source: ''
-    strategy: ''
+ precheck_tools: []
+ requires_action_plan: false
+ requires_approval: false
+ rollback:
+ source: ''
+ strategy: ''
 input_schema:
-  environment:
-    description: 部署环境，必须是 prod、staging 或 dev 之一
-    enum:
-    - prod
-    - staging
-    - dev
-    examples:
-    - prod
-    required: true
-    type: string
-  name:
-    description: 资源名称（可选）
-    required: false
-    type: string
+ name:
+ description: 资源名称（可选）
+ required: false
+ type: string
 name: moonlightbox.security.statistics.read
 operation: read
 output:
-  fields:
-    critical: $.data.critical
-    high: $.data.high
-    low: $.data.low
-    medium: $.data.medium
-    total_scans: $.data.total_scans
-    total_vulns: $.data.total_vulns
-  kind: observation
-  severity_path: $.data
-  summary_template: 安全漏洞扫描统计：高危 {high} 个、中危 {medium} 个、低危 {low} 个，共 {total_vulns}
-    个漏洞
+ fields:
+ critical: $.data.critical
+ high: $.data.high
+ low: $.data.low
+ medium: $.data.medium
+ total_scans: $.data.total_scans
+ total_vulns: $.data.total_vulns
+ kind: observation
+ severity_path: $.data
+ summary_template: 安全漏洞扫描统计：高危 {high} 个、中危 {medium} 个、低危 {low} 个，共 {total_vulns}
+ 个漏洞
 resource_type: vulnerability
 risk: low
 schema_version: 1

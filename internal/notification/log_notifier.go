@@ -21,7 +21,6 @@ func (n *LogNotifier) NotifyConfirmation(ctx context.Context, req ConfirmationRe
 	observability.LoggerFromContext(ctx).Info("confirmation-required",
 		zap.String("plan_id", req.PlanID),
 		zap.String("tool", req.ToolName),
-		zap.String("environment", req.Environment),
 		zap.String("risk", req.Risk),
 		zap.String("subject", req.Subject),
 		zap.String("expires_at", req.ExpiresAt),

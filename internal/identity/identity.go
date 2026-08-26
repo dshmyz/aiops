@@ -11,17 +11,15 @@ import (
 // TrustedClaims are claims obtained only after JWT verification or from a
 // trusted gateway header. Callers must not populate them from request bodies.
 type TrustedClaims struct {
-	Subject             string
-	Roles               []string
-	AllowedEnvironments []string
+	Subject string
+	Roles   []string
 }
 
 // CurrentUser is the immutable identity projection used for one request.
 type CurrentUser struct {
-	Subject             string
-	Roles               []string
-	AllowedEnvironments []string
-	RequestID           string
+	Subject   string
+	Roles     []string
+	RequestID string
 }
 
 // Project validates and copies trusted identity claims. It never accepts or
@@ -38,16 +36,11 @@ func Project(claims TrustedClaims, requestID string) (CurrentUser, error) {
 	if err != nil {
 		return CurrentUser{}, err
 	}
-	environments, err := uniqueNonEmpty(claims.AllowedEnvironments, "allowed environments")
-	if err != nil {
-		return CurrentUser{}, err
-	}
 
 	return CurrentUser{
-		Subject:             strings.TrimSpace(claims.Subject),
-		Roles:               roles,
-		AllowedEnvironments: environments,
-		RequestID:           strings.TrimSpace(requestID),
+		Subject:   strings.TrimSpace(claims.Subject),
+		Roles:     roles,
+		RequestID: strings.TrimSpace(requestID),
 	}, nil
 }
 

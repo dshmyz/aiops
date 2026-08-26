@@ -174,7 +174,6 @@ const {
   assistantLatestResponse,
   assistantLatestStatus,
   assistantEntryLoading,
-  assistantEnvironment,
   assistantPageContext,
   setAssistantPageContext,
   assistantEntryError,
@@ -989,20 +988,6 @@ onUnmounted(() => {
                   aria-label="清除页面上下文"
                   @click="clearAssistantPageContext"
                 >×</button>
-              </div>
-              <div class="assistant-env-field">
-                <span class="assistant-env-label">目标环境</span>
-                <select
-                  data-test="assistant-env-selector"
-                  v-model="assistantEnvironment"
-                  class="env-selector"
-                  aria-label="目标环境"
-                >
-                  <option value="prod">prod</option>
-                  <option value="staging">staging</option>
-                  <option value="dev">dev</option>
-                  <option value="none">不指定</option>
-                </select>
               </div>
               <div class="assistant-input-actions">
                 <span data-test="assistant-input-hint" class="input-hint">

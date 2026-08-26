@@ -28,7 +28,6 @@ function capability(summary: Pick<Capability, 'name' | 'domain' | 'resource_type
     },
     auth: {
       roles: ['viewer'],
-      environment_scoped: true,
     },
     ai: {
       description: '',

@@ -7,65 +7,60 @@ operation: write
 risk: medium
 
 backend:
-    adapter: http
-    method: PATCH
-    path: /apis/apps/v1/namespaces/{namespace}/deployments/{deployment_name}/scale
-    timeout_ms: 5000
-    base_url: https://kubernetes.default.svc
+ adapter: http
+ method: PATCH
+ path: /apis/apps/v1/namespaces/{namespace}/deployments/{deployment_name}/scale
+ timeout_ms: 5000
+ base_url: https://kubernetes.default.svc
 
 input_schema:
-    namespace:
-        type: string
-        required: true
-    deployment_name:
-        type: string
-        required: true
-    replicas:
-        type: integer
-        required: true
-        min: 0
-        max: 100
-    environment:
-        type: string
-        required: true
-
+ namespace:
+ type: string
+ required: true
+ deployment_name:
+ type: string
+ required: true
+ replicas:
+ type: integer
+ required: true
+ min: 0
+ max: 100
 output:
-    kind: action
-    severity_path: $.status
-    summary_template: "Deployment {deployment_name} scaled to {replicas} replicas"
-    fields:
-        current_replicas: $.spec.replicas
-        available_replicas: $.status.availableReplicas
-        ready_replicas: $.status.readyReplicas
+ kind: action
+ severity_path: $.status
+ summary_template: "Deployment {deployment_name} scaled to {replicas} replicas"
+ fields:
+ current_replicas: $.spec.replicas
+ available_replicas: $.status.availableReplicas
+ ready_replicas: $.status.readyReplicas
 
 governance:
-    requires_action_plan: true
-    requires_approval: true
-    precheck_tools:
-        - k8s.deployment.status.read
-    rollback:
-        strategy: revert_scale
-        source: "Scale back to previous replica count if new pods fail readiness"
+ requires_action_plan: true
+ requires_approval: true
+ precheck_tools:
+ - k8s.deployment.status.read
+ rollback:
+ strategy: revert_scale
+ source: "Scale back to previous replica count if new pods fail readiness"
 
 auth:
-    roles:
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - operator
+ - admin
 
 ai:
-    description: |
-        Scale a Kubernetes Deployment to the specified number of replicas.
-        Use for handling traffic spikes, maintenance windows, or cost optimization.
+ description: |
+ Scale a Kubernetes Deployment to the specified number of replicas.
+ Use for handling traffic spikes, maintenance windows, or cost optimization.
 
-        Common scenarios: scale up during peak hours, scale down to 0 for maintenance
-        (careful with stateful apps), scale to 1 for troubleshooting a single instance.
+ Common scenarios: scale up during peak hours, scale down to 0 for maintenance
+ (careful with stateful apps), scale to 1 for troubleshooting a single instance.
 
-        Caution: scaling to 0 causes a complete service outage; ensure an HPA is
-        disabled or it will fight manual scaling; check resource quotas before scaling
-        up; monitor pod readiness after scaling.
+ Caution: scaling to 0 causes a complete service outage; ensure an HPA is
+ disabled or it will fight manual scaling; check resource quotas before scaling
+ up; monitor pod readiness after scaling.
 
-    examples:
-        - 把 prod 环境 default namespace 的 api-server deployment 扩容到 5 个副本
-        - scale deployment nginx in namespace web to 3 replicas, environment staging
-        - 将 dev 环境 kube-system 的 coredns 缩容到 1 个副本
+ examples:
+ - 把 default namespace 的 api-server deployment 扩容到 5 个副本
+ - scale deployment nginx in namespace web to 3 replicas
+ - 将 kube-system 的 coredns 缩容到 1 个副本

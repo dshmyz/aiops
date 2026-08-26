@@ -6,43 +6,39 @@ resource_type: bucket
 operation: read
 risk: low
 backend:
-    adapter: http
-    method: GET
-    path: /api/minio/{cluster}/buckets/{bucket}/capacity
-    timeout_ms: 3000
-    base_url: http://127.0.0.1:19090
+ adapter: http
+ method: GET
+ path: /api/minio/{cluster}/buckets/{bucket}/capacity
+ timeout_ms: 3000
+ base_url: http://127.0.0.1:19090
 input_schema:
-    bucket:
-        type: string
-        required: true
-    cluster:
-        type: string
-        required: true
-    environment:
-        type: string
-        required: true
+ bucket:
+ type: string
+ required: true
+ cluster:
+ type: string
+ required: true
 output:
-    kind: observation
-    severity_path: $.status
-    summary_template: Bucket {bucket} usage is {usage_pct}%
-    fields:
-        limit_gb: $.data.limit_gb
-        usage_pct: $.data.usage_pct
-        used_gb: $.data.used_gb
+ kind: observation
+ severity_path: $.status
+ summary_template: Bucket {bucket} usage is {usage_pct}%
+ fields:
+ limit_gb: $.data.limit_gb
+ usage_pct: $.data.usage_pct
+ used_gb: $.data.used_gb
 governance:
-    requires_action_plan: false
-    requires_approval: false
-    precheck_tools: []
-    rollback:
-        strategy: ""
-        source: ""
+ requires_action_plan: false
+ requires_approval: false
+ precheck_tools: []
+ rollback:
+ strategy: ""
+ source: ""
 auth:
-    roles:
-        - viewer
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - viewer
+ - operator
+ - admin
 ai:
-    description: Read MinIO bucket capacity from the demo middleware backend.
-    examples:
-        - 查询 prod m1 archive bucket 的 minio 容量
+ description: Read MinIO bucket capacity from the demo middleware backend.
+ examples:
+ - 查询 m1 archive bucket 的 minio 容量

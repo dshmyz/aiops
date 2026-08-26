@@ -133,9 +133,15 @@ type alertWebhookService struct {
 	audit          *audit.Service
 	llmDiagnoser   *alert.LLMDiagnoser   // LLM 智能研判（最高优先级）
 	diagnoser      *alert.Diagnoser
-	chainDiagnoser *alert.ChainDiagnoser
-	actions        []alert.AlertAction
+	chainDiagnoser chainExecutor
+	actionMatcher  alert.ActionMatcher
 	now            func() time.Time
+}
+
+// chainExecutor 是链式研判的执行接口。*alert.ChainDiagnoser 满足它；测试可用
+// 简单 stub 验证 webhook→规则→执行链路，而不必构造完整诊断依赖。
+type chainExecutor interface {
+	ExecuteChain(ctx context.Context, alert alert.Alert, action alert.AlertAction)
 }
 
 // NewAlertWebhookService 创建一个带审计的组合 webhook 服务。
@@ -150,7 +156,8 @@ func (s *alertWebhookService) WithDiagnoser(d *alert.Diagnoser) *alertWebhookSer
 }
 
 // WithChainDiagnoser 配置多步链式研判（告警落地后异步执行序列）。
-func (s *alertWebhookService) WithChainDiagnoser(d *alert.ChainDiagnoser) *alertWebhookService {
+// 参数用 chainExecutor 接口而非具体类型，便于测试注入 stub。
+func (s *alertWebhookService) WithChainDiagnoser(d chainExecutor) *alertWebhookService {
 	s.chainDiagnoser = d
 	return s
 }
@@ -162,9 +169,12 @@ func (s *alertWebhookService) WithLLMDiagnoser(d *alert.LLMDiagnoser) *alertWebh
 	return s
 }
 
-// WithActions 配置告警→动作的编排规则。
-func (s *alertWebhookService) WithActions(actions []alert.AlertAction) *alertWebhookService {
-	s.actions = actions
+// WithActions 配置告警→动作的编排规则。传入的规则既可以是管理后台的 DB 注册表
+// （*alert.AlertActionRegistry 实现了 ActionMatcher），也可以是 env 加载的静态
+// 规则（用 alert.NewStaticActionMatcher 包装）。静态规则作为回退：仅在未注入
+// 注册表时使用，保证旧部署升级后行为不变。
+func (s *alertWebhookService) WithActions(m alert.ActionMatcher) *alertWebhookService {
+	s.actionMatcher = m
 	return s
 }
 
@@ -189,9 +199,9 @@ func (s *alertWebhookService) Ingest(ctx context.Context, p alert.WebhookPayload
 	a := result.Alert
 	if s.llmDiagnoser != nil {
 		go s.llmDiagnoser.Diagnose(context.Background(), a)
-	} else if s.chainDiagnoser != nil && len(s.actions) > 0 {
+	} else if s.chainDiagnoser != nil && s.actionMatcher != nil {
 		// 按匹配的规则逐条执行完整序列
-		matched := alert.MatchActions(a, s.actions)
+		matched := s.actionMatcher.Match(a)
 		for _, action := range matched {
 			go s.chainDiagnoser.ExecuteChain(context.Background(), a, action)
 		}

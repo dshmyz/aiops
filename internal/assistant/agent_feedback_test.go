@@ -102,7 +102,6 @@ func TestFeedbackTextPlainReadHasNoEvidenceBlock(t *testing.T) {
 		Tool:    "minio.bucket.health.read",
 		Summary: "minio 资源 bucket 状态为 ok",
 		Output: map[string]any{
-			"environment": "prod",
 			"name":        "bucket",
 		},
 	}
@@ -121,10 +120,9 @@ func TestFeedbackTextPlainReadHasNoEvidenceBlock(t *testing.T) {
 func TestDiagnosticStepSummaryIsDataBearing(t *testing.T) {
 	t.Parallel()
 	pkg := diagnostics.Package{
-		Environment: "prod",
 		Domains:     []string{"glusterfs"},
 		Resources: []diagnostics.ResourceRef{
-			{Domain: "glusterfs", Type: "volume", Name: "data", Environment: "prod"},
+			{Domain: "glusterfs", Type: "volume", Name: "data"},
 		},
 		Observations: []diagnostics.Observation{
 			{Kind: "glusterfs.volume.health", Severity: diagnostics.SeverityWarning, Summary: "容量使用 82%"},
@@ -156,12 +154,11 @@ func TestDiagnosticStepSummaryIsDataBearing(t *testing.T) {
 func TestDiagnosticStepSummaryMultiDomainAggregatesAllDomains(t *testing.T) {
 	t.Parallel()
 	pkg := diagnostics.Package{
-		Environment: "prod",
 		Domains:     []string{"glusterfs", "minio", "kafka"},
 		Resources: []diagnostics.ResourceRef{
-			{Domain: "glusterfs", Type: "volume", Name: "glusterfs-volume", Environment: "prod"},
-			{Domain: "minio", Type: "bucket", Name: "minio-bucket", Environment: "prod"},
-			{Domain: "kafka", Type: "consumer_group", Name: "kafka-consumer_group", Environment: "prod"},
+			{Domain: "glusterfs", Type: "volume", Name: "glusterfs-volume"},
+			{Domain: "minio", Type: "bucket", Name: "minio-bucket"},
+			{Domain: "kafka", Type: "consumer_group", Name: "kafka-consumer_group"},
 		},
 		Observations: []diagnostics.Observation{
 			{Kind: "glusterfs.volume.health", Severity: diagnostics.SeverityInfo, Summary: "glusterfs 资源 glusterfs-volume 状态为 可用"},

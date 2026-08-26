@@ -144,8 +144,8 @@ func TestOpenWithDriverDefaultsToMySQLRequirement(t *testing.T) {
 func TestMemoryStoreListPlansFiltersByStatus(t *testing.T) {
 	ctx := context.Background()
 	repository := NewMemoryActionPlanStore()
-	pending := PlanRecord{ID: "pending-plan", ToolName: "topic.retention.set", InputJSON: []byte(`{"environment":"prod"}`), RiskLevel: "medium", Status: PlanPendingConfirmation, Version: 1, ExpiresAt: time.Now().Add(time.Minute)}
-	confirmed := PlanRecord{ID: "confirmed-plan", ToolName: "topic.retention.set", InputJSON: []byte(`{"environment":"prod"}`), RiskLevel: "medium", Status: PlanConfirmed, Version: 2, ExpiresAt: time.Now().Add(time.Minute)}
+	pending := PlanRecord{ID: "pending-plan", ToolName: "topic.retention.set", InputJSON: []byte(`{"topic":"orders","retention_hours":72}`), RiskLevel: "medium", Status: PlanPendingConfirmation, Version: 1, ExpiresAt: time.Now().Add(time.Minute)}
+	confirmed := PlanRecord{ID: "confirmed-plan", ToolName: "topic.retention.set", InputJSON: []byte(`{"topic":"orders","retention_hours":72}`), RiskLevel: "medium", Status: PlanConfirmed, Version: 2, ExpiresAt: time.Now().Add(time.Minute)}
 	if err := repository.CreatePlan(ctx, pending, AuditEvent{ID: "audit-pending", PlanID: pending.ID, Action: "plan_created", CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("create pending plan: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestMemoryStoreListPlansFiltersByStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get stored plan: %v", err)
 	}
-	if string(stored.InputJSON) != `{"environment":"prod"}` {
+	if string(stored.InputJSON) != `{"topic":"orders","retention_hours":72}` {
 		t.Fatalf("stored input mutated to %q", stored.InputJSON)
 	}
 }
@@ -348,8 +348,8 @@ func TestSQLStoreListAuditFiltersByTool(t *testing.T) {
 	repository := NewSQLActionPlanStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
-	planX := PlanRecord{ID: "plan-x", RequestID: "req-1", CreatedBy: "admin", ToolName: "minio.bucket.capacity.read", InputJSON: []byte(`{"environment":"prod"}`), InputHash: "hash-x", RiskLevel: "low", Status: PlanConfirmed, Version: 1, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now}
-	planY := PlanRecord{ID: "plan-y", RequestID: "req-2", CreatedBy: "operator", ToolName: "kafka.topic.retention.set", InputJSON: []byte(`{"environment":"prod"}`), InputHash: "hash-y", RiskLevel: "medium", Status: PlanConfirmed, Version: 1, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now}
+	planX := PlanRecord{ID: "plan-x", RequestID: "req-1", CreatedBy: "admin", ToolName: "minio.bucket.capacity.read", InputJSON: []byte(`{"bucket":"archive"}`), InputHash: "hash-x", RiskLevel: "low", Status: PlanConfirmed, Version: 1, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now}
+	planY := PlanRecord{ID: "plan-y", RequestID: "req-2", CreatedBy: "operator", ToolName: "kafka.topic.retention.set", InputJSON: []byte(`{"topic":"orders","retention_hours":72}`), InputHash: "hash-y", RiskLevel: "medium", Status: PlanConfirmed, Version: 1, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now}
 	if err := repository.CreatePlan(ctx, planX, AuditEvent{ID: "sql-evt-1", PlanID: planX.ID, RequestID: planX.RequestID, Subject: planX.CreatedBy, ToolName: planX.ToolName, Action: "plan_created", Decision: "permitted", Metadata: map[string]any{"source": "test"}, CreatedAt: now}); err != nil {
 		t.Fatalf("create first plan: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestSQLStorePersistTraceIDRoundTrips(t *testing.T) {
 		RequestID: "req-trace",
 		CreatedBy: "admin",
 		ToolName:  "kafka.topic.retention.set",
-		InputJSON: []byte(`{"environment":"prod"}`),
+		InputJSON: []byte(`{"topic":"orders","retention_hours":72}`),
 		InputHash: "hash-trace",
 		RiskLevel: "medium",
 		Status:    PlanConfirmed,
@@ -481,7 +481,7 @@ func TestSQLStoreListAuditPaginatesByKeysetCursor(t *testing.T) {
 			RequestID: "req-" + id,
 			CreatedBy: "admin",
 			ToolName:  "kafka.topic.retention.set",
-			InputJSON: []byte(`{"environment":"prod"}`),
+			InputJSON: []byte(`{"topic":"orders","retention_hours":72}`),
 			InputHash: "hash-" + id,
 			RiskLevel: "medium",
 			Status:    PlanConfirmed,
@@ -540,8 +540,8 @@ func TestSQLStoreListPlansFiltersByStatus(t *testing.T) {
 	repository := NewSQLActionPlanStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
-	pending := PlanRecord{ID: "pending-sql-plan", RequestID: "request-1", CreatedBy: "admin-1", ToolName: "topic.retention.set", InputJSON: []byte(`{"environment":"prod"}`), InputHash: "hash-1", RiskLevel: "medium", Status: PlanPendingConfirmation, Version: 1, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now}
-	confirmed := PlanRecord{ID: "confirmed-sql-plan", RequestID: "request-2", CreatedBy: "admin-1", ToolName: "topic.retention.set", InputJSON: []byte(`{"environment":"prod"}`), InputHash: "hash-2", RiskLevel: "medium", Status: PlanConfirmed, Version: 2, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now}
+	pending := PlanRecord{ID: "pending-sql-plan", RequestID: "request-1", CreatedBy: "admin-1", ToolName: "topic.retention.set", InputJSON: []byte(`{"topic":"orders","retention_hours":72}`), InputHash: "hash-1", RiskLevel: "medium", Status: PlanPendingConfirmation, Version: 1, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now}
+	confirmed := PlanRecord{ID: "confirmed-sql-plan", RequestID: "request-2", CreatedBy: "admin-1", ToolName: "topic.retention.set", InputJSON: []byte(`{"topic":"orders","retention_hours":72}`), InputHash: "hash-2", RiskLevel: "medium", Status: PlanConfirmed, Version: 2, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now}
 	if err := repository.CreatePlan(ctx, pending, AuditEvent{ID: "audit-sql-pending", PlanID: pending.ID, RequestID: pending.RequestID, Subject: pending.CreatedBy, ToolName: pending.ToolName, Action: "plan_created", Decision: "permitted", CreatedAt: now}); err != nil {
 		t.Fatalf("create pending plan: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestSQLiteStoreReusesExecutionAndKeepsAuditForeignKeyValid(t *testing.T) {
 		RequestID: "req-reuse",
 		CreatedBy: "operator-1",
 		ToolName:  "middleware.kafka.topic_retention.set",
-		InputJSON: []byte(`{"environment":"prod"}`),
+		InputJSON: []byte(`{"topic":"orders","retention_hours":72}`),
 		InputHash: "input-hash",
 		RiskLevel: "L2",
 		Status:    PlanConfirmed,

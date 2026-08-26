@@ -84,7 +84,7 @@ func TestExecuteFromIntentReadStreamsFormatDelta(t *testing.T) {
 	var deltas []string
 	resp, err := s.executeFromIntent(context.Background(), adminUser(),
 		"查一下 demo volume 健康",
-		Intent{ToolName: "demo.health.read", Input: map[string]any{"environment": "prod", "name": "data"}},
+		Intent{ToolName: "demo.health.read", Input: map[string]any{"name": "data"}},
 		nil,
 		func(d string) { deltas = append(deltas, d) })
 	if err != nil {

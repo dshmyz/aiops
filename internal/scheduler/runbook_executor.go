@@ -82,8 +82,7 @@ func (e *RunbookAutoExecutor) Execute(ctx context.Context, task store.ScheduledT
 		return nil, fmt.Errorf("runbook %q risk_level is %q, want low (autonomous scheduled runbook must be low risk)", task.RunbookSlug, rb.RiskLevel)
 	}
 
-	// 定时任务由创建它的 admin 预先授权；调度器以其身份执行，但环境限定为
-	// 任务输入所声明的 environment（不放开「全环境」），写操作仍过 policy + 准入门。
+	// 定时任务由创建它的 admin 预先授权；调度器以其身份执行，写操作仍过 policy + 准入门。
 	user := scheduledAdminIdentity(task)
 
 	// 逐工具执行：只执行写步骤，只读步骤跳过。
@@ -161,17 +160,11 @@ func (e *RunbookAutoExecutor) Execute(ctx context.Context, task store.ScheduledT
 }
 
 // scheduledAdminIdentity 构造定时 runbook 执行所用的身份：Subject 用创建任务的
-// admin，角色为 admin（其创建时已具备该 runbook 的授权），环境限定为任务输入所
-// 声明的 environment（单个，避免「全环境」通配）。
+// admin，角色为 admin（其创建时已具备该 runbook 的授权）。
 func scheduledAdminIdentity(task store.ScheduledTask) identity.CurrentUser {
-	env := ""
-	if raw, ok := task.Input["environment"].(string); ok {
-		env = raw
-	}
 	return identity.CurrentUser{
-		Subject:             task.Subject,
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{env},
-		RequestID:           "scheduler:" + task.ID,
+		Subject:   task.Subject,
+		Roles:     []string{"admin"},
+		RequestID: "scheduler:" + task.ID,
 	}
 }

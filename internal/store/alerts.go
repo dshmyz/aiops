@@ -20,7 +20,6 @@ type Alert struct {
 	Description  string            `json:"description"`
 	Severity     string            `json:"severity"`
 	Status       string            `json:"status"`
-	Environment  string            `json:"environment"`
 	Domain       string            `json:"domain,omitempty"`
 	ResourceType string            `json:"resource_type,omitempty"`
 	ResourceName string            `json:"resource_name,omitempty"`
@@ -34,11 +33,10 @@ type Alert struct {
 
 // AlertFilter 是告警查询条件。零值字段不参与过滤。
 type AlertFilter struct {
-	Status      string
-	Severity    string
-	Environment string
-	Domain      string
-	Limit       int
+	Status   string
+	Severity string
+	Domain   string
+	Limit    int
 }
 
 // defaultAlertLimit 是 AlertFilter.Limit 为 0 时的默认查询上限。
@@ -54,7 +52,7 @@ type AlertStore interface {
 	Get(ctx context.Context, id string) (Alert, error)
 	UpdateDescription(ctx context.Context, id, description string) error
 	Query(ctx context.Context, f AlertFilter) ([]Alert, error)
-	ListActive(ctx context.Context, environment string, limit int) ([]Alert, error)
+	ListActive(ctx context.Context, limit int) ([]Alert, error)
 	Resolve(ctx context.Context, externalID, source string) (Alert, error)
 }
 
@@ -162,9 +160,6 @@ func (s *MemoryAlertStore) Query(ctx context.Context, f AlertFilter) ([]Alert, e
 		if f.Severity != "" && a.Severity != f.Severity {
 			continue
 		}
-		if f.Environment != "" && a.Environment != f.Environment {
-			continue
-		}
 		if f.Domain != "" && a.Domain != f.Domain {
 			continue
 		}
@@ -176,7 +171,7 @@ func (s *MemoryAlertStore) Query(ctx context.Context, f AlertFilter) ([]Alert, e
 	return out, nil
 }
 
-func (s *MemoryAlertStore) ListActive(ctx context.Context, environment string, limit int) ([]Alert, error) {
+func (s *MemoryAlertStore) ListActive(ctx context.Context, limit int) ([]Alert, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if limit <= 0 {
@@ -190,9 +185,6 @@ func (s *MemoryAlertStore) ListActive(ctx context.Context, environment string, l
 	for _, id := range ids {
 		a := s.byID[id]
 		if a.Status != "firing" {
-			continue
-		}
-		if environment != "" && a.Environment != environment {
 			continue
 		}
 		out = append(out, cloneStoreAlert(a))

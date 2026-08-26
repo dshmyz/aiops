@@ -31,7 +31,6 @@ type Alert struct {
 	Description  string            `json:"description"`
 	Severity     Severity          `json:"severity"`
 	Status       Status            `json:"status"`
-	Environment  string            `json:"environment"`
 	Domain       string            `json:"domain,omitempty"`
 	ResourceType string            `json:"resource_type,omitempty"`
 	ResourceName string            `json:"resource_name,omitempty"`

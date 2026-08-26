@@ -15,7 +15,7 @@ func TestHTTPForbiddenRecordsAudit(t *testing.T) {
 	router, repository := testRouter(t, &readRunner{})
 
 	// viewer 访问 admin-only 的 /v1/executions → 403 + audit
-	req := signedRequest(t, "/v1/executions", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/executions", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -38,28 +38,4 @@ func TestHTTPForbiddenRecordsAudit(t *testing.T) {
 	if !found {
 		t.Errorf("no http_forbidden audit event for viewer-1; events = %+v", events)
 	}
-}
-
-// TestReadToolEnvironmentDeniedAudited verifies the read-tool env-denial is
-// already audited at the service layer (readonly_tool_rejected with
-// environment_denied), so the HTTP layer does not double-record it.
-func TestReadToolEnvironmentDeniedAudited(t *testing.T) {
-	t.Parallel()
-	router, repository := testRouter(t, &readRunner{result: map[string]any{"status": "ok"}})
-
-	// viewer 只能访问 prod，但请求 staging 数据 → 403（服务层审计）
-	req := signedRequest(t, "/v1/tools/cluster.status.read/read", `{"environment":"staging"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
-	res := httptest.NewRecorder()
-	router.ServeHTTP(res, req)
-
-	if res.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", res.Code)
-	}
-	events := repository.AuditEvents()
-	for _, ev := range events {
-		if ev.Action == audit.ActionReadonlyToolRejected && ev.Decision == audit.DecisionEnvironmentDenied {
-			return // 服务层已审计
-		}
-	}
-	t.Errorf("no readonly_tool_rejected/environment_denied audit; events = %+v", events)
 }

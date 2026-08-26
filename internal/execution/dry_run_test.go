@@ -20,13 +20,12 @@ func TestDryRunTemplateResourceKey(t *testing.T) {
 	ensureMiddlewareWriteTool(t)
 	svc := execution.NewDryRunService()
 	svc.Register("topic.retention.set", execution.TemplateDryRunHandler(execution.DryRunTemplate{
-		Summary:      "将把 {environment} 环境的 topic {topic} 的消息保留时间设置为 {retention_hours} 小时。",
+		Summary:      "将把 topic {topic} 的消息保留时间设置为 {retention_hours} 小时。",
 		ResourceType: "topic",
 		ResourceKey:  "topic",
 	}))
 
 	result, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{
-		"environment":     "prod",
 		"topic":           "orders",
 		"retention_hours": 72,
 	})
@@ -53,7 +52,7 @@ func TestTemplateDryRunHandler(t *testing.T) {
 	svc := execution.NewDryRunService()
 	// 模拟 topic.retention.set 能力 YAML 的 dry_run 段转译后的模板
 	svc.Register("topic.retention.set", execution.TemplateDryRunHandler(execution.DryRunTemplate{
-		Summary: "将把 {environment} 环境的 topic {topic} 的消息保留时间设置为 {retention_hours} 小时。",
+		Summary: "将把 topic {topic} 的消息保留时间设置为 {retention_hours} 小时。",
 		Commands: []string{
 			"kafka-configs --bootstrap-server <broker> --entity-type topics --entity-name {topic} --alter --add-config retention.hours={retention_hours}",
 		},
@@ -65,7 +64,6 @@ func TestTemplateDryRunHandler(t *testing.T) {
 	}))
 
 	result, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{
-		"environment":     "prod",
 		"topic":           "orders",
 		"retention_hours": 72,
 	})
@@ -101,7 +99,7 @@ func TestTemplateDryRunHandler(t *testing.T) {
 func TestDryRunUnsupportedReadTool(t *testing.T) {
 	t.Parallel()
 	svc := execution.NewDryRunService()
-	_, err := svc.DryRun(context.Background(), tools.ClusterStatusRead, map[string]any{"environment": "prod"})
+	_, err := svc.DryRun(context.Background(), tools.ClusterStatusRead, map[string]any{})
 	if !errors.Is(err, execution.ErrDryRunNotSupported) {
 		t.Fatalf("err = %v, want ErrDryRunNotSupported", err)
 	}
@@ -143,7 +141,6 @@ func TestDryRunSuggestsStrategyForWriteTool(t *testing.T) {
 	}))
 
 	result, err := svc.DryRun(context.Background(), "topic.retention.set", map[string]any{
-		"environment":     "prod",
 		"topic":           "orders",
 		"retention_hours": 72,
 	})

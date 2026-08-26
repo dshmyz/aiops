@@ -19,7 +19,7 @@ func sampleScheduledTask(now time.Time) ScheduledTask {
 		Name:           "minio 容量巡检",
 		Subject:        "alice",
 		CapabilityName: "minio.bucket.capacity.read",
-		Input:          map[string]any{"environment": "prod", "bucket": "archive"},
+		Input:          map[string]any{"bucket": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",

@@ -23,7 +23,7 @@ const testRetentionWriteToolName = "test.retention.set"
 
 // registerTestRetentionWriteTool 注册一个写工具供写门测试使用。eino 动态工具校验要求：
 // Write 必须带 RollbackDescription，点号工具必须带 Domain+ResourceType，InputSchema
-// 必须有 required string environment。与 recommendation_status_test.go 的注册模式一致。
+// 至少一个必填字段。与 recommendation_status_test.go 的注册模式一致。
 func registerTestRetentionWriteTool(t *testing.T) {
 	t.Helper()
 	tools.ResetDynamicToolsForTest()
@@ -39,7 +39,7 @@ func registerTestRetentionWriteTool(t *testing.T) {
 			SupportsDryRun:      true,
 		},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment":     {Type: "string", Required: true},
+
 			"retention_hours": {Type: "integer", Required: true},
 		},
 	}})
@@ -126,8 +126,8 @@ func TestExecutorPendingSequence(t *testing.T) {
 func TestHandleToolCallWriteGateDispatch(t *testing.T) {
 	registerTestRetentionWriteTool(t)
 	ctx := context.Background()
-	user := identity.CurrentUser{Subject: "alice", Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}}
-	args := `{"environment":"prod","retention_hours":48}`
+	user := identity.CurrentUser{Subject: "alice", Roles: []string{"admin"}}
+	args := `{"retention_hours":48}`
 
 	t.Run("handoff", func(t *testing.T) {
 		gate := &recordingWriteGate{out: &agentWriteOutcome{PlanID: "plan-1", Status: "pending", ConfirmationToken: "tok-1", Summary: "已创建待确认计划"}}
@@ -171,7 +171,7 @@ func TestHandleToolCallWriteGateDispatch(t *testing.T) {
 	t.Run("read bypasses gate", func(t *testing.T) {
 		rec := &recordingInvokableTool{name: "kafka.consumer_lag.read"}
 		exec := &AgentExecutor{toolMap: map[string]tool.BaseTool{"kafka.consumer_lag.read": rec}}
-		resp, err, out := exec.handleToolCall(ctx, user, "kafka.consumer_lag.read", `{"environment":"prod"}`)
+		resp, err, out := exec.handleToolCall(ctx, user, "kafka.consumer_lag.read", `{}`)
 		if err != nil || out != nil || resp != `{"status":"ok"}` {
 			t.Fatalf("read: resp=%q err=%v out=%+v, want tool executed with no gate interception", resp, err, out)
 		}
@@ -187,7 +187,7 @@ func TestHandleToolCallWriteGateDispatch(t *testing.T) {
 func TestAgentExecutorStopsAtWriteGate(t *testing.T) {
 	registerTestRetentionWriteTool(t)
 	ctx := context.Background()
-	user := identity.CurrentUser{Subject: "alice", Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}}
+	user := identity.CurrentUser{Subject: "alice", Roles: []string{"admin"}}
 	toolCtx := WithToolUser(ctx, user)
 
 	out := &agentWriteOutcome{
@@ -206,7 +206,7 @@ func TestAgentExecutorStopsAtWriteGate(t *testing.T) {
 			Type: "function",
 			Function: schema.FunctionCall{
 				Name:      testRetentionWriteToolName,
-				Arguments: `{"environment":"prod","retention_hours":48}`,
+				Arguments: `{"retention_hours":48}`,
 			},
 		}},
 	}}}
@@ -253,9 +253,9 @@ func TestAgentExecutorSequenceSteering(t *testing.T) {
 
 	const finalAnswer = "取证完毕，结论：lag 与 topic 两个维度均正常。"
 	chat := &queuedChat{responses: []*schema.Message{
-		{ToolCalls: []schema.ToolCall{{ID: "c1", Type: "function", Function: schema.FunctionCall{Name: "kafka.consumer_lag.read", Arguments: `{"environment":"prod"}`}}}},
+		{ToolCalls: []schema.ToolCall{{ID: "c1", Type: "function", Function: schema.FunctionCall{Name: "kafka.consumer_lag.read", Arguments: `{}`}}}},
 		{Content: "消费组 lag 为 12ms，看起来正常。"}, // 提前结论 → 触发引导
-		{ToolCalls: []schema.ToolCall{{ID: "c2", Type: "function", Function: schema.FunctionCall{Name: "kafka.topic.read", Arguments: `{"environment":"prod"}`}}}},
+		{ToolCalls: []schema.ToolCall{{ID: "c2", Type: "function", Function: schema.FunctionCall{Name: "kafka.topic.read", Arguments: `{}`}}}},
 		{Content: finalAnswer},
 	}}
 	exec := &AgentExecutor{
@@ -306,7 +306,7 @@ func newWriteGateTestService(t *testing.T) (*Service, store.ActionPlanStore) {
 			SupportsDryRun:      true,
 		},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment": {Type: "string", Required: true},
+
 			"name":        {Type: "string", Required: true},
 		},
 	}})
@@ -329,7 +329,7 @@ func TestExecutorWriteGateCreatesPendingPlan(t *testing.T) {
 	s, repo := newWriteGateTestService(t)
 	ctx := context.Background()
 
-	out, err := s.executorWriteGate(ctx, adminUser(), "demo.retention.set", map[string]any{"environment": "prod", "name": "topic-a"})
+	out, err := s.executorWriteGate(ctx, adminUser(), "demo.retention.set", map[string]any{"name": "topic-a"})
 	if err != nil {
 		t.Fatalf("executorWriteGate error: %v", err)
 	}
@@ -354,9 +354,9 @@ func TestExecutorWriteGateCreatesPendingPlan(t *testing.T) {
 func TestExecutorWriteGateDeniesWithoutPermission(t *testing.T) {
 	s, _ := newWriteGateTestService(t)
 	ctx := context.Background()
-	viewer := identity.CurrentUser{Subject: "bob", Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}}
+	viewer := identity.CurrentUser{Subject: "bob", Roles: []string{"viewer"}}
 
-	out, err := s.executorWriteGate(ctx, viewer, "demo.retention.set", map[string]any{"environment": "prod", "name": "topic-a"})
+	out, err := s.executorWriteGate(ctx, viewer, "demo.retention.set", map[string]any{"name": "topic-a"})
 	if err != nil {
 		t.Fatalf("executorWriteGate error: %v", err)
 	}
@@ -387,7 +387,7 @@ func (blankReasoner) Stream(_ context.Context, _ []*schema.Message, _ ...model.O
 func TestAgentExecutorWriteResultNotCached(t *testing.T) {
 	registerTestRetentionWriteTool(t)
 	ctx := context.Background()
-	user := identity.CurrentUser{Subject: "alice", Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}}
+	user := identity.CurrentUser{Subject: "alice", Roles: []string{"admin"}}
 	toolCtx := WithToolUser(ctx, user)
 	const message = "把 kafka retention 调低到 48 小时"
 
@@ -395,9 +395,9 @@ func TestAgentExecutorWriteResultNotCached(t *testing.T) {
 		AutoExec: true, ExecutionID: "exec-1", Status: "completed", PlanID: "plan-1", Summary: "已自动执行",
 	}}
 	chat := &queuedChat{responses: []*schema.Message{
-		{ToolCalls: []schema.ToolCall{{ID: "c1", Type: "function", Function: schema.FunctionCall{Name: testRetentionWriteToolName, Arguments: `{"environment":"prod","retention_hours":48}`}}}},
+		{ToolCalls: []schema.ToolCall{{ID: "c1", Type: "function", Function: schema.FunctionCall{Name: testRetentionWriteToolName, Arguments: `{"retention_hours":48}`}}}},
 		{Content: "已自动执行完成。"},
-		{ToolCalls: []schema.ToolCall{{ID: "c2", Type: "function", Function: schema.FunctionCall{Name: testRetentionWriteToolName, Arguments: `{"environment":"prod","retention_hours":48}`}}}},
+		{ToolCalls: []schema.ToolCall{{ID: "c2", Type: "function", Function: schema.FunctionCall{Name: testRetentionWriteToolName, Arguments: `{"retention_hours":48}`}}}},
 		{Content: "已自动执行完成。"},
 	}}
 	exec := &AgentExecutor{chat: chat, reasoningChat: blankReasoner{}, writeGate: gate.gate, maxSteps: 5, cache: NewResponseCache(10, time.Minute)}

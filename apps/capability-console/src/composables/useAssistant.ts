@@ -47,7 +47,6 @@ export interface UseAssistant {
   assistantLatestResponse: Ref<unknown>;
   assistantLatestStatus: Ref<AssistantDetailStatus>;
   assistantEntryLoading: Ref<boolean>;
-  assistantEnvironment: Ref<'prod' | 'staging' | 'dev' | 'none'>;
   assistantPageContext: Ref<PageContext | null>;
   setAssistantPageContext: (ctx: PageContext | null) => void;
   assistantEntryError: Ref<string>;
@@ -184,10 +183,8 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
   const assistantLatestStatus = ref<AssistantDetailStatus>('等待请求');
   const assistantEntryLoading = ref(false);
   const activeAbortController = ref<AbortController | null>(null);
-  const assistantEnvironment = ref<'prod' | 'staging' | 'dev' | 'none'>('prod');
-  // 缺口-3：页面上下文带入。由外部（如 management 视图选中 capability 跳转）通过
+  // 页面上下文带入。由外部（如 management 视图选中 capability 跳转）通过
   // setAssistantPageContext 设置，send/retry/regenerate 自动携带，无需每个调用点显式传。
-  // 为 null 时走 legacy environment 字段，保持现有行为；非空时发 page_context（含 environment）。
   const assistantPageContext = ref<PageContext | null>(null);
   function setAssistantPageContext(ctx: PageContext | null) {
     assistantPageContext.value = ctx;
@@ -208,19 +205,16 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
 
   const latestDetailText = computed(() => assistantDetailText(assistantLatestResponse.value));
 
-  async function submitAssistantMessage(message: string, environment?: string) {
+  async function submitAssistantMessage(message: string) {
     if (assistantEntryLoading.value) {
       return;
     }
-    // 组装 pageContext：仅当跳转设置了 assistantPageContext 时才启用 page_context，
-    // 否则保持 legacy environment 字段行为。environment 始终合并进 pageContext，
-    // 因为后端 router 仅在 PageContext 全空时才把 environment 提升进 PageContext。
+    // 组装 pageContext：仅当跳转设置了 assistantPageContext 时才启用 page_context。
     const pageContext: PageContext | undefined = assistantPageContext.value
       ? {
           domain: assistantPageContext.value.domain,
           resource_type: assistantPageContext.value.resource_type,
           resource_name: assistantPageContext.value.resource_name,
-          environment: environment && environment !== 'none' ? environment : undefined,
         }
       : undefined;
     assistantEntryLoading.value = true;
@@ -372,7 +366,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     try {
       if (streamingEnabled) {
         await streamAssistantMessage(
-          { message, conversationID, environment, pageContext },
+          { message, conversationID, pageContext },
           controller.signal,
           {
             onDelta: (chunk) => {
@@ -433,7 +427,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
           },
         );
       } else {
-        const response = await sendAssistantMessage(message, conversationID, controller.signal, environment, pageContext);
+        const response = await sendAssistantMessage(message, conversationID, controller.signal, pageContext);
         applyResponse(response);
       }
     } catch (err) {
@@ -472,7 +466,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
       return;
     }
     assistantInput.value = '';
-    await submitAssistantMessage(rawMessage, assistantEnvironment.value);
+    await submitAssistantMessage(rawMessage);
   }
 
   async function retry() {
@@ -480,7 +474,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     if (!message || assistantEntryLoading.value) {
       return;
     }
-    await submitAssistantMessage(message, assistantEnvironment.value);
+    await submitAssistantMessage(message);
   }
 
   async function regenerate(turn: ConversationTurn) {
@@ -500,7 +494,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     // turns so the conversation can be replayed from that user message.
     conversationTurns.value = turns.slice(0, index - 1);
     lastFailedAssistantMessage.value = '';
-    await submitAssistantMessage(userTurn.content, assistantEnvironment.value);
+    await submitAssistantMessage(userTurn.content);
   }
 
   function fillPrompt(prompt: string) {
@@ -569,7 +563,6 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     assistantLatestResponse,
     assistantLatestStatus,
     assistantEntryLoading,
-    assistantEnvironment,
     assistantPageContext,
     setAssistantPageContext,
     assistantEntryError,

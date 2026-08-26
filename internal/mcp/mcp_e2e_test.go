@@ -37,10 +37,9 @@ backend:
   timeout_ms: 3000
   base_url: http://127.0.0.1:19090
 input_schema:
-  environment: {type: string, required: true}
   cluster: {type: string, required: true}
   name: {type: string, required: true}
-auth: {roles: [viewer, operator, admin], environment_scoped: true}
+auth: {roles: [viewer, operator, admin]}
 output: {kind: observation, summary_template: "Bucket {name} usage is {usage_pct}%", fields: {usage_pct: "$.data.usage_pct"}}
 ai: {description: 读取 MinIO 桶容量}
 `), 0o644); err != nil {
@@ -99,7 +98,7 @@ ai: {description: 读取 MinIO 桶容量}
 	fmt.Printf("  name=%s desc=%s\n", listResult.Result.Tools[0].Name, listResult.Result.Tools[0].Description)
 
 	// tools/call (must carry session ID)
-	resp, _ = mcpPostWithSession(t, addr, `{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"minio.bucket.capacity.read","arguments":{"environment":"prod","cluster":"default","name":"archive"}}}`, sessionID)
+	resp, _ = mcpPostWithSession(t, addr, `{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"minio.bucket.capacity.read","arguments":{"cluster":"default","name":"archive"}}}`, sessionID)
 	fmt.Printf("tools/call raw: %s\n", string(resp))
 	var callResult struct {
 		Result struct {

@@ -47,7 +47,7 @@ type Capability struct {
 // DryRunSpec 是写操作 dry-run 预览的模板。所有字段的 {field} 占位符在执行
 // dry-run 时用写操作入参渲染。
 type DryRunSpec struct {
-	// Summary 是预览摘要模板，如"将把 {environment} 环境的 topic {topic} 的
+	// Summary 是预览摘要模板，如"将把 topic {topic} 的
 	// 消息保留时间设置为 {retention_hours} 小时。"为空时 handler 给出通用摘要。
 	Summary string `yaml:"summary,omitempty" json:"summary,omitempty"`
 	// Command 是具体命令/调用模板，如 kafka-configs 命令或 HTTP 端点。为空时
@@ -144,8 +144,7 @@ type RollbackSpec struct {
 }
 
 type AuthSpec struct {
-	Roles             []string `yaml:"roles" json:"roles"`
-	EnvironmentScoped bool     `yaml:"environment_scoped" json:"environment_scoped"`
+	Roles []string `yaml:"roles" json:"roles"`
 }
 
 type AISpec struct {
@@ -165,8 +164,7 @@ type NormalizedResult struct {
 }
 
 type ResourceRef struct {
-	Domain      string `json:"domain"`
-	Type        string `json:"type"`
-	Name        string `json:"name"`
-	Environment string `json:"environment"`
+	Domain string `json:"domain"`
+	Type   string `json:"type"`
+	Name   string `json:"name"`
 }

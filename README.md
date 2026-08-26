@@ -19,19 +19,8 @@ Go backend foundation for an AI-assisted middleware operations console.
 - Alert layer: `/v1/alerts/webhook` and `/v1/alerts/alertmanager` (both HMAC-SHA256; the latter ingests Prometheus Alertmanager's native payload), `copilot_alerts` table, `alert.query` tool.
 - Audit layer: `/v1/audit-events` (filters + keyset + `final_result_only`) + `/v1/audit-events/search` natural-language query; scheduled tasks `/v1/scheduled-tasks*`; prompt registry `/v1/admin/prompts*`; knowledge base; feedback; rate limiting; auth modes (jwt / cas / both).
 - Vue 3 capability console in `apps/capability-console`.
-- JWT projection uses only `sub`, `roles`, `allowed_environments`, and request ID.
+- JWT projection uses only `sub`, `roles`, and request ID.
 - Production persistence targets MySQL 8; local tests use SQLite for real SQL constraints, foreign keys, and idempotency behavior without Docker.
-
-## Eval
-
-The EinoPlanner evaluation suite is isolated behind a build tag. Run it with:
-
-```bash
-make eval
-# or: go test -tags=eval ./internal/assistant/eval/...
-```
-
-It regenerates `internal/assistant/eval/report.md` with per-category pass rates (tool category 100%, others ≥90%).
 
 ## Prompts
 
@@ -94,9 +83,9 @@ questions. The first rollout order is GlusterFS, then MinIO, then Kafka.
 Example prompts:
 
 ```text
-检查 prod glusterfs data volume 健康
-检查 prod minio archive bucket 健康
-检查 prod kafka payments consumer lag
+检查 glusterfs data volume 健康
+检查 minio archive bucket 健康
+检查 kafka payments consumer lag
 ```
 
 Diagnostic output includes resources, observations, findings, and

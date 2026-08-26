@@ -19,7 +19,6 @@ export interface StreamCallbacks {
 
 export interface PageContext {
   domain?: string;
-  environment?: string;
   resource_type?: string;
   resource_name?: string;
 }
@@ -27,7 +26,6 @@ export interface PageContext {
 export interface StreamParams {
   message: string;
   conversationID?: string;
-  environment?: string;
   pageContext?: PageContext;
 }
 
@@ -49,12 +47,9 @@ export async function streamAssistantMessage(
   if (params.conversationID) {
     payload.conversation_id = params.conversationID;
   }
-  // PageContext 是结构化页面上下文（缺口-3），优先于 legacy environment 字段。
-  // 当 pageContext 非空时发送 page_context；否则回退到 environment 字段以保持兼容。
-  if (params.pageContext && (params.pageContext.domain || params.pageContext.environment || params.pageContext.resource_type || params.pageContext.resource_name)) {
+  // PageContext 是结构化页面上下文，非空时发送 page_context。
+  if (params.pageContext && (params.pageContext.domain || params.pageContext.resource_type || params.pageContext.resource_name)) {
     payload.page_context = params.pageContext;
-  } else if (params.environment && params.environment !== 'none') {
-    payload.environment = params.environment;
   }
 
   const response = await fetch('/v1/assistant/stream', {

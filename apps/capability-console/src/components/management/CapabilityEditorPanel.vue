@@ -35,10 +35,10 @@ const props = defineProps<{ capabilities: UseCapabilities }>();
         <div class="field-table">
           <div class="field-row header"><span>字段名</span><span>类型</span><span>必填</span><span></span></div>
           <div v-for="(row, index) in capabilities.inputRows.value" :key="row.name" class="field-row">
-            <input :data-test="`input-name-${index}`" class="mini-input" :value="row.name" :disabled="row.name === 'environment'" @change="capabilities.renameInputField(row.name, ($event.target as HTMLInputElement).value)" />
+            <input :data-test="`input-name-${index}`" class="mini-input" :value="row.name" @change="capabilities.renameInputField(row.name, ($event.target as HTMLInputElement).value)" />
             <select :data-test="`input-type-${index}`" class="mini-select" :value="row.type" @change="capabilities.setInputType(row.name, ($event.target as HTMLSelectElement).value as InputField['type'])"><option value="string">string</option><option value="integer">integer</option><option value="number">number</option><option value="boolean">boolean</option></select>
             <input :data-test="`input-required-${index}`" type="checkbox" :checked="row.required" @change="capabilities.setInputRequired(row.name, ($event.target as HTMLInputElement).checked)" />
-            <button class="mini-button" :disabled="row.name === 'environment'" @click="capabilities.removeInputField(row.name)">删除</button>
+            <button class="mini-button" @click="capabilities.removeInputField(row.name)">删除</button>
           </div>
           <button data-test="add-input-field" class="inline-add" @click="capabilities.addInputField">添加参数</button>
         </div>
@@ -64,7 +64,7 @@ const props = defineProps<{ capabilities: UseCapabilities }>();
         <span>{{ capabilities.selected.value.auth.roles.join(' / ') || '未配置角色' }}</span>
       </div>
       <div class="policy-line">
-        <span>环境隔离：{{ capabilities.selected.value.auth.environment_scoped ? '开启' : '关闭' }}</span>
+        <span>{{ capabilities.selected.value.auth.roles.join(' / ') || '未配置角色' }}</span>
         <span data-test="governance-summary">{{ capabilities.governanceSummary.value }}</span>
       </div>
     </section>

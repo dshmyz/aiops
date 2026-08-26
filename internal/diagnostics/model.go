@@ -30,19 +30,17 @@ const (
 
 type Request struct {
 	Domain       string
-	Environment  string
 	ResourceType string
 	ResourceName string
 	Runbook      string
 }
 
 type ResourceRef struct {
-	Domain      string            `json:"domain"`
-	Type        string            `json:"type"`
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Environment string            `json:"environment"`
-	Labels      map[string]string `json:"labels,omitempty"`
+	Domain string            `json:"domain"`
+	Type   string            `json:"type"`
+	ID     string            `json:"id"`
+	Name   string            `json:"name"`
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 type Observation struct {
@@ -75,7 +73,6 @@ type Recommendation struct {
 
 type Package struct {
 	ID              string           `json:"id"`
-	Environment     string           `json:"environment"`
 	Domains         []string         `json:"domains"`
 	Resources       []ResourceRef    `json:"resources"`
 	Observations    []Observation    `json:"observations"`
@@ -89,19 +86,13 @@ func ValidatePackage(pkg Package) error {
 	if strings.TrimSpace(pkg.ID) == "" {
 		return errors.New("诊断ID为必填项")
 	}
-	if strings.TrimSpace(pkg.Environment) == "" {
-		return errors.New("诊断环境为必填项")
-	}
 	if len(pkg.Domains) == 0 {
 		return errors.New("至少需要一个领域")
 	}
 	resources := map[string]struct{}{}
 	for _, resource := range pkg.Resources {
-		if strings.TrimSpace(resource.ID) == "" || strings.TrimSpace(resource.Domain) == "" || strings.TrimSpace(resource.Environment) == "" {
-			return errors.New("资源ID、领域和环境为必填项")
-		}
-		if resource.Environment != pkg.Environment {
-			return fmt.Errorf("资源 %q 的环境 %q 与诊断环境 %q 不匹配", resource.ID, resource.Environment, pkg.Environment)
+		if strings.TrimSpace(resource.ID) == "" || strings.TrimSpace(resource.Domain) == "" {
+			return errors.New("资源ID和领域为必填项")
 		}
 		resources[resource.ID] = struct{}{}
 	}

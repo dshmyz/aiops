@@ -64,9 +64,9 @@ func (s *Service) Query(ctx context.Context, f store.AlertFilter) ([]Alert, erro
 	return out, nil
 }
 
-// ListActive 列出某环境下的活动（firing）告警。
-func (s *Service) ListActive(ctx context.Context, environment string, limit int) ([]Alert, error) {
-	records, err := s.store.ListActive(ctx, environment, limit)
+// ListActive 列出活动（firing）告警。
+func (s *Service) ListActive(ctx context.Context, limit int) ([]Alert, error) {
+	records, err := s.store.ListActive(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,6 @@ func toStoreAlert(a Alert) store.Alert {
 		Description:  a.Description,
 		Severity:     string(a.Severity),
 		Status:       string(a.Status),
-		Environment:  a.Environment,
 		Domain:       a.Domain,
 		ResourceType: a.ResourceType,
 		ResourceName: a.ResourceName,
@@ -117,7 +116,6 @@ func fromStoreAlert(r store.Alert) Alert {
 		Description:  r.Description,
 		Severity:     Severity(r.Severity),
 		Status:       Status(r.Status),
-		Environment:  r.Environment,
 		Domain:       r.Domain,
 		ResourceType: r.ResourceType,
 		ResourceName: r.ResourceName,

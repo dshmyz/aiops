@@ -19,7 +19,7 @@ const metadataEntries = computed<Array<[string, unknown]>>(() => {
 
 // Build a Jaeger trace URL for the event's trace_id. The Jaeger base URL is
 // configurable via the VITE_JAEGER_URL env var (defaults to localhost:16686)
-// so different environments can point at their own tracing backend.
+// so different deployments can point at their own tracing backend.
 const traceUrl = computed<string>(() => {
   const traceId = props.event?.trace_id;
   if (!traceId) return '';

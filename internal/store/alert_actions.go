@@ -43,7 +43,7 @@ func NewSQLAlertActionRuleStore(db *sql.DB) *SQLAlertActionRuleStore {
 func (s *SQLAlertActionRuleStore) List(ctx context.Context) ([]AlertActionRuleRecord, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT name, alert_match, tool_sequence, execute_last_step, description, enabled, created_at, updated_at
-		 FROM alert_action_rules WHERE enabled = 1 ORDER BY name`)
+		 FROM alert_action_rules ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list alert action rules: %w", err)
 	}

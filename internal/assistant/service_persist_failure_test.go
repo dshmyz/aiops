@@ -85,7 +85,7 @@ func TestHandleMessagePersistsFailedTurn(t *testing.T) {
 			ResourceType: "volume",
 		},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment": {Type: "string", Required: true},
+
 			"name":        {Type: "string", Required: true},
 		},
 	}}); err != nil {

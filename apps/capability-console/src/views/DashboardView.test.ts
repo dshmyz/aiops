@@ -21,7 +21,6 @@ const plans = [
   {
     id: 'plan-1',
     tool: 'kafka.topic.retention.set',
-    environment: 'prod',
     risk: 'medium',
     status: 'pending_confirmation',
     version: 1,

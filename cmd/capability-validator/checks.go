@@ -282,9 +282,6 @@ func syntheticInput(capability capabilities.Capability) map[string]any {
 			input[name] = "dry-run-" + name
 		}
 	}
-	if _, ok := input["environment"]; !ok {
-		input["environment"] = "staging"
-	}
 	return input
 }
 

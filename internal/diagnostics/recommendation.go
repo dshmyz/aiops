@@ -26,16 +26,16 @@ type RecommendationResult struct {
 
 // RecommendationGenerator 定义建议生成器接口
 type RecommendationGenerator interface {
-	Generate(ctx context.Context, domain, name, environment string, severity Severity, observationData map[string]any) (RecommendationResult, error)
+	Generate(ctx context.Context, domain, name string, severity Severity, observationData map[string]any) (RecommendationResult, error)
 }
 
 // TemplateRecommendationGenerator 使用模板生成建议（默认实现）
 type TemplateRecommendationGenerator struct{}
 
-func (g *TemplateRecommendationGenerator) Generate(_ context.Context, domain, name, environment string, severity Severity, observationData map[string]any) (RecommendationResult, error) {
+func (g *TemplateRecommendationGenerator) Generate(_ context.Context, domain, name string, severity Severity, observationData map[string]any) (RecommendationResult, error) {
 	summary := recommendationSummary(domain, severity, name)
 	rationale := fmt.Sprintf("基于 %s 资源 %s 的诊断结果，严重级别为 %s", domain, name, severity)
-	toolName, candidateInput := recommendationAction(domain, severity, environment, name, observationData)
+	toolName, candidateInput := recommendationAction(domain, severity, name, observationData)
 	return RecommendationResult{
 		Summary:        summary,
 		Rationale:      rationale,
@@ -52,7 +52,7 @@ func (g *TemplateRecommendationGenerator) Generate(_ context.Context, domain, na
 // 同名键提取；无来源的必填字段留空，让建 plan 前的 ValidateInput 明确报缺参，
 // 而不是生成一个确认后必然失败的残缺输入。When no write tool is registered
 // for the given domain, toolName is empty.
-func recommendationAction(domain string, severity Severity, environment, name string, observationData map[string]any) (string, map[string]any) {
+func recommendationAction(domain string, severity Severity, name string, observationData map[string]any) (string, map[string]any) {
 	if severity != SeverityCritical && severity != SeverityWarning {
 		return "", nil
 	}
@@ -60,13 +60,11 @@ func recommendationAction(domain string, severity Severity, environment, name st
 	if !ok {
 		return "", nil
 	}
-	input := map[string]any{"environment": environment}
+	input := map[string]any{}
 	if schema, ok := tools.DynamicInputSchema(tool.Name); ok {
 		fields := make([]string, 0, len(schema))
 		for field := range schema {
-			if field != "environment" {
-				fields = append(fields, field)
-			}
+			fields = append(fields, field)
 		}
 		sort.Strings(fields)
 		for _, field := range fields {
@@ -121,7 +119,7 @@ func NewLLMRecommendationGenerator(chat model.BaseChatModel) *LLMRecommendationG
 	return &LLMRecommendationGenerator{chat: chat}
 }
 
-func (g *LLMRecommendationGenerator) Generate(ctx context.Context, domain, name, environment string, severity Severity, observationData map[string]any) (RecommendationResult, error) {
+func (g *LLMRecommendationGenerator) Generate(ctx context.Context, domain, name string, severity Severity, observationData map[string]any) (RecommendationResult, error) {
 	if g.chat == nil {
 		return RecommendationResult{}, fmt.Errorf("LLM 模型未配置")
 	}
@@ -174,7 +172,7 @@ func (g *LLMRecommendationGenerator) Generate(ctx context.Context, domain, name,
 
 	// The LLM focuses on summary/rationale; the candidate tool/input come
 	// from the deterministic template so the recommendation stays actionable.
-	toolName, candidateInput := recommendationAction(domain, severity, environment, name, observationData)
+	toolName, candidateInput := recommendationAction(domain, severity, name, observationData)
 
 	return RecommendationResult{
 		Summary:        result.Summary,
@@ -197,13 +195,13 @@ func NewHybridRecommendationGenerator(chat model.BaseChatModel) *HybridRecommend
 	}
 }
 
-func (g *HybridRecommendationGenerator) Generate(ctx context.Context, domain, name, environment string, severity Severity, observationData map[string]any) (RecommendationResult, error) {
+func (g *HybridRecommendationGenerator) Generate(ctx context.Context, domain, name string, severity Severity, observationData map[string]any) (RecommendationResult, error) {
 	// 优先尝试 LLM 生成
-	result, err := g.llm.Generate(ctx, domain, name, environment, severity, observationData)
+	result, err := g.llm.Generate(ctx, domain, name, severity, observationData)
 	if err == nil && result.Summary != "" {
 		return result, nil
 	}
 
 	// LLM 失败时回退到模板
-	return g.template.Generate(ctx, domain, name, environment, severity, observationData)
+	return g.template.Generate(ctx, domain, name, severity, observationData)
 }

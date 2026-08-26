@@ -26,7 +26,7 @@ func TestFormatAssistantTurnToolIntent(t *testing.T) {
 	t.Parallel()
 	intent := &Intent{
 		ToolName: "kafka.consumer_lag.read",
-		Input:    map[string]any{"environment": "prod", "group": "orders"},
+		Input:    map[string]any{"group": "orders"},
 	}
 	got := formatAssistantTurn("lag = 1234", intent)
 
@@ -35,9 +35,6 @@ func TestFormatAssistantTurnToolIntent(t *testing.T) {
 	}
 	if !contains(got, "tool_name: kafka.consumer_lag.read") {
 		t.Fatalf("missing tool_name: %q", got)
-	}
-	if !contains(got, `"environment":"prod"`) {
-		t.Fatalf("missing environment in input JSON: %q", got)
 	}
 	if !contains(got, `"group":"orders"`) {
 		t.Fatalf("missing group in input JSON: %q", got)
@@ -51,7 +48,6 @@ func TestFormatAssistantTurnDiagnosticIntent(t *testing.T) {
 	intent := &Intent{
 		Diagnostic: &diagnostics.Request{
 			Domain:       "glusterfs",
-			Environment:  "prod",
 			ResourceType: "volume",
 			ResourceName: "data",
 		},
@@ -66,9 +62,6 @@ func TestFormatAssistantTurnDiagnosticIntent(t *testing.T) {
 	}
 	if !contains(got, "domain=glusterfs") {
 		t.Fatalf("missing domain: %q", got)
-	}
-	if !contains(got, "environment=prod") {
-		t.Fatalf("missing environment: %q", got)
 	}
 	if !contains(got, "resource_type=volume") {
 		t.Fatalf("missing resource_type: %q", got)
@@ -115,7 +108,7 @@ func TestFormatAssistantTurnContentPreserved(t *testing.T) {
 	t.Parallel()
 	intent := &Intent{
 		ToolName: "cluster.status.read",
-		Input:    map[string]any{"environment": "prod"},
+		Input:    map[string]any{},
 	}
 	got := formatAssistantTurn("status OK", intent)
 	if !startsWith(got, "status OK") {
@@ -162,7 +155,7 @@ func TestEstimateTurnCharsWithToolIntent(t *testing.T) {
 		Content: "lag = 1234",
 		Intent: &Intent{
 			ToolName: "kafka.consumer_lag.read",
-			Input:    map[string]any{"environment": "prod", "group": "orders"},
+			Input:    map[string]any{"group": "orders"},
 		},
 	}
 	got := estimateTurnChars(turn)
@@ -170,7 +163,7 @@ func TestEstimateTurnCharsWithToolIntent(t *testing.T) {
 		t.Fatalf("got %d, want > %d (content length)", got, len(turn.Content))
 	}
 	// sanity check that input marshals
-	_ = contains(jsonMust(t, map[string]any{"environment": "prod", "group": "orders"}), "")
+	_ = contains(jsonMust(t, map[string]any{"group": "orders"}), "")
 }
 
 // TestEstimateTurnCharsWithDiagnosticIntent asserts that a diagnostic turn
@@ -182,7 +175,7 @@ func TestEstimateTurnCharsWithDiagnosticIntent(t *testing.T) {
 		Role:    "assistant",
 		Content: "healthy",
 		Intent: &Intent{
-			Diagnostic: &diagnostics.Request{Domain: "kafka", Environment: "prod"},
+			Diagnostic: &diagnostics.Request{Domain: "kafka"},
 		},
 	}
 	got := estimateTurnChars(turn)
@@ -285,16 +278,16 @@ func TestHistoryMessagesSkipsEmptyContent(t *testing.T) {
 func TestHistoryMessagesPreservesStructuredIntent(t *testing.T) {
 	t.Parallel()
 	history := []Turn{
-		{Role: "user", Content: "查 prod kafka orders group 的 lag"},
+		{Role: "user", Content: "查 kafka orders group 的 lag"},
 		{
 			Role:    "assistant",
 			Content: "lag = 1234",
 			Intent: &Intent{
 				ToolName: "kafka.consumer_lag.read",
-				Input:    map[string]any{"environment": "prod", "group": "orders"},
+				Input:    map[string]any{"group": "orders"},
 			},
 		},
-		{Role: "user", Content: "同 environment 再查一个 payments group"},
+		{Role: "user", Content: "再查一个 payments group"},
 	}
 	msgs := historyMessages(history)
 	if len(msgs) != 3 {
@@ -307,9 +300,6 @@ func TestHistoryMessagesPreservesStructuredIntent(t *testing.T) {
 	}
 	if !contains(assistantContent, "tool_name: kafka.consumer_lag.read") {
 		t.Fatalf("missing tool_name in [Last Intent]: %q", assistantContent)
-	}
-	if !contains(assistantContent, `"environment":"prod"`) {
-		t.Fatalf("missing environment in [Last Intent]: %q", assistantContent)
 	}
 }
 
@@ -337,7 +327,7 @@ func TestHistoryMessagesIncludesSystemSummary(t *testing.T) {
 	t.Parallel()
 	history := []Turn{
 		{Role: "system_summary", Content: "User previously checked prod Kafka lag."},
-		{Role: "user", Content: "同 environment 查 MinIO"},
+		{Role: "user", Content: "再查 MinIO"},
 		{Role: "assistant", Content: "MinIO healthy"},
 	}
 	msgs := historyMessages(history)
@@ -428,10 +418,10 @@ func TestHistoryMessagesInLoopToolStepBackwardCompat(t *testing.T) {
 			Content:      "lag = 1234",
 			Intent: &Intent{
 				ToolName: "kafka.consumer_lag.read",
-				Input:    map[string]any{"environment": "prod"},
+				Input:    map[string]any{},
 			},
 		},
-		{Role: "user", Content: "同 environment 再查 minio"},
+		{Role: "user", Content: "再查 minio"},
 	}
 	msgs := historyMessages(history)
 	if len(msgs) != 3 {

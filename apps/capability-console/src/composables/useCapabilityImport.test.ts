@@ -36,7 +36,6 @@ function makePreview(overrides: Partial<ImportPreview> = {}): ImportPreview {
           source: 'discovered',
           backend: { adapter: 'http', method: 'GET', path: '/api/minio/{cluster}/buckets/{bucket}/capacity', timeout_ms: 3000, base_url: BUILTIN_BASE_URL },
           input_schema: {
-            environment: { type: 'string', required: true },
             cluster: { type: 'string', required: true },
           },
           output: { kind: 'observation', severity_path: '', summary_template: '', fields: { usage_pct: '$.usage_pct' } },

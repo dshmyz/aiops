@@ -4,9 +4,8 @@ import "testing"
 
 func TestProjectCopiesOnlyTrustedIdentityFields(t *testing.T) {
 	claims := TrustedClaims{
-		Subject:             "user-123",
-		Roles:               []string{"operator", "operator"},
-		AllowedEnvironments: []string{"staging", "prod", "staging"},
+		Subject: "user-123",
+		Roles:   []string{"operator", "operator"},
 	}
 
 	user, err := Project(claims, "req-456")
@@ -23,24 +22,21 @@ func TestProjectCopiesOnlyTrustedIdentityFields(t *testing.T) {
 	if !sameStrings(user.Roles, []string{"operator"}) {
 		t.Fatalf("roles = %v, want [operator]", user.Roles)
 	}
-	if !sameStrings(user.AllowedEnvironments, []string{"staging", "prod"}) {
-		t.Fatalf("allowed environments = %v, want [staging prod]", user.AllowedEnvironments)
-	}
 
 	claims.Roles[0] = "admin"
-	claims.AllowedEnvironments[0] = "dev"
 	if !sameStrings(user.Roles, []string{"operator"}) {
 		t.Fatalf("roles changed after claims mutation: %v", user.Roles)
-	}
-	if !sameStrings(user.AllowedEnvironments, []string{"staging", "prod"}) {
-		t.Fatalf("allowed environments changed after claims mutation: %v", user.AllowedEnvironments)
 	}
 }
 
 func TestProjectRejectsIncompleteTrustedClaims(t *testing.T) {
 	_, err := Project(TrustedClaims{Subject: "user-123", Roles: []string{"viewer"}}, "req-456")
+	if err != nil {
+		t.Fatalf("Project rejected valid claims: %v", err)
+	}
+	_, err = Project(TrustedClaims{Roles: []string{"viewer"}}, "req-456")
 	if err == nil {
-		t.Fatal("Project accepted claims without allowed environments")
+		t.Fatal("Project accepted claims without subject")
 	}
 }
 

@@ -10,8 +10,8 @@ import (
 )
 
 // registerClarifyTool 注册带必填字段的动态工具，模拟已发布能力：
-// 写工具 topic.retention.set（environment/topic/retention_hours 必填）与
-// 读工具 kafka.consumer_group.lag.read（environment/cluster/group 必填）。
+// 写工具 topic.retention.set（topic/retention_hours 必填）与
+// 读工具 kafka.consumer_group.lag.read（cluster/group 必填）。
 func registerClarifyTool(t *testing.T) {
 	t.Helper()
 	tools.ResetDynamicToolsForTest()
@@ -20,7 +20,7 @@ func registerClarifyTool(t *testing.T) {
 		{
 			Tool: tools.Tool{Name: "topic.retention.set", Operation: tools.Write, Risk: tools.Medium, Domain: "kafka", ResourceType: "topic", RollbackDescription: "reset_to_previous"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment":     {Type: "string", Required: true},
+
 				"topic":           {Type: "string", Required: true},
 				"retention_hours": {Type: "integer", Required: true, Min: ptrFloat(1), Description: "保留时长（小时）"},
 			},
@@ -28,7 +28,7 @@ func registerClarifyTool(t *testing.T) {
 		{
 			Tool: tools.Tool{Name: "kafka.consumer_group.lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
+
 				"cluster":     {Type: "string", Required: true},
 				"group":       {Type: "string", Required: true},
 			},
@@ -64,9 +64,6 @@ func TestParseIntentMissingRequiredFieldsYieldsStructuredForm(t *testing.T) {
 	for _, f := range clar.Fields {
 		byName[f.Name] = f
 	}
-	if _, ok := byName["environment"]; !ok {
-		t.Fatalf("write tool missing environment should be in form fields: %+v", clar.Fields)
-	}
 	if _, ok := byName["retention_hours"]; !ok {
 		t.Fatalf("missing retention_hours should be in form fields: %+v", clar.Fields)
 	}
@@ -82,16 +79,15 @@ func TestParseIntentMissingRequiredFieldsYieldsStructuredForm(t *testing.T) {
 	}
 }
 
-// 读路径 environment 由 policy.DefaultEnvironment 统一兜底，不构成缺参；
-// 其余必填缺失才澄清。
-func TestParseIntentReadToolExcludesDefaultedEnvironment(t *testing.T) {
+// 读工具与写工具一样：必填字段缺失即澄清，无兜底默认。
+func TestParseIntentReadToolMissingRequiredFieldClarifies(t *testing.T) {
 	registerClarifyTool(t)
 	p := NewEinoPlanner(&stubChat{})
 
 	intent, err := p.parseIntent(context.Background(), schema.SystemMessage(
 		`{"tool_name":"kafka.consumer_group.lag.read","input":{"cluster":"c1","group":"g1"},"confidence":0.9}`))
 	if err != nil {
-		t.Fatalf("read intent with defaulted environment should pass: %v", err)
+		t.Fatalf("complete read intent should pass: %v", err)
 	}
 	if intent.ToolName != "kafka.consumer_group.lag.read" {
 		t.Fatalf("ToolName = %q", intent.ToolName)
@@ -100,7 +96,7 @@ func TestParseIntentReadToolExcludesDefaultedEnvironment(t *testing.T) {
 	_, err = p.parseIntent(context.Background(), schema.SystemMessage(
 		`{"tool_name":"kafka.consumer_group.lag.read","input":{"cluster":"c1"},"confidence":0.9}`))
 	if err == nil {
-		t.Fatal("missing non-environment required field should clarify")
+		t.Fatal("missing required field should clarify")
 	}
 	var clar ClarificationError
 	if !errors.As(err, &clar) {
@@ -117,7 +113,7 @@ func TestParseIntentCompleteInputPassesThrough(t *testing.T) {
 	p := NewEinoPlanner(&stubChat{})
 
 	intent, err := p.parseIntent(context.Background(), schema.SystemMessage(
-		`{"tool_name":"topic.retention.set","input":{"environment":"prod","topic":"orders","retention_hours":48},"confidence":0.9}`))
+		`{"tool_name":"topic.retention.set","input":{"topic":"orders","retention_hours":48},"confidence":0.9}`))
 	if err != nil {
 		t.Fatalf("complete input should pass: %v", err)
 	}

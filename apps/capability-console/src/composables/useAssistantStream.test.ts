@@ -30,7 +30,7 @@ describe('useAssistantStream step 事件解析', () => {
   test('解析 event: step 并回调 onStep，且不触发 onDelta', async () => {
     mockFetchStream(
       sseStream(
-        'event: step\ndata: {"tool":"cluster.status.read","step_index":0,"status":"done","summary":"green","input":{"environment":"prod"},"output":{"status":"green"}}',
+        'event: step\ndata: {"tool":"cluster.status.read","step_index":0,"status":"done","summary":"green","input":{"cluster":"c1"},"output":{"status":"green"}}',
       ),
     );
 
@@ -55,7 +55,7 @@ describe('useAssistantStream step 事件解析', () => {
       status: 'done',
       summary: 'green',
     });
-    expect(steps[0].input).toEqual({ environment: 'prod' });
+    expect(steps[0].input).toEqual({ cluster: 'c1' });
     expect(steps[0].output).toEqual({ status: 'green' });
     expect(deltas).toHaveLength(0);
   });

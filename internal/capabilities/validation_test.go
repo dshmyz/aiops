@@ -140,12 +140,12 @@ func TestValidateAcceptsAndPropagatesNumericBounds(t *testing.T) {
 	}
 
 	tool, _ := tools.Lookup(capability.Name)
-	valid := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive", "quota": 500}
+	valid := map[string]any{"cluster": "m1", "bucket": "archive", "quota": 500}
 	if err := tools.ValidateInput(tool, valid); err != nil {
 		t.Fatalf("ValidateInput in-range = %v, want accepted", err)
 	}
 	for _, quota := range []int{0, 1001} {
-		input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive", "quota": quota}
+		input := map[string]any{"cluster": "m1", "bucket": "archive", "quota": quota}
 		if err := tools.ValidateInput(tool, input); err == nil {
 			t.Fatalf("ValidateInput accepted out-of-range quota %d", quota)
 		}
@@ -195,9 +195,8 @@ func validReadCapability() capabilities.Capability {
 			BaseURL:   "https://backend.example.com",
 		},
 		InputSchema: map[string]capabilities.InputField{
-			"environment": {Type: "string", Required: true},
-			"cluster":     {Type: "string", Required: true},
-			"bucket":      {Type: "string", Required: true},
+			"cluster": {Type: "string", Required: true},
+			"bucket":  {Type: "string", Required: true},
 		},
 		Output: capabilities.OutputSpec{
 			Kind:            "observation",
@@ -207,8 +206,7 @@ func validReadCapability() capabilities.Capability {
 			},
 		},
 		Auth: capabilities.AuthSpec{
-			Roles:             []string{"viewer", "operator", "admin"},
-			EnvironmentScoped: true,
+			Roles: []string{"viewer", "operator", "admin"},
 		},
 	}
 }
@@ -230,10 +228,9 @@ func validWriteCapability() capabilities.Capability {
 			BaseURL:   "https://backend.example.com",
 		},
 		InputSchema: map[string]capabilities.InputField{
-			"environment": {Type: "string", Required: true},
-			"cluster":     {Type: "string", Required: true},
-			"bucket":      {Type: "string", Required: true},
-			"quota":       {Type: "integer", Required: true},
+			"cluster": {Type: "string", Required: true},
+			"bucket":  {Type: "string", Required: true},
+			"quota":   {Type: "integer", Required: true},
 		},
 		Output: capabilities.OutputSpec{
 			Kind:            "mutation",
@@ -246,8 +243,7 @@ func validWriteCapability() capabilities.Capability {
 			Rollback:           capabilities.RollbackSpec{Strategy: "restore_previous"},
 		},
 		Auth: capabilities.AuthSpec{
-			Roles:             []string{"operator", "admin"},
-			EnvironmentScoped: true,
+			Roles: []string{"operator", "admin"},
 		},
 	}
 }

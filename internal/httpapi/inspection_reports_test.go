@@ -47,7 +47,7 @@ func TestInspectionReportListReturnsReports(t *testing.T) {
 	_, _ = reportStore.CreateReport(context.Background(), sampleInspectionReport())
 
 	router := inspectionReportRouter(t, reportStore)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/inspection-reports", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/inspection-reports", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -74,7 +74,7 @@ func TestInspectionReportGetReturnsReport(t *testing.T) {
 	_, _ = reportStore.CreateReport(context.Background(), sampleInspectionReport())
 
 	router := inspectionReportRouter(t, reportStore)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/inspection-reports/report-1", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/inspection-reports/report-1", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -104,7 +104,7 @@ func TestInspectionReportGetNonExistentReturns404(t *testing.T) {
 	reportStore := &store.MemoryInspectionReportStore{}
 	router := inspectionReportRouter(t, reportStore)
 
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/inspection-reports/nonexistent", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/inspection-reports/nonexistent", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -121,7 +121,7 @@ func TestInspectionReportNotConfiguredReturns500(t *testing.T) {
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		nil,
 	)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/inspection-reports", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/inspection-reports", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 

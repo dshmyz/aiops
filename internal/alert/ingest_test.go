@@ -11,10 +11,10 @@ func TestValidateMissingRequiredFields(t *testing.T) {
 		name    string
 		payload WebhookPayload
 	}{
-		{name: "missing external_id", payload: WebhookPayload{Source: "grafana", Title: "t", Severity: "critical", Status: "firing", Environment: "prod"}},
-		{name: "missing source", payload: WebhookPayload{ExternalID: "a1", Title: "t", Severity: "critical", Status: "firing", Environment: "prod"}},
-		{name: "missing title", payload: WebhookPayload{ExternalID: "a1", Source: "grafana", Severity: "critical", Status: "firing", Environment: "prod"}},
-		{name: "missing severity", payload: WebhookPayload{ExternalID: "a1", Source: "grafana", Title: "t", Status: "firing", Environment: "prod"}},
+		{name: "missing external_id", payload: WebhookPayload{Source: "grafana", Title: "t", Severity: "critical", Status: "firing"}},
+		{name: "missing source", payload: WebhookPayload{ExternalID: "a1", Title: "t", Severity: "critical", Status: "firing"}},
+		{name: "missing title", payload: WebhookPayload{ExternalID: "a1", Source: "grafana", Severity: "critical", Status: "firing"}},
+		{name: "missing severity", payload: WebhookPayload{ExternalID: "a1", Source: "grafana", Title: "t", Status: "firing"}},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -37,7 +37,7 @@ func TestValidateRejectsUnknownStatus(t *testing.T) {
 
 func TestValidateAcceptsValidPayload(t *testing.T) {
 	t.Parallel()
-	p := WebhookPayload{ExternalID: "a1", Source: "grafana", Title: "t", Severity: "critical", Status: "firing", Environment: "prod"}
+	p := WebhookPayload{ExternalID: "a1", Source: "grafana", Title: "t", Severity: "critical", Status: "firing"}
 	if err := p.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil", err)
 	}
@@ -47,11 +47,10 @@ func TestNormalizeDefaults(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
 	p := WebhookPayload{
-		ExternalID:  "a1",
-		Source:      "GRAFANA",
-		Title:       "CPU 高",
-		Severity:    "unknown-severity", // 未知 severity → warning
-		Environment: "prod",
+		ExternalID: "a1",
+		Source:     "GRAFANA",
+		Title:      "CPU 高",
+		Severity:   "unknown-severity", // 未知 severity → warning
 	}
 	a, err := Normalize(p, now)
 	if err != nil {
@@ -77,23 +76,10 @@ func TestNormalizeDefaults(t *testing.T) {
 	}
 }
 
-func TestNormalizeDefaultEnvironment(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
-	p := WebhookPayload{ExternalID: "a1", Source: "grafana", Title: "t", Severity: "warning", Status: "firing"}
-	a, err := Normalize(p, now)
-	if err != nil {
-		t.Fatalf("Normalize: %v", err)
-	}
-	if a.Environment != "prod" {
-		t.Errorf("Environment = %q, want default prod", a.Environment)
-	}
-}
-
 func TestNormalizeResolvedSetsResolvedAt(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
-	p := WebhookPayload{ExternalID: "a1", Source: "grafana", Title: "t", Severity: "warning", Status: "resolved", Environment: "prod"}
+	p := WebhookPayload{ExternalID: "a1", Source: "grafana", Title: "t", Severity: "warning", Status: "resolved"}
 	a, err := Normalize(p, now)
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
@@ -109,7 +95,7 @@ func TestNormalizeResolvedSetsResolvedAt(t *testing.T) {
 func TestNormalizeRejectsUnknownStatus(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
-	p := WebhookPayload{ExternalID: "a1", Source: "grafana", Title: "t", Severity: "warning", Status: "acknowledged", Environment: "prod"}
+	p := WebhookPayload{ExternalID: "a1", Source: "grafana", Title: "t", Severity: "warning", Status: "acknowledged"}
 	if _, err := Normalize(p, now); err == nil {
 		t.Error("Normalize() = nil err, want error for unknown status")
 	}

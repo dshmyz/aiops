@@ -18,7 +18,7 @@ function makeCapability(overrides: Partial<ManagedCapability> = {}): ManagedCapa
     risk: 'low',
     source: 'discovered',
     backend: { adapter: 'http', method: 'GET', path: '/api/minio/{cluster}/buckets/{bucket}/capacity', timeout_ms: 3000, base_url: 'https://middleware.example.com' },
-    input_schema: { environment: { type: 'string', required: true } },
+    input_schema: { cluster: { type: 'string', required: true } },
     output: { kind: 'observation', severity_path: '', summary_template: '', fields: { usage_pct: '$.usage_pct' } },
     ...overrides,
   });

@@ -40,7 +40,7 @@ func registerLowRiskWriteTool(t *testing.T) {
 			SupportsDryRun:      true,
 		},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment":     {Type: "string", Required: true},
+
 			"topic":           {Type: "string", Required: true},
 			"retention_hours": {Type: "integer", Required: true},
 		},
@@ -71,7 +71,7 @@ func registerMediumWriteTool(t *testing.T) {
 			SupportsDryRun:      true,
 		},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment":     {Type: "string", Required: true},
+
 			"topic":           {Type: "string", Required: true},
 			"retention_hours": {Type: "integer", Required: true},
 		},
@@ -167,7 +167,7 @@ func (f *e2eFixture) runbookTask(slug string) store.ScheduledTask {
 		Subject:     "admin-1",
 		RunKind:     store.RunKindRunbook,
 		RunbookSlug: slug,
-		Input:       map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72},
+		Input:       map[string]any{"topic": "orders", "retention_hours": 72},
 	}
 }
 
@@ -258,7 +258,7 @@ func TestRunbookExecutorE2EDeniedWithoutController(t *testing.T) {
 
 	task := store.ScheduledTask{ID: "t1", Subject: "admin-1", RunKind: store.RunKindRunbook,
 		RunbookSlug: "minio-retention-low-risk",
-		Input:       map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}}
+		Input:       map[string]any{"topic": "orders", "retention_hours": 72}}
 	if _, err := ex.Execute(context.Background(), task); !errors.Is(err, ErrRunbookDenied) {
 		t.Fatalf("Execute = %v, want ErrRunbookDenied (nil controller fail-closed)", err)
 	}

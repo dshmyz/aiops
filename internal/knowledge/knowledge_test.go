@@ -75,7 +75,7 @@ func TestExecutionIngesterOnComplete(t *testing.T) {
 	event := execution.ExecutionEvent{
 		PlanID:    "plan-123",
 		ToolName:  "topic.retention.set",
-		Input:     map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72},
+		Input:     map[string]any{"topic": "orders", "retention_hours": 72},
 		Status:    "succeeded",
 		Subject:   "ops-alice",
 		Timestamp: time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC),
@@ -171,7 +171,7 @@ func TestExecutionIngesterRichDocument(t *testing.T) {
 		PlanID:        "plan-123",
 		RequestID:     "req-abc-456",
 		ToolName:      "topic.retention.set",
-		Input:         map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72},
+		Input:         map[string]any{"topic": "orders", "retention_hours": 72},
 		Status:        "succeeded",
 		Subject:       "ops-alice",
 		Timestamp:     time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC),

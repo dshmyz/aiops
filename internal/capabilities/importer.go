@@ -246,11 +246,8 @@ func inferCapability(method, path string, operation openAPIOperation, respSchema
 	resourceType := inferResourceType(text)
 	toolOperation := inferOperation(method)
 	name := inferName(domain, resourceType, text, method)
-	input := map[string]InputField{"environment": {Type: "string", Required: true}}
+	input := map[string]InputField{}
 	for _, parameter := range operation.Parameters {
-		if strings.EqualFold(parameter.Name, "environment") {
-			continue
-		}
 		if _, exists := input[parameter.Name]; exists {
 			continue
 		}
@@ -295,9 +292,6 @@ func inferCapability(method, path string, operation openAPIOperation, respSchema
 				required[name] = true
 			}
 			for name, fieldSchema := range schema.Properties {
-				if strings.EqualFold(name, "environment") {
-					continue
-				}
 				if _, exists := input[name]; exists {
 					continue
 				}
@@ -325,7 +319,7 @@ func inferCapability(method, path string, operation openAPIOperation, respSchema
 		Risk:          inferRisk(text, toolOperation),
 		Backend:       BackendSpec{Adapter: "http", Method: method, Path: path, TimeoutMS: 3000},
 		InputSchema:   input,
-		Auth:          AuthSpec{Roles: []string{"viewer", "operator", "admin"}, EnvironmentScoped: true},
+		Auth:          AuthSpec{Roles: []string{"viewer", "operator", "admin"}},
 		AI:            AISpec{Description: operation.Summary},
 	}
 	// 从响应 schema 推断输出字段映射

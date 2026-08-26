@@ -6,9 +6,8 @@ import (
 
 func user() identity.CurrentUser {
 	return identity.CurrentUser{
-		Subject:            "admin-1",
-		Roles:              []string{"admin"},
-		AllowedEnvironments: []string{"prod", "staging", "dev"},
-		RequestID:          "request-admin",
+		Subject:   "admin-1",
+		Roles:     []string{"admin"},
+		RequestID: "request-admin",
 	}
 }

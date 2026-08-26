@@ -155,9 +155,6 @@ summary 要求：
 func buildEnrichPrompt(draft Capability) string {
 	var fields []string
 	for name, f := range draft.InputSchema {
-		if name == "environment" {
-			continue
-		}
 		fields = append(fields, fmt.Sprintf("%s(type=%s, required=%v)", name, f.Type, f.Required))
 	}
 	var outputFields []string

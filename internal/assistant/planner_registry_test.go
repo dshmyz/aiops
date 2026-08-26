@@ -14,7 +14,7 @@ func registerKafkaReadTool(t *testing.T) {
 	t.Helper()
 	tools.ResetDynamicToolsForTest()
 	err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{
-		{Tool: tools.Tool{Name: "kafka.consumer_group.lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"}, InputSchema: map[string]tools.DynamicInputField{"environment": {Type: "string", Required: true}, "cluster": {Type: "string", Required: true}, "group": {Type: "string", Required: true}}},
+		{Tool: tools.Tool{Name: "kafka.consumer_group.lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"}, InputSchema: map[string]tools.DynamicInputField{"cluster": {Type: "string", Required: true}, "group": {Type: "string", Required: true}}},
 	})
 	if err != nil {
 		t.Fatalf("register kafka read tool: %v", err)
@@ -41,7 +41,7 @@ func TestDeterministicPlannerDomainDiagnostic(t *testing.T) {
 	}
 
 	// 页面上下文声明已注册域 → 该域诊断。
-	got, err = p.Plan(ctx, user, "这个 volume 健康吗", nil, PageContext{Domain: "kafka", Environment: "prod", ResourceName: "payments"})
+	got, err = p.Plan(ctx, user, "这个 volume 健康吗", nil, PageContext{Domain: "kafka", ResourceName: "payments"})
 	if err != nil {
 		t.Fatalf("Plan(page kafka): %v", err)
 	}

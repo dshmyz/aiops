@@ -24,7 +24,7 @@ function makeCandidate(overrides: Partial<ImportCandidate> = {}): ImportCandidat
       backend: { adapter: 'http', method: 'GET', path: '/api/minio/{cluster}/buckets/{bucket}/capacity', timeout_ms: 3000, base_url: 'https://middleware.example.com' },
       input_schema: {},
       output: { kind: 'observation', severity_path: '', summary_template: '', fields: {} },
-      auth: { roles: ['viewer'], environment_scoped: true },
+      auth: { roles: ['viewer'] },
       ai: { description: '', examples: [] },
     },
     recommendation: 'recommended',

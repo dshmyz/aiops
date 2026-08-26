@@ -12,11 +12,10 @@ func TestValidatePackageAcceptsStructuredDiagnostic(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.July, 22, 9, 0, 0, 0, time.UTC)
 	pkg := diagnostics.Package{
-		ID:          "diag-1",
-		Environment: "prod",
-		Domains:     []string{"glusterfs"},
+		ID:      "diag-1",
+		Domains: []string{"glusterfs"},
 		Resources: []diagnostics.ResourceRef{{
-			Domain: "glusterfs", Type: "volume", ID: "vol-prod-data", Name: "prod-data", Environment: "prod",
+			Domain: "glusterfs", Type: "volume", ID: "vol-prod-data", Name: "prod-data",
 		}},
 		Observations: []diagnostics.Observation{{
 			ID: "obs-1", ResourceID: "vol-prod-data", Kind: "glusterfs.volume.health", Severity: diagnostics.SeverityWarning, Summary: "heal backlog is present", Data: map[string]any{"heal_pending": 12}, CollectedAt: now,
@@ -38,10 +37,9 @@ func TestValidatePackageAcceptsStructuredDiagnostic(t *testing.T) {
 func TestValidatePackageRejectsUnknownEvidenceReference(t *testing.T) {
 	t.Parallel()
 	pkg := diagnostics.Package{
-		ID:          "diag-1",
-		Environment: "prod",
-		Domains:     []string{"glusterfs"},
-		Resources:   []diagnostics.ResourceRef{{Domain: "glusterfs", Type: "volume", ID: "vol-prod-data", Name: "prod-data", Environment: "prod"}},
+		ID:      "diag-1",
+		Domains: []string{"glusterfs"},
+		Resources:   []diagnostics.ResourceRef{{Domain: "glusterfs", Type: "volume", ID: "vol-prod-data", Name: "prod-data"}},
 		Observations: []diagnostics.Observation{{
 			ID: "obs-1", ResourceID: "vol-prod-data", Kind: "glusterfs.volume.health", Severity: diagnostics.SeverityOK, Summary: "healthy", CollectedAt: time.Now().UTC(),
 		}},

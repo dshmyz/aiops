@@ -211,7 +211,7 @@ func TestLoadPublishedParsesDryRun(t *testing.T) {
 	root := t.TempDir()
 	body := strings.Replace(validKafkaWriteYAML("published"), "name: topic.retention.set", "name: kafka.topic.retention.dryrun", 1) + `
 dry_run:
-  summary: 将把 {environment} 环境的 topic {topic} 的保留时间设置为 {retention_hours} 小时。
+  summary: 将把 topic {topic} 的保留时间设置为 {retention_hours} 小时。
   command: kafka-configs --entity-name {topic} --add-config retention.hours={retention_hours}
   warnings:
     - 缩短保留时间可能导致超过 {retention_hours} 小时的历史消息被删除，请确认下游消费和审计需求。
@@ -284,9 +284,6 @@ backend:
   path: /api/minio/clusters/{cluster}/buckets/{bucket}/capacity
   timeout_ms: 3000
 input_schema:
-  environment:
-    type: string
-    required: true
   cluster:
     type: string
     required: true
@@ -300,7 +297,6 @@ output:
     usage_pct: $.data.usage_pct
 auth:
   roles: [viewer, operator, admin]
-  environment_scoped: true
 `
 }
 
@@ -319,9 +315,6 @@ backend:
   path: /api/kafka/clusters/{cluster}/topics/{topic}/retention
   timeout_ms: 3000
 input_schema:
-  environment:
-    type: string
-    required: true
   cluster:
     type: string
     required: true
@@ -336,7 +329,6 @@ output:
   summary_template: "Set topic {topic} retention to {retention_hours}h"
 auth:
   roles: [operator, admin]
-  environment_scoped: true
 governance:
   requires_action_plan: true
   requires_approval: true

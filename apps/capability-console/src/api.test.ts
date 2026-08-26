@@ -38,7 +38,7 @@ const sampleTask: ScheduledTask = {
   name: 'minio 巡检',
   subject: 'admin-1',
   capability_name: 'minio.bucket.capacity.read',
-  input: { environment: 'prod', cluster: 'm1', bucket: 'archive' },
+  input: { cluster: 'm1', bucket: 'archive' },
   schedule_kind: 'preset',
   preset: '5m',
   cron_expr: null,
@@ -134,7 +134,7 @@ describe('scheduled tasks API', () => {
     const payload: CreateScheduledTaskPayload = {
       name: 'minio 巡检',
       capability_name: 'minio.bucket.capacity.read',
-      input: { environment: 'prod' },
+      input: { cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'preset',
       preset: '5m',
     };
@@ -154,7 +154,7 @@ describe('scheduled tasks API', () => {
     const payload: UpdateScheduledTaskPayload = {
       name: 'minio 巡检',
       capability_name: 'minio.bucket.capacity.read',
-      input: { environment: 'prod' },
+      input: { cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'preset',
       preset: '5m',
       enabled: false,

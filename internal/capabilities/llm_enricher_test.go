@@ -29,8 +29,8 @@ func draftForEnrich() Capability {
 		Operation:    "write",
 		AI:           AISpec{Description: "set retention"},
 		InputSchema: map[string]InputField{
-			"environment":    {Type: "string", Required: true},
-			"topic":          {Type: "string", Required: true},
+			"topic":           {Type: "string", Required: true},
+			"cluster":         {Type: "string", Required: true},
 			"retention_hours": {Type: "integer", Required: true},
 		},
 	}
@@ -41,7 +41,7 @@ func TestLLMImportEnricherFillsFieldMetadata(t *testing.T) {
 		"description": "调整 Kafka topic 的保留期",
 		"input_schema": {
 			"topic": {"description": "目标 topic 名", "examples": ["orders"], "enum": ["orders","payments"]},
-			"environment": {"description": "目标环境", "enum": ["prod","staging","dev"]}
+			"cluster": {"description": "目标集群", "enum": ["m1","m2","m3"]}
 		}
 	}`}
 	enrich := NewLLMImportEnricher(fc)
@@ -58,9 +58,9 @@ func TestLLMImportEnricherFillsFieldMetadata(t *testing.T) {
 	if topic.Description != "目标 topic 名" || len(topic.Examples) != 1 || topic.Examples[0] != "orders" || len(topic.Enum) != 2 {
 		t.Fatalf("topic = %+v, want description+examples+enum", topic)
 	}
-	env := got[0].InputSchema["environment"]
-	if env.Description != "目标环境" || len(env.Enum) != 3 {
-		t.Fatalf("environment = %+v, want description+enum", env)
+	cluster := got[0].InputSchema["cluster"]
+	if cluster.Description != "目标集群" || len(cluster.Enum) != 3 {
+		t.Fatalf("cluster = %+v, want description+enum", cluster)
 	}
 	// 不存在于 schema 的字段不能被凭空加入input_schema
 	if _, ok := got[0].InputSchema["nonexistent"]; ok {

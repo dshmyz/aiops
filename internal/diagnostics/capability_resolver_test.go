@@ -75,7 +75,7 @@ func TestPublishedCapabilityResolverMissingDomainFallsBack(t *testing.T) {
 
 // TestPublishedCapabilityResolverInputSchemaExposesFieldNames verifies the
 // resolver converts capability input_schema keys into the map the diagnostics
-// service uses to key the read input (environment + the resource field).
+// service uses to key the read input (cluster + the resource field).
 func TestPublishedCapabilityResolverInputSchemaExposesFieldNames(t *testing.T) {
 	t.Parallel()
 	loaded := []capabilities.Capability{
@@ -104,7 +104,7 @@ func TestNewMiddlewareDomainDiagnosableViaYamlOnly(t *testing.T) {
 	t.Parallel()
 	reads := &fakeReads{result: map[string]any{"status": "ok", "unhealthy": 0}}
 	loaded := []capabilities.Capability{
-		sampleCap("cache.memcached.health.read", "cache", "cluster", tools.Read, map[string]string{"environment": "string", "name": "string"}),
+		sampleCap("cache.memcached.health.read", "cache", "cluster", tools.Read, map[string]string{"cluster": "string", "name": "string"}),
 	}
 	service := diagnostics.NewService(reads, nil).
 		WithCapabilityResolver(diagnostics.NewCapabilityResolver(loaded))
@@ -112,7 +112,6 @@ func TestNewMiddlewareDomainDiagnosableViaYamlOnly(t *testing.T) {
 	// "cache" is not in resolveRunbook's switch (glusterfs/minio/kafka only).
 	pkg, err := service.Run(context.Background(), user(), diagnostics.Request{
 		Domain:       "cache",
-		Environment:  "prod",
 		ResourceType: "cluster",
 		ResourceName: "orders-cache",
 	})

@@ -402,9 +402,8 @@ func (r *Router) authenticate(writer http.ResponseWriter, request *http.Request)
 		// 一律仍 401，不吞调用方意图。
 		if r.devAdminIdentity && request.Header.Get("Authorization") == "" {
 			user = identity.CurrentUser{
-				Subject:             devAdminSubject,
-				Roles:               []string{"admin"},
-				AllowedEnvironments: []string{"prod", "staging", "dev"},
+				Subject: devAdminSubject,
+				Roles:   []string{"admin"},
 			}
 		} else {
 			writeError(writer, http.StatusUnauthorized, "authentication required")
@@ -416,8 +415,8 @@ func (r *Router) authenticate(writer http.ResponseWriter, request *http.Request)
 }
 
 // writeForbidden 写 403 并记录权限拒绝审计事件（R2: HTTP 403 权限拒绝审计）。
-// user 是已通过鉴权的调用者身份；reason 映射到 audit Decision（permission_denied
-// / environment_denied）。audit 服务未配置时仅写响应，不阻塞调用。
+// user 是已通过鉴权的调用者身份；reason 映射到 audit Decision
+// （permission_denied 等）。audit 服务未配置时仅写响应，不阻塞调用。
 func (r *Router) writeForbidden(writer http.ResponseWriter, request *http.Request, user identity.CurrentUser, reason string, path string) {
 	writeError(writer, http.StatusForbidden, reason)
 	r.recordForbidden(request, user, reason)
@@ -429,15 +428,11 @@ func (r *Router) recordForbidden(request *http.Request, user identity.CurrentUse
 	if r.audit == nil {
 		return
 	}
-	decision := audit.DecisionPermissionDenied
-	if reason == string(policy.EnvironmentDenied) {
-		decision = audit.DecisionEnvironmentDenied
-	}
 	event := audit.Event{
 		ID:       uuid.NewString(),
 		Subject:  user.Subject,
 		Action:   audit.ActionHTTPForbidden,
-		Decision: decision,
+		Decision: audit.DecisionPermissionDenied,
 		Metadata: map[string]any{"path": request.URL.Path, "reason": reason},
 	}
 	_ = r.audit.Record(request.Context(), event)
@@ -540,6 +535,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/admin/prompts") {
 		r.serveAdminPrompts(writer, request)
+		return
+	}
+	if request.Method == http.MethodGet && request.URL.Path == "/v1/admin/tools" {
+		r.serveAdminTools(writer, request)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/admin/alert-actions") {
@@ -866,25 +865,24 @@ func writeCapabilityError(writer http.ResponseWriter, err error) {
 }
 
 type actionPlanResponse struct {
-	ID          string         `json:"id"`
-	Tool        string         `json:"tool"`
-	Environment string         `json:"environment"`
-	Risk        string         `json:"risk"`
-	Status      string         `json:"status"`
-	Version     uint           `json:"version"`
-	ExpiresAt   time.Time      `json:"expires_at"`
-	CreatedBy   string         `json:"created_by"`
-	CreatedAt   time.Time      `json:"created_at"`
-	Input       map[string]any `json:"input,omitempty"`
+	ID        string         `json:"id"`
+	Tool      string         `json:"tool"`
+	Risk      string         `json:"risk"`
+	Status    string         `json:"status"`
+	Version   uint           `json:"version"`
+	ExpiresAt time.Time      `json:"expires_at"`
+	CreatedBy string         `json:"created_by"`
+	CreatedAt time.Time      `json:"created_at"`
+	Input     map[string]any `json:"input,omitempty"`
 }
 
 func shapeActionPlan(plan store.PlanRecord, includeInput bool) (actionPlanResponse, bool) {
-	tool, input, environment, ok := canonicalActionPlan(plan)
+	tool, input, ok := canonicalActionPlan(plan)
 	if !ok {
 		return actionPlanResponse{}, false
 	}
 	response := actionPlanResponse{
-		ID: plan.ID, Tool: tool.Name, Environment: environment,
+		ID: plan.ID, Tool: tool.Name,
 		Risk: string(tool.Risk), Status: string(plan.Status), Version: plan.Version,
 		ExpiresAt: plan.ExpiresAt, CreatedBy: plan.CreatedBy, CreatedAt: plan.CreatedAt,
 	}
@@ -894,33 +892,20 @@ func shapeActionPlan(plan store.PlanRecord, includeInput bool) (actionPlanRespon
 	return response, true
 }
 
-func canonicalActionPlan(plan store.PlanRecord) (tools.Tool, map[string]any, string, bool) {
+func canonicalActionPlan(plan store.PlanRecord) (tools.Tool, map[string]any, bool) {
 	input, err := plans.DecodeInput(plan.InputJSON)
 	if err != nil {
-		return tools.Tool{}, nil, "", false
+		return tools.Tool{}, nil, false
 	}
 	_, inputHash, err := plans.CanonicalInput(input)
 	if err != nil || inputHash != plan.InputHash {
-		return tools.Tool{}, nil, "", false
+		return tools.Tool{}, nil, false
 	}
 	tool, ok := tools.Lookup(plan.ToolName)
 	if !ok || tools.ValidateInput(tool, input) != nil {
-		return tools.Tool{}, nil, "", false
+		return tools.Tool{}, nil, false
 	}
-	environment, ok := input["environment"].(string)
-	if !ok || strings.TrimSpace(environment) == "" {
-		return tools.Tool{}, nil, "", false
-	}
-	return tool, input, environment, true
-}
-
-func userAllowedEnvironment(user identity.CurrentUser, environment string) bool {
-	for _, allowed := range user.AllowedEnvironments {
-		if allowed == environment {
-			return true
-		}
-	}
-	return false
+	return tool, input, true
 }
 
 func userCanViewPlans(user identity.CurrentUser) bool {
@@ -1008,7 +993,7 @@ func (r *Router) serveListActionPlans(writer http.ResponseWriter, request *http.
 	responses := []actionPlanResponse{}
 	for _, record := range page.Plans {
 		response, ok := shapeActionPlan(record, false)
-		if !ok || !userAllowedEnvironment(user, response.Environment) {
+		if !ok {
 			continue
 		}
 		responses = append(responses, response)
@@ -1372,10 +1357,6 @@ func (r *Router) serveGetActionPlan(writer http.ResponseWriter, request *http.Re
 		writeError(writer, http.StatusNotFound, "action plan not found")
 		return
 	}
-	if !userAllowedEnvironment(user, response.Environment) {
-		r.writeForbidden(writer, request, user, string(policy.EnvironmentDenied), request.URL.Path)
-		return
-	}
 	writeCappedJSON(writer, response)
 }
 
@@ -1428,10 +1409,6 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 		Message        string                `json:"message"`
 		ConversationID string                `json:"conversation_id"`
 		PageContext    assistant.PageContext `json:"page_context,omitempty"`
-		// Environment is the legacy single-field context (already sent by the
-		// frontend today). When PageContext is empty, we promote Environment
-		// into PageContext.Environment so existing clients keep working.
-		Environment string `json:"environment,omitempty"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
 	if err := decoder.Decode(&body); err != nil {
@@ -1443,9 +1420,6 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	pc := body.PageContext
-	if pc.Environment == "" && body.Environment != "" && body.Environment != "none" {
-		pc.Environment = body.Environment
-	}
 	ctx, cancel := context.WithTimeout(request.Context(), assistantRequestTimeout)
 	defer cancel()
 	response, err := r.assistant.HandleMessage(ctx, user, body.Message, body.ConversationID, pc)
@@ -1471,9 +1445,6 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 			notifReq.ExpiresAt = response.ExpiresAt.Format(time.RFC3339)
 		}
 		if response.Trace != nil && response.Trace.ToolInvocation != nil {
-			if env, ok := response.Trace.ToolInvocation.Input["environment"].(string); ok {
-				notifReq.Environment = env
-			}
 			if input := response.Trace.ToolInvocation.Input; input != nil {
 				notifReq.Input = input
 			}
@@ -1523,7 +1494,6 @@ func (r *Router) serveAssistantStream(writer http.ResponseWriter, request *http.
 		Message        string                `json:"message"`
 		ConversationID string                `json:"conversation_id"`
 		PageContext    assistant.PageContext `json:"page_context,omitempty"`
-		Environment    string                `json:"environment,omitempty"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
 	if err := decoder.Decode(&body); err != nil {
@@ -1535,9 +1505,6 @@ func (r *Router) serveAssistantStream(writer http.ResponseWriter, request *http.
 		return
 	}
 	pc := body.PageContext
-	if pc.Environment == "" && body.Environment != "" && body.Environment != "none" {
-		pc.Environment = body.Environment
-	}
 
 	flusher, ok := writer.(http.Flusher)
 	if !ok {
@@ -2221,7 +2188,7 @@ func (r *Router) serveConfirmActionPlan(writer http.ResponseWriter, request *htt
 		writeError(writer, http.StatusBadGateway, err.Error())
 		return
 	}
-	tool, input, _, ok := canonicalActionPlan(record)
+	tool, input, ok := canonicalActionPlan(record)
 	if !ok {
 		writeError(writer, http.StatusNotFound, "action plan not found")
 		return
@@ -2305,7 +2272,7 @@ func (r *Router) serveRejectActionPlan(writer http.ResponseWriter, request *http
 		writeError(writer, http.StatusBadGateway, err.Error())
 		return
 	}
-	tool, input, _, ok := canonicalActionPlan(record)
+	tool, input, ok := canonicalActionPlan(record)
 	if !ok {
 		writeError(writer, http.StatusNotFound, "action plan not found")
 		return
@@ -2641,20 +2608,11 @@ func writeError(writer http.ResponseWriter, status int, message string) {
 }
 
 type HMACAuthenticator struct {
-	secret        []byte
-	aliasExpander AliasExpander
+	secret []byte
 }
 
 func NewHMACAuthenticator(secret []byte) *HMACAuthenticator {
 	return &HMACAuthenticator{secret: append([]byte(nil), secret...)}
-}
-
-// WithAliasExpander wires an alias expander that expands canonical environment
-// identifiers with their aliases during authentication. A nil expander is a
-// no-op.
-func (a *HMACAuthenticator) WithAliasExpander(expander AliasExpander) *HMACAuthenticator {
-	a.aliasExpander = expander
-	return a
 }
 
 func (a *HMACAuthenticator) Authenticate(request *http.Request) (identity.CurrentUser, error) {
@@ -2673,14 +2631,9 @@ func (a *HMACAuthenticator) Authenticate(request *http.Request) (identity.Curren
 	if requestID == "" {
 		requestID = newRequestID()
 	}
-	envs := claims.AllowedEnvironments
-	if a.aliasExpander != nil {
-		envs = a.aliasExpander.Expand(request.Context(), envs)
-	}
 	return identity.Project(identity.TrustedClaims{
-		Subject:             claims.Subject,
-		Roles:               claims.Roles,
-		AllowedEnvironments: envs,
+		Subject: claims.Subject,
+		Roles:   claims.Roles,
 	}, requestID)
 }
 
@@ -2736,11 +2689,10 @@ func validateTokenTime(claims jwtClaims) error {
 }
 
 type jwtClaims struct {
-	Subject             string   `json:"sub"`
-	Roles               []string `json:"roles"`
-	AllowedEnvironments []string `json:"allowed_environments"`
-	ExpiresAt           *int64   `json:"exp,omitempty"`
-	NotBefore           *int64   `json:"nbf,omitempty"`
+	Subject   string   `json:"sub"`
+	Roles     []string `json:"roles"`
+	ExpiresAt *int64   `json:"exp,omitempty"`
+	NotBefore *int64   `json:"nbf,omitempty"`
 }
 
 // clockSkew is the maximum allowed clock difference between the token issuer
@@ -2875,6 +2827,69 @@ func (r *Router) serveAdminPrompts(writer http.ResponseWriter, request *http.Req
 	}
 }
 
+// serveAdminTools 返回可用于告警编排的可用工具清单（GET /v1/admin/tools）。
+// 每个工具带基础元信息（operation/risk/domain/resource_type）；动态工具（来自能力
+// 注册）额外带 input schema（Type/Required/Enum/Description/Examples），前端据此
+// 渲染"工具下拉 + schema 驱动的动态参数表单"，避免手填工具名与参数的易错体验。
+func (r *Router) serveAdminTools(writer http.ResponseWriter, request *http.Request) {
+	if r.auth == nil {
+		writeError(writer, http.StatusServiceUnavailable, "authentication is not configured")
+		return
+	}
+	user, _, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	if !userHasAnyRole(user, "admin") {
+		r.writeForbidden(writer, request, user, string(policy.PermissionDenied), request.URL.Path)
+		return
+	}
+
+	type toolField struct {
+		Type        string   `json:"type"`
+		Required    bool     `json:"required"`
+		Description string   `json:"description,omitempty"`
+		Examples    []string `json:"examples,omitempty"`
+		Enum        []string `json:"enum,omitempty"`
+	}
+	type toolDTO struct {
+		Name             string              `json:"name"`
+		Operation        string              `json:"operation"`
+		Risk             string              `json:"risk"`
+		Domain           string              `json:"domain,omitempty"`
+		ResourceType     string              `json:"resource_type,omitempty"`
+		SupportsDryRun   bool                `json:"supports_dry_run,omitempty"`
+		InputSchema      map[string]toolField `json:"input_schema,omitempty"`
+	}
+
+	all := tools.All()
+	out := make([]toolDTO, 0, len(all))
+	for _, t := range all {
+		dto := toolDTO{
+			Name:           t.Name,
+			Operation:      string(t.Operation),
+			Risk:           string(t.Risk),
+			Domain:         t.Domain,
+			ResourceType:   t.ResourceType,
+			SupportsDryRun: t.SupportsDryRun,
+		}
+		if schema, ok := tools.DynamicInputSchema(t.Name); ok {
+			dto.InputSchema = make(map[string]toolField, len(schema))
+			for key, f := range schema {
+				dto.InputSchema[key] = toolField{
+					Type:        f.Type,
+					Required:    f.Required,
+					Description: f.Description,
+					Examples:    f.Examples,
+					Enum:        f.Enum,
+				}
+			}
+		}
+		out = append(out, dto)
+	}
+	writeCappedJSON(writer, map[string]any{"tools": out, "count": len(out)})
+}
+
 // serveAdminAlertActions handles GET/POST/PUT/DELETE /v1/admin/alert-actions[/:name]。
 // Admin role required。GET 列出所有规则，POST 创建，PUT 更新，DELETE 删除。
 func (r *Router) serveAdminAlertActions(writer http.ResponseWriter, request *http.Request) {
@@ -2907,6 +2922,23 @@ func (r *Router) serveAdminAlertActions(writer http.ResponseWriter, request *htt
 	name = strings.TrimPrefix(name, "/")
 	name = strings.TrimSpace(name)
 
+	// 触发历史/统计：GET /v1/admin/alert-actions/:name/runs
+	if request.Method == http.MethodGet && strings.HasSuffix(name, "/runs") {
+		ruleName := strings.TrimSuffix(name, "/runs")
+		ruleName = strings.TrimSpace(strings.TrimSuffix(ruleName, "/"))
+		if ruleName == "" {
+			writeError(writer, http.StatusBadRequest, "rule name is required")
+			return
+		}
+		overview, err := r.alertActions.Runs(ctx, ruleName, 10)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "list alert action runs: "+err.Error())
+			return
+		}
+		writeCappedJSON(writer, map[string]any{"rule": ruleName, "stats": overview.Stats, "recent": overview.Recent})
+		return
+	}
+
 	switch {
 	case request.Method == http.MethodGet && name == "":
 		rules := r.alertActions.List()
@@ -2932,6 +2964,22 @@ func (r *Router) serveAdminAlertActions(writer http.ResponseWriter, request *htt
 		}
 		log.Printf("[httpapi] alert action %q upserted", body.Name)
 		writeCappedJSON(writer, map[string]any{"status": "created", "name": body.Name})
+
+	case request.Method == http.MethodPatch && name != "":
+		// 启停开关：PATCH /v1/admin/alert-actions/:name { "enabled": true|false }。
+		// 用 SetEnabled 只改启停位，避免把未提交的编辑内容一并覆写。
+		var patch struct {
+			Enabled *bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&patch); err != nil || patch.Enabled == nil {
+			writeError(writer, http.StatusBadRequest, "enabled is required")
+			return
+		}
+		if err := r.alertActions.SetEnabled(ctx, name, *patch.Enabled); err != nil {
+			writeError(writer, http.StatusInternalServerError, "set alert action enabled: "+err.Error())
+			return
+		}
+		writeCappedJSON(writer, map[string]any{"status": "updated", "name": name, "enabled": *patch.Enabled})
 
 	case request.Method == http.MethodDelete && name != "":
 		// 真实删除 + 热重载（修复前是 TODO，只返回假成功）。

@@ -51,7 +51,7 @@ func TestCapabilityListAllowsViewer(t *testing.T) {
 		execution.NewReadOnlyService(&readRunner{}, nil),
 		httpapi.WithCapabilities(service),
 	)
-	req := signedRequest(t, "/v1/capabilities", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -88,7 +88,7 @@ func TestCapabilityTestRequiresAdmin(t *testing.T) {
 		execution.NewReadOnlyService(&readRunner{}, nil),
 		httpapi.WithCapabilities(service),
 	)
-	req := signedRequest(t, "/v1/capabilities/test", `{"capability":{"name":"minio.bucket.capacity.read"},"input":{"environment":"prod"}}`, "operator-1", []string{"operator"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/test", `{"capability":{"name":"minio.bucket.capacity.read"},"input":{}}`, "operator-1", []string{"operator"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -110,7 +110,7 @@ func TestCapabilityImportOpenAPIURLRequiresAdmin(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"openapi_url":"https://admin.example.com/v3/api-docs","backend_base_url":"https://middleware.example.com"}`
-	req := signedRequest(t, "/v1/capabilities/import/openapi-url", body, "operator-1", []string{"operator"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/import/openapi-url", body, "operator-1", []string{"operator"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -144,7 +144,7 @@ func TestCapabilityImportOpenAPIURLReturnsImportedDrafts(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"openapi_url":"https://admin.example.com/v3/api-docs","backend_base_url":"https://middleware.example.com"}`
-	req := signedRequest(t, "/v1/capabilities/import/openapi-url", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/import/openapi-url", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -172,7 +172,7 @@ func TestCapabilityPreviewOpenAPIURLRequiresAdmin(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"openapi_url":"https://admin.example.com/v3/api-docs","backend_base_url":"https://middleware.example.com"}`
-	req := signedRequest(t, "/v1/capabilities/import/openapi-url/preview", body, "operator-1", []string{"operator"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/import/openapi-url/preview", body, "operator-1", []string{"operator"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -216,7 +216,7 @@ func TestCapabilityPreviewOpenAPIURLReturnsCandidates(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"openapi_url":"https://admin.example.com/v3/api-docs","backend_base_url":"https://middleware.example.com"}`
-	req := signedRequest(t, "/v1/capabilities/import/openapi-url/preview", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/import/openapi-url/preview", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -258,7 +258,7 @@ func TestCapabilityCommitOpenAPIURLReturnsSavedDrafts(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"openapi_url":"https://admin.example.com/v3/api-docs","backend_base_url":"https://middleware.example.com","fingerprint":"sha256:test","selections":[{"candidate_id":"GET /api/minio/{cluster}/buckets/{bucket}/capacity","overrides":{"name":"minio.bucket.capacity.read","domain":"minio","resource_type":"bucket","operation":"read","risk":"low"}}]}`
-	req := signedRequest(t, "/v1/capabilities/import/openapi-url/commit", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/import/openapi-url/commit", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -305,7 +305,7 @@ func TestCapabilityImportOpenAPIURLAllowsLargeDraftResponse(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"openapi_url":"https://admin.example.com/v3/api-docs","backend_base_url":"https://middleware.example.com"}`
-	req := signedRequest(t, "/v1/capabilities/import/openapi-url", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/import/openapi-url", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -330,25 +330,25 @@ func TestCapabilityDraftValidatePublishAndUnpublishRequireAdmin(t *testing.T) {
 	capabilityBody := `{"name":"minio.bucket.capacity.read","status":"needs_review"}`
 
 	createRes := httptest.NewRecorder()
-	router.ServeHTTP(createRes, signedRequest(t, "/v1/capabilities/drafts", capabilityBody, "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(createRes, signedRequest(t, "/v1/capabilities/drafts", capabilityBody, "admin-1", []string{"admin"}))
 	if createRes.Code != http.StatusOK || service.saveCalls != 1 || !strings.Contains(createRes.Body.String(), `"source":"discovered"`) {
 		t.Fatalf("create status = %d body = %s saveCalls = %d, want saved draft", createRes.Code, createRes.Body.String(), service.saveCalls)
 	}
 
 	validateRes := httptest.NewRecorder()
-	router.ServeHTTP(validateRes, signedRequest(t, "/v1/capabilities/validate", capabilityBody, "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(validateRes, signedRequest(t, "/v1/capabilities/validate", capabilityBody, "admin-1", []string{"admin"}))
 	if validateRes.Code != http.StatusOK || !strings.Contains(validateRes.Body.String(), `"valid":true`) {
 		t.Fatalf("validate status = %d body = %s, want valid result", validateRes.Code, validateRes.Body.String())
 	}
 
 	publishRes := httptest.NewRecorder()
-	router.ServeHTTP(publishRes, signedRequest(t, "/v1/capabilities/minio.bucket.capacity.read/publish", `{}`, "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(publishRes, signedRequest(t, "/v1/capabilities/minio.bucket.capacity.read/publish", `{}`, "admin-1", []string{"admin"}))
 	if publishRes.Code != http.StatusOK || service.publishName != "minio.bucket.capacity.read" || !strings.Contains(publishRes.Body.String(), `"source":"published"`) {
 		t.Fatalf("publish status = %d body = %s name = %q, want published", publishRes.Code, publishRes.Body.String(), service.publishName)
 	}
 
 	unpublishRes := httptest.NewRecorder()
-	router.ServeHTTP(unpublishRes, signedRequest(t, "/v1/capabilities/minio.bucket.capacity.read/unpublish", `{}`, "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(unpublishRes, signedRequest(t, "/v1/capabilities/minio.bucket.capacity.read/unpublish", `{}`, "admin-1", []string{"admin"}))
 	if unpublishRes.Code != http.StatusOK || service.unpublishName != "minio.bucket.capacity.read" || !strings.Contains(unpublishRes.Body.String(), `"source":"discovered"`) {
 		t.Fatalf("unpublish status = %d body = %s name = %q, want discovered", unpublishRes.Code, unpublishRes.Body.String(), service.unpublishName)
 	}
@@ -363,7 +363,7 @@ func TestCapabilityQuickPublishRequiresAdmin(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"name":"redis.cluster.info.read","domain":"redis","resource_type":"cluster","backend_base_url":"https://middleware.example.com","method":"GET","path":"/api/redis/clusters/{cluster}/info","description":"Read Redis cluster info"}`
-	req := signedRequest(t, "/v1/capabilities/quick-publish", body, "operator-1", []string{"operator"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/quick-publish", body, "operator-1", []string{"operator"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -398,7 +398,7 @@ func TestCapabilityQuickPublishPublishesCapability(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"name":"redis.cluster.info.read","domain":"redis","resource_type":"cluster","backend_base_url":"https://middleware.example.com","method":"GET","path":"/api/redis/clusters/{cluster}/info","description":"Read Redis cluster info"}`
-	req := signedRequest(t, "/v1/capabilities/quick-publish", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/quick-publish", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -428,7 +428,7 @@ func TestCapabilityQuickPublishMapsConflict(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"name":"redis.cluster.info.read","domain":"redis","resource_type":"cluster","backend_base_url":"https://middleware.example.com","method":"GET","path":"/api/redis/clusters/{cluster}/info","description":"Read Redis cluster info"}`
-	req := signedRequest(t, "/v1/capabilities/quick-publish", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/quick-publish", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -449,7 +449,7 @@ func TestCapabilityQuickPublishMapsInvalidRequest(t *testing.T) {
 		httpapi.WithCapabilities(service),
 	)
 	body := `{"name":"redis.cluster.info.read","domain":"redis","resource_type":"cluster","backend_base_url":"https://middleware.example.com","method":"OPTIONS","path":"/api/redis/clusters/{cluster}/info","description":"Read Redis cluster info"}`
-	req := signedRequest(t, "/v1/capabilities/quick-publish", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/capabilities/quick-publish", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -464,7 +464,7 @@ func TestReadToolRequiresAuthenticatedRole(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/v1/tools/cluster.status.read/read", strings.NewReader(`{"environment":"prod"}`)))
+	router.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/v1/tools/cluster.status.read/read", strings.NewReader(`{}`)))
 
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", res.Code, http.StatusUnauthorized)
@@ -475,7 +475,7 @@ func TestReadToolExecutesAllowedReadToolAndAudits(t *testing.T) {
 	t.Parallel()
 	runner := &readRunner{result: map[string]any{"status": "green"}}
 	router, repository := testRouter(t, runner)
-	req := signedRequest(t, "/v1/tools/cluster.status.read/read", `{"environment":"prod"}`, "operator-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/tools/cluster.status.read/read", `{}`, "operator-1", []string{"viewer"})
 
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
@@ -499,7 +499,7 @@ func TestReadToolRejectsWriteTool(t *testing.T) {
 	t.Parallel()
 	runner := &readRunner{}
 	router, repository := testRouter(t, runner)
-	req := signedRequest(t, "/v1/tools/topic.retention.set/read", `{"environment":"prod","topic":"orders","retention_hours":72}`, "operator-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/tools/topic.retention.set/read", `{"topic":"orders","retention_hours":72}`, "operator-1", []string{"admin"})
 
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
@@ -519,7 +519,7 @@ func TestReadToolRejectsWriteTool(t *testing.T) {
 func TestReadToolCapsResponseSize(t *testing.T) {
 	t.Parallel()
 	router, _ := testRouter(t, &readRunner{result: map[string]any{"payload": strings.Repeat("x", 1024*1024+1)}})
-	req := signedRequest(t, "/v1/tools/cluster.status.read/read", `{"environment":"prod"}`, "operator-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/tools/cluster.status.read/read", `{}`, "operator-1", []string{"viewer"})
 
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
@@ -534,7 +534,7 @@ func TestAssistantMessagesRequiresAuthentication(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"查看 prod 集群状态"}`)))
+	router.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"查看 集群状态"}`)))
 
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", res.Code, http.StatusUnauthorized)
@@ -544,7 +544,7 @@ func TestAssistantMessagesRequiresAuthentication(t *testing.T) {
 func TestAssistantMessagesViewerReadSuccess(t *testing.T) {
 	t.Parallel()
 	router, _ := testRouter(t, &readRunner{result: map[string]any{"status": "green"}})
-	req := signedRequest(t, "/v1/assistant/messages", `{"message":"查看 prod kafka 状态"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/assistant/messages", `{"message":"查看 kafka 状态"}`, "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -577,7 +577,7 @@ func TestAssistantMessagesIncludesTraceForReadAnswer(t *testing.T) {
 		httpapi.WithActionPlans(repository),
 		httpapi.WithAuditEvents(auditService),
 	)
-	req := signedRequest(t, "/v1/assistant/messages", `{"message":"查看 prod 集群状态"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/assistant/messages", `{"message":"查看 集群状态"}`, "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -630,7 +630,7 @@ func TestAssistantMessagesPreservesTraceInDevTokenResponse(t *testing.T) {
 		httpapi.WithActionPlans(repository),
 		httpapi.WithDevelopmentConfirmationTokens(),
 	)
-	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -658,7 +658,7 @@ func TestAssistantMessagesDiagnosticResponseReservesWrapperCapacity(t *testing.T
 		"details": strings.Repeat("\u4e2d\"\\\\", 888),
 	}}
 	router, _ := testRouter(t, runner)
-	req := signedRequest(t, "/v1/assistant/messages", `{"message":"检查 prod glusterfs `+resourceName+` health"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/assistant/messages", `{"message":"检查 glusterfs `+resourceName+` health"}`, "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -678,7 +678,7 @@ func TestAssistantMessagesDiagnosticResponseReservesWrapperCapacity(t *testing.T
 func TestAssistantMessagesReturnsMiddlewareDiagnostic(t *testing.T) {
 	t.Parallel()
 	router, _ := testRouter(t, &readRunner{result: map[string]any{"status": "warning", "capacity_pct": 82.5}})
-	req := signedRequest(t, "/v1/assistant/messages", `{"message":"检查 prod glusterfs data volume 健康"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/assistant/messages", `{"message":"检查 glusterfs data volume 健康"}`, "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -717,7 +717,7 @@ func TestAssistantMessagesMapsDiagnosticErrorsToExpectedStatus(t *testing.T) {
 				httpapi.WithAssistant(errorAssistant{err: testCase.err}),
 			)
 			res := httptest.NewRecorder()
-			req := signedRequest(t, "/v1/assistant/messages", `{"message":"检查 prod glusterfs data volume 健康"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
+			req := signedRequest(t, "/v1/assistant/messages", `{"message":"检查 glusterfs data volume 健康"}`, "viewer-1", []string{"viewer"})
 
 			router.ServeHTTP(res, req)
 
@@ -733,10 +733,10 @@ func TestAssistantMessagesRejectsInvalidDiagnosticCandidatesBeforeRead(t *testin
 		name    string
 		request diagnostics.Request
 	}{
-		{name: "invalid runbook", request: diagnostics.Request{Domain: "glusterfs", Environment: "prod", Runbook: "repair"}},
-		{name: "invalid resource type", request: diagnostics.Request{Domain: "glusterfs", Environment: "prod", ResourceType: "bucket"}},
-		{name: "oversized environment", request: diagnostics.Request{Domain: "glusterfs", Environment: strings.Repeat("e", 128)}},
-		{name: "oversized resource name", request: diagnostics.Request{Domain: "glusterfs", Environment: "prod", ResourceName: strings.Repeat("r", 128)}},
+		{name: "invalid runbook", request: diagnostics.Request{Domain: "glusterfs", Runbook: "repair"}},
+		{name: "invalid resource type", request: diagnostics.Request{Domain: "glusterfs", ResourceType: "bucket"}},
+		{name: "oversized domain", request: diagnostics.Request{Domain: strings.Repeat("d", 128)}},
+		{name: "oversized resource name", request: diagnostics.Request{Domain: "glusterfs", ResourceName: strings.Repeat("r", 128)}},
 	}
 
 	for _, testCase := range cases {
@@ -751,7 +751,7 @@ func TestAssistantMessagesRejectsInvalidDiagnosticCandidatesBeforeRead(t *testin
 			)
 			res := httptest.NewRecorder()
 
-			router.ServeHTTP(res, signedRequest(t, "/v1/assistant/messages", `{"message":"check diagnostic"}`, "viewer-1", []string{"viewer"}, []string{"prod"}))
+			router.ServeHTTP(res, signedRequest(t, "/v1/assistant/messages", `{"message":"check diagnostic"}`, "viewer-1", []string{"viewer"}))
 
 			if res.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
@@ -779,7 +779,7 @@ func TestAssistantMessagesViewerWriteDenied(t *testing.T) {
 		httpapi.WithAssistant(assistantService),
 		httpapi.WithActionPlans(repository),
 	)
-	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -805,7 +805,7 @@ func TestAssistantMessagesAdminWriteReturnsConfirmationWithoutToken(t *testing.T
 		httpapi.WithAssistant(assistantService),
 		httpapi.WithActionPlans(repository),
 	)
-	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -839,7 +839,7 @@ func TestAssistantMessagesCanExposeConfirmationTokenForDevelopment(t *testing.T)
 		httpapi.WithActionPlans(repository),
 		httpapi.WithDevelopmentConfirmationTokens(),
 	)
-	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/assistant/messages", `{"message":"把 prod 的 orders topic retention 改成 72 小时"}`, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -911,7 +911,7 @@ func TestListConversationsReturnsOnlySubjectConversations(t *testing.T) {
 	seedConversation(t, conversations, "viewer-2", "bob 会话", "private", now)
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations", "", "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations", "", "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
@@ -935,7 +935,7 @@ func TestListConversationsExcludesArchivedByDefault(t *testing.T) {
 	}
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations", "", "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations", "", "viewer-1", []string{"viewer"}))
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.Code)
 	}
@@ -944,7 +944,7 @@ func TestListConversationsExcludesArchivedByDefault(t *testing.T) {
 	}
 
 	resArchived := httptest.NewRecorder()
-	router.ServeHTTP(resArchived, signedRequest(t, "/v1/assistant/conversations?archived=true", "", "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(resArchived, signedRequest(t, "/v1/assistant/conversations?archived=true", "", "viewer-1", []string{"viewer"}))
 	if resArchived.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resArchived.Code)
 	}
@@ -957,12 +957,12 @@ func TestGetConversationReturnsConversationAndTurns(t *testing.T) {
 	t.Parallel()
 	router, conversations := newConversationRouter(t, nil)
 	now := time.Date(2026, time.July, 27, 10, 0, 0, 0, time.UTC)
-	conv := seedConversation(t, conversations, "viewer-1", "minio 容量查询", "检查 prod minio archive bucket 容量", now)
-	seedTurn(t, conversations, conv.ID, store.ConversationRoleUser, "检查 prod minio archive bucket 容量", "", now)
+	conv := seedConversation(t, conversations, "viewer-1", "minio 容量查询", "检查 minio archive bucket 容量", now)
+	seedTurn(t, conversations, conv.ID, store.ConversationRoleUser, "检查 minio archive bucket 容量", "", now)
 	seedTurn(t, conversations, conv.ID, store.ConversationRoleAssistant, "Bucket archive usage is 77%", "answer", now.Add(time.Second))
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations/"+conv.ID, "", "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations/"+conv.ID, "", "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
@@ -986,7 +986,7 @@ func TestGetConversationReturns404ForForeignConversation(t *testing.T) {
 	conv := seedConversation(t, conversations, "owner-1", "private", "secret", now)
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations/"+conv.ID, "", "intruder-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations/"+conv.ID, "", "intruder-1", []string{"viewer"}))
 
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 to avoid leaking existence", res.Code)
@@ -1001,7 +1001,7 @@ func TestGetConversationReturns404ForMissingConversation(t *testing.T) {
 	router, _ := newConversationRouter(t, nil)
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations/nonexistent-id", "", "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/conversations/nonexistent-id", "", "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", res.Code)
@@ -1015,7 +1015,7 @@ func TestArchiveConversationSetsArchivedAtAndReturns204(t *testing.T) {
 	conv := seedConversation(t, conversations, "viewer-1", "to archive", "hello", now)
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedPostRequest(t, "/v1/assistant/conversations/"+conv.ID+"/archive", "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedPostRequest(t, "/v1/assistant/conversations/"+conv.ID+"/archive", "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", res.Code)
@@ -1036,7 +1036,7 @@ func TestArchiveConversationReturns404ForForeignConversation(t *testing.T) {
 	conv := seedConversation(t, conversations, "owner-1", "private", "secret", now)
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedPostRequest(t, "/v1/assistant/conversations/"+conv.ID+"/archive", "intruder-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedPostRequest(t, "/v1/assistant/conversations/"+conv.ID+"/archive", "intruder-1", []string{"viewer"}))
 
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", res.Code)
@@ -1063,7 +1063,7 @@ func TestAssistantMessagesEndpointReturnsConversationID(t *testing.T) {
 	)
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/messages", `{"message":"查看 prod 集群状态"}`, "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/messages", `{"message":"查看 集群状态"}`, "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
@@ -1086,17 +1086,17 @@ func TestListActionPlansRequiresAuthentication(t *testing.T) {
 	}
 }
 
-func TestListActionPlansReturnsOnlyAllowedPendingPlans(t *testing.T) {
+func TestListActionPlansReturnsAllPendingPlans(t *testing.T) {
 	t.Parallel()
 	router, _, planService := testRouterWithPlans(t, &readRunner{})
 	prodPlan := createPendingPlan(t, planService)
-	stagingInput := map[string]any{"environment": "staging", "topic": "orders", "retention_hours": 72}
-	decision := policy.Evaluate(identity.CurrentUser{Subject: "admin-1", Roles: []string{"admin"}, AllowedEnvironments: []string{"staging"}, RequestID: "request-staging"}, tool(t, "topic.retention.set"), stagingInput)
-	stagingPlan, err := planService.CreatePlan(context.Background(), identity.CurrentUser{Subject: "admin-1", Roles: []string{"admin"}, AllowedEnvironments: []string{"staging"}, RequestID: "request-staging"}, decision, stagingInput)
+	secondInput := map[string]any{"topic": "payments", "retention_hours": 48}
+	decision := policy.Evaluate(identity.CurrentUser{Subject: "admin-1", Roles: []string{"admin"}, RequestID: "request-second"}, tool(t, "topic.retention.set"), secondInput)
+	secondPlan, err := planService.CreatePlan(context.Background(), identity.CurrentUser{Subject: "admin-1", Roles: []string{"admin"}, RequestID: "request-second"}, decision, secondInput)
 	if err != nil {
-		t.Fatalf("create staging plan: %v", err)
+		t.Fatalf("create second plan: %v", err)
 	}
-	req := signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -1108,8 +1108,8 @@ func TestListActionPlansReturnsOnlyAllowedPendingPlans(t *testing.T) {
 	if !strings.Contains(body, prodPlan.ID) {
 		t.Fatalf("body = %s, want prod plan", body)
 	}
-	if strings.Contains(body, stagingPlan.ID) {
-		t.Fatalf("body = %s, must not include staging plan", body)
+	if !strings.Contains(body, secondPlan.ID) {
+		t.Fatalf("body = %s, want second plan", body)
 	}
 	if strings.Contains(body, "confirmation_token") {
 		t.Fatalf("body = %s, must not expose confirmation token", body)
@@ -1119,7 +1119,7 @@ func TestListActionPlansReturnsOnlyAllowedPendingPlans(t *testing.T) {
 func TestListActionPlansRejectsUnsupportedStatus(t *testing.T) {
 	t.Parallel()
 	router, _ := testRouter(t, &readRunner{})
-	req := signedRequest(t, "/v1/action-plans?status=confirmed", "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/action-plans?status=confirmed", "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -1138,7 +1138,7 @@ func TestListActionPlansRejectsUnsupportedOrDuplicateQueryParameters(t *testing.
 		"/v1/action-plans?status=pending_confirmation&status=pending_confirmation",
 	} {
 		res := httptest.NewRecorder()
-		router.ServeHTTP(res, signedRequest(t, path, "", "admin-1", []string{"admin"}, []string{"prod"}))
+		router.ServeHTTP(res, signedRequest(t, path, "", "admin-1", []string{"admin"}))
 		if res.Code != http.StatusBadRequest {
 			t.Fatalf("path %q status = %d body = %s, want 400", path, res.Code, res.Body.String())
 		}
@@ -1151,20 +1151,20 @@ func TestListActionPlansRejectsUnknownRole(t *testing.T) {
 	createPendingPlan(t, planService)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "unknown-1", []string{"unrecognized"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "unknown-1", []string{"unrecognized"}))
 
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("status = %d body = %s, want 403", res.Code, res.Body.String())
 	}
 }
 
-func TestListActionPlansAllowsViewerInAllowedEnvironment(t *testing.T) {
+func TestListActionPlansAllowsViewer(t *testing.T) {
 	t.Parallel()
 	router, _, planService := testRouterWithPlans(t, &readRunner{})
 	plan := createPendingPlan(t, planService)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), plan.ID) {
 		t.Fatalf("status = %d body = %s, want visible plan", res.Code, res.Body.String())
@@ -1178,7 +1178,7 @@ func TestListActionPlansExcludesStoredInputHashMismatch(t *testing.T) {
 	corrupted := createInputHashMismatchPlan(t, repository)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
@@ -1188,11 +1188,11 @@ func TestListActionPlansExcludesStoredInputHashMismatch(t *testing.T) {
 	}
 }
 
-func TestGetActionPlanReturnsDetailForAllowedEnvironment(t *testing.T) {
+func TestGetActionPlanReturnsDetail(t *testing.T) {
 	t.Parallel()
 	router, _, planService := testRouterWithPlans(t, &readRunner{})
 	plan := createPendingPlan(t, planService)
-	req := signedRequest(t, "/v1/action-plans/"+plan.ID, "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/action-plans/"+plan.ID, "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -1201,7 +1201,7 @@ func TestGetActionPlanReturnsDetailForAllowedEnvironment(t *testing.T) {
 		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
 	}
 	body := res.Body.String()
-	for _, want := range []string{`"id":"` + plan.ID + `"`, `"tool":"topic.retention.set"`, `"environment":"prod"`, `"topic":"orders"`, `"retention_hours":72`} {
+	for _, want := range []string{`"id":"` + plan.ID + `"`, `"tool":"topic.retention.set"`, `"topic":"orders"`, `"retention_hours":72`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body = %s, want %s", body, want)
 		}
@@ -1211,40 +1211,26 @@ func TestGetActionPlanReturnsDetailForAllowedEnvironment(t *testing.T) {
 	}
 }
 
-func TestGetActionPlanRejectsDisallowedEnvironment(t *testing.T) {
-	t.Parallel()
-	router, _, planService := testRouterWithPlans(t, &readRunner{})
-	plan := createPendingPlan(t, planService)
-	req := signedRequest(t, "/v1/action-plans/"+plan.ID, "", "admin-1", []string{"admin"}, []string{"staging"})
-	res := httptest.NewRecorder()
-
-	router.ServeHTTP(res, req)
-
-	if res.Code != http.StatusForbidden {
-		t.Fatalf("status = %d body = %s, want 403", res.Code, res.Body.String())
-	}
-}
-
 func TestGetActionPlanRejectsUnknownRole(t *testing.T) {
 	t.Parallel()
 	router, _, planService := testRouterWithPlans(t, &readRunner{})
 	plan := createPendingPlan(t, planService)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID, "", "unknown-1", []string{"unrecognized"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID, "", "unknown-1", []string{"unrecognized"}))
 
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("status = %d body = %s, want 403", res.Code, res.Body.String())
 	}
 }
 
-func TestGetActionPlanAllowsViewerInAllowedEnvironment(t *testing.T) {
+func TestGetActionPlanAllowsViewer(t *testing.T) {
 	t.Parallel()
 	router, _, planService := testRouterWithPlans(t, &readRunner{})
 	plan := createPendingPlan(t, planService)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID, "", "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID, "", "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), plan.ID) {
 		t.Fatalf("status = %d body = %s, want visible plan", res.Code, res.Body.String())
@@ -1257,7 +1243,7 @@ func TestGetActionPlanReturnsJSONNotFoundForStoredInputHashMismatch(t *testing.T
 	plan := createInputHashMismatchPlan(t, repository)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID, "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID, "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("status = %d body = %s, want 404", res.Code, res.Body.String())
@@ -1273,10 +1259,10 @@ func TestGetActionPlanReturnsJSONNotFoundForStoredInputHashMismatch(t *testing.T
 func TestGetActionPlanUsesCanonicalToolRisk(t *testing.T) {
 	t.Parallel()
 	router, repository, _ := testRouterWithPlans(t, &readRunner{})
-	plan := createStoredPlan(t, repository, "canonical-risk-plan", `{"environment":"prod","topic":"orders","retention_hours":72}`, string(tools.High))
+	plan := createStoredPlan(t, repository, "canonical-risk-plan", `{"topic":"orders","retention_hours":72}`, string(tools.High))
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID, "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID, "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
@@ -1291,7 +1277,7 @@ func TestConfirmActionPlanConfirmsAndExecutes(t *testing.T) {
 	runner := &readRunner{}
 	router, repository, planService := testRouterWithPlans(t, runner)
 	plan := createPendingPlan(t, planService)
-	req := signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-2", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-2", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -1333,7 +1319,7 @@ func TestConfirmActionPlanSurfacesVerificationInResponse(t *testing.T) {
 		httpapi.WithAuditEvents(auditService),
 	)
 	plan := createPendingPlan(t, planService)
-	req := signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-2", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-2", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -1377,7 +1363,7 @@ func TestConfirmActionPlanRejectsMissingToken(t *testing.T) {
 	t.Parallel()
 	router, _, planService := testRouterWithPlans(t, &readRunner{})
 	plan := createPendingPlan(t, planService)
-	req := signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1}`, "admin-2", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1}`, "admin-2", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -1393,20 +1379,7 @@ func TestConfirmActionPlanRejectsViewer(t *testing.T) {
 	plan := createPendingPlan(t, planService)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "viewer-1", []string{"viewer"}, []string{"prod"}))
-
-	if res.Code != http.StatusForbidden {
-		t.Fatalf("status = %d body = %s, want 403", res.Code, res.Body.String())
-	}
-}
-
-func TestConfirmActionPlanRejectsDisallowedEnvironment(t *testing.T) {
-	t.Parallel()
-	router, _, planService := testRouterWithPlans(t, &readRunner{})
-	plan := createPendingPlan(t, planService)
-	res := httptest.NewRecorder()
-
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-1", []string{"admin"}, []string{"staging"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("status = %d body = %s, want 403", res.Code, res.Body.String())
@@ -1419,7 +1392,7 @@ func TestConfirmActionPlanRejectsStoredInputHashMismatchWithoutConsumingToken(t 
 	plan := createInputHashMismatchPlan(t, repository)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"valid-confirmation-token"}`, "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"valid-confirmation-token"}`, "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("status = %d body = %s, want 404", res.Code, res.Body.String())
@@ -1439,7 +1412,7 @@ func TestConfirmActionPlanRejectsMalformedStoredInputWithoutConsumingToken(t *te
 	plan := createMalformedPlan(t, repository)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"valid-confirmation-token"}`, "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"valid-confirmation-token"}`, "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("status = %d body = %s, want 404", res.Code, res.Body.String())
@@ -1459,13 +1432,13 @@ func TestConfirmedActionPlanDisappearsFromPendingList(t *testing.T) {
 	plan := createPendingPlan(t, planService)
 	confirmRes := httptest.NewRecorder()
 
-	router.ServeHTTP(confirmRes, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-2", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(confirmRes, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-2", []string{"admin"}))
 	if confirmRes.Code != http.StatusOK {
 		t.Fatalf("confirm status = %d body = %s, want 200", confirmRes.Code, confirmRes.Body.String())
 	}
 
 	listRes := httptest.NewRecorder()
-	router.ServeHTTP(listRes, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "admin-2", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(listRes, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "admin-2", []string{"admin"}))
 	if listRes.Code != http.StatusOK {
 		t.Fatalf("list status = %d body = %s, want 200", listRes.Code, listRes.Body.String())
 	}
@@ -1479,7 +1452,7 @@ func TestRejectActionPlanRejectsPendingAndDisappearsFromPendingList(t *testing.T
 	router, repository, planService := testRouterWithPlans(t, &readRunner{})
 	plan := createPendingPlan(t, planService)
 
-	req := signedRequest(t, "/v1/action-plans/"+plan.ID+"/reject", `{"expected_version":1}`, "admin-2", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/action-plans/"+plan.ID+"/reject", `{"expected_version":1}`, "admin-2", []string{"admin"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -1496,7 +1469,7 @@ func TestRejectActionPlanRejectsPendingAndDisappearsFromPendingList(t *testing.T
 
 	// rejected plan 从待确认列表消失。
 	listRes := httptest.NewRecorder()
-	router.ServeHTTP(listRes, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "admin-2", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(listRes, signedRequest(t, "/v1/action-plans?status=pending_confirmation", "", "admin-2", []string{"admin"}))
 	if listRes.Code != http.StatusOK {
 		t.Fatalf("list status = %d, want 200", listRes.Code)
 	}
@@ -1511,7 +1484,7 @@ func TestRejectActionPlanRejectsViewer(t *testing.T) {
 	plan := createPendingPlan(t, planService)
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/reject", `{"expected_version":1}`, "viewer-1", []string{"viewer"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/action-plans/"+plan.ID+"/reject", `{"expected_version":1}`, "viewer-1", []string{"viewer"}))
 
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("status = %d body = %s, want 403", res.Code, res.Body.String())
@@ -1525,14 +1498,14 @@ func TestRejectActionPlanRejectsAlreadyConfirmedPlan(t *testing.T) {
 
 	// 先确认。
 	confirmRes := httptest.NewRecorder()
-	router.ServeHTTP(confirmRes, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-2", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(confirmRes, signedRequest(t, "/v1/action-plans/"+plan.ID+"/confirm", `{"expected_version":1,"confirmation_token":"`+plan.ConfirmationToken+`"}`, "admin-2", []string{"admin"}))
 	if confirmRes.Code != http.StatusOK {
 		t.Fatalf("confirm status = %d, want 200", confirmRes.Code)
 	}
 
 	// 已确认的 plan 拒绝 → 乐观冲突 409。
 	rejectRes := httptest.NewRecorder()
-	router.ServeHTTP(rejectRes, signedRequest(t, "/v1/action-plans/"+plan.ID+"/reject", `{"expected_version":2}`, "admin-2", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(rejectRes, signedRequest(t, "/v1/action-plans/"+plan.ID+"/reject", `{"expected_version":2}`, "admin-2", []string{"admin"}))
 	if rejectRes.Code != http.StatusConflict {
 		t.Fatalf("reject confirmed plan status = %d body = %s, want 409", rejectRes.Code, rejectRes.Body.String())
 	}
@@ -1545,7 +1518,7 @@ func TestOverviewReturnsPendingCount(t *testing.T) {
 	createPendingPlan(t, planService)
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/overview", "", "admin-2", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/overview", "", "admin-2", []string{"admin"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
@@ -1585,7 +1558,7 @@ func TestListAuditEventsRejectsUnknownRole(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events", "", "unknown-1", []string{"unrecognized"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events", "", "unknown-1", []string{"unrecognized"}))
 
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("status = %d body = %s, want 403", res.Code, res.Body.String())
@@ -1606,7 +1579,7 @@ func TestListAuditEventsReturnsChronologicalEvents(t *testing.T) {
 			t.Fatalf("append audit %s: %v", event.ID, err)
 		}
 	}
-	req := signedRequest(t, "/v1/audit-events", "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/audit-events", "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -1662,7 +1635,7 @@ func TestListAuditEventsFiltersByToolActionDecisionAndLimit(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			req := signedRequest(t, "/v1/audit-events"+testCase.query, "", "admin-1", []string{"admin"}, []string{"prod"})
+			req := signedRequest(t, "/v1/audit-events"+testCase.query, "", "admin-1", []string{"admin"})
 			res := httptest.NewRecorder()
 			router.ServeHTTP(res, req)
 			if res.Code != http.StatusOK {
@@ -1708,7 +1681,7 @@ func TestListAuditEventsFinalResultOnlyFilter(t *testing.T) {
 	}
 
 	// 不带参数：返回全部 4 条（含驳回事件）。
-	req := signedRequest(t, "/v1/audit-events", "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/audit-events", "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -1727,7 +1700,7 @@ func TestListAuditEventsFinalResultOnlyFilter(t *testing.T) {
 	}
 
 	// final_result_only=true：隐藏 plan_rejected + execution_rejected，保留 2 条。
-	reqFinal := signedRequest(t, "/v1/audit-events?final_result_only=true", "", "admin-1", []string{"admin"}, []string{"prod"})
+	reqFinal := signedRequest(t, "/v1/audit-events?final_result_only=true", "", "admin-1", []string{"admin"})
 	resFinal := httptest.NewRecorder()
 	router.ServeHTTP(resFinal, reqFinal)
 	if resFinal.Code != http.StatusOK {
@@ -1761,7 +1734,7 @@ func TestListAuditEventsAllowsViewer(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("append audit: %v", err)
 	}
-	req := signedRequest(t, "/v1/audit-events", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequest(t, "/v1/audit-events", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -1779,7 +1752,7 @@ func TestListAuditEventsRejectsInvalidLimit(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events?limit=0", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events?limit=0", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
@@ -1791,7 +1764,7 @@ func TestListAuditEventsRejectsUnsupportedQueryParameter(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events?foo=bar", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events?foo=bar", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
@@ -1824,7 +1797,7 @@ func TestListAuditEventsFiltersByCreatedAfterAndBefore(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			req := signedRequest(t, "/v1/audit-events"+testCase.query, "", "admin-1", []string{"admin"}, []string{"prod"})
+			req := signedRequest(t, "/v1/audit-events"+testCase.query, "", "admin-1", []string{"admin"})
 			res := httptest.NewRecorder()
 			router.ServeHTTP(res, req)
 			if res.Code != http.StatusOK {
@@ -1855,7 +1828,7 @@ func TestListAuditEventsRejectsMalformedTimeQuery(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events?after=not-a-time", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events?after=not-a-time", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
@@ -1879,7 +1852,7 @@ func TestListAuditEventsReturnsNextCursorAndPagesBackInTime(t *testing.T) {
 	}
 
 	// Page 1: newest 2 events, descending. NextCursor points at cur-3.
-	firstReq := signedRequest(t, "/v1/audit-events?limit=2", "", "admin-1", []string{"admin"}, []string{"prod"})
+	firstReq := signedRequest(t, "/v1/audit-events?limit=2", "", "admin-1", []string{"admin"})
 	firstRes := httptest.NewRecorder()
 	router.ServeHTTP(firstRes, firstReq)
 	if firstRes.Code != http.StatusOK {
@@ -1905,7 +1878,7 @@ func TestListAuditEventsReturnsNextCursorAndPagesBackInTime(t *testing.T) {
 	}
 
 	// Page 2: pass cursor back, expect remaining older events.
-	secondReq := signedRequest(t, "/v1/audit-events?limit=2&cursor_created_at="+url.QueryEscape(firstPage.NextCursor.CreatedAt)+"&cursor_id="+firstPage.NextCursor.ID, "", "admin-1", []string{"admin"}, []string{"prod"})
+	secondReq := signedRequest(t, "/v1/audit-events?limit=2&cursor_created_at="+url.QueryEscape(firstPage.NextCursor.CreatedAt)+"&cursor_id="+firstPage.NextCursor.ID, "", "admin-1", []string{"admin"})
 	secondRes := httptest.NewRecorder()
 	router.ServeHTTP(secondRes, secondReq)
 	if secondRes.Code != http.StatusOK {
@@ -1945,7 +1918,7 @@ func TestListAuditEventsFiltersBySubject(t *testing.T) {
 		}
 	}
 
-	req := signedRequest(t, "/v1/audit-events?subject=admin-2", "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequest(t, "/v1/audit-events?subject=admin-2", "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -1969,7 +1942,7 @@ func TestListAuditEventsRejectsMalformedCursorCreatedAt(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events?cursor_created_at=not-a-time&cursor_id=evt", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events?cursor_created_at=not-a-time&cursor_id=evt", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
@@ -1993,7 +1966,7 @@ func TestSearchAuditEventsRejectsUnknownRole(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events/search?q=x", "", "u-1", []string{"unknown"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events/search?q=x", "", "u-1", []string{"unknown"}))
 
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", res.Code)
@@ -2005,7 +1978,7 @@ func TestSearchAuditEventsRejectsMissingQuery(t *testing.T) {
 	router, _ := testRouter(t, &readRunner{})
 	res := httptest.NewRecorder()
 
-	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events/search", "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events/search", "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
@@ -2029,7 +2002,7 @@ func TestSearchAuditEventsMapsRejectedQueryToDenied(t *testing.T) {
 	}
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events/search?q="+url.QueryEscape("上周谁拒绝了 plan"), "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events/search?q="+url.QueryEscape("上周谁拒绝了 plan"), "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", res.Code, res.Body.String())
@@ -2070,7 +2043,7 @@ func TestSearchAuditEventsReturnsSubjectFilteredResults(t *testing.T) {
 	}
 
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events/search?q="+url.QueryEscape("admin-2 rejected"), "", "admin-1", []string{"admin"}, []string{"prod"}))
+	router.ServeHTTP(res, signedRequest(t, "/v1/audit-events/search?q="+url.QueryEscape("admin-2 rejected"), "", "admin-1", []string{"admin"}))
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", res.Code, res.Body.String())
@@ -2111,7 +2084,7 @@ func sampleScheduledTask() store.ScheduledTask {
 		Name:           "minio 巡检",
 		Subject:        "admin-1",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -2140,8 +2113,8 @@ func TestScheduledTaskCreateAdminSucceeds(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
-	body := `{"name":"minio 巡检","capability_name":"minio.bucket.health.read","input":{"environment":"prod","name":"archive"},"schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	body := `{"name":"minio 巡检","capability_name":"minio.bucket.health.read","input":{"name":"archive"},"schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2168,7 +2141,7 @@ func TestScheduledTaskCreateNonAdminReturnsForbidden(t *testing.T) {
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"巡检","capability_name":"minio.bucket.health.read","schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2186,8 +2159,8 @@ func TestScheduledTaskCreateRunbookSucceeds(t *testing.T) {
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	// run_kind=runbook 时只需 runbook_slug，无需 capability_name（低风险 runbook 模板，E2）。
-	body := `{"name":"minio 定时清理","run_kind":"runbook","runbook_slug":"minio-retention-low-risk","input":{"environment":"prod"},"schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	body := `{"name":"minio 定时清理","run_kind":"runbook","runbook_slug":"minio-retention-low-risk","input":{},"schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2212,7 +2185,7 @@ func TestScheduledTaskCreateReadTaskMissingCapabilityReturnsBadRequest(t *testin
 	router := scheduledTaskRouter(t, svc)
 	// run_kind=read（默认）必须提供 capability_name。
 	body := `{"name":"巡检","run_kind":"read","schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2230,7 +2203,7 @@ func TestScheduledTaskCreateRunbookMissingSlugReturnsBadRequest(t *testing.T) {
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"清理","run_kind":"runbook","schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2248,7 +2221,7 @@ func TestScheduledTaskCreateInvalidRunKindReturnsBadRequest(t *testing.T) {
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"巡检","run_kind":"garbage","capability_name":"minio.bucket.health.read","schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2266,7 +2239,7 @@ func TestScheduledTaskCreateMissingNameReturnsBadRequest(t *testing.T) {
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"capability_name":"minio.bucket.health.read","schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2284,7 +2257,7 @@ func TestScheduledTaskCreateMissingCapabilityNameReturnsBadRequest(t *testing.T)
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"巡检","schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2302,7 +2275,7 @@ func TestScheduledTaskCreateInvalidScheduleKindReturnsBadRequest(t *testing.T) {
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"巡检","capability_name":"minio.bucket.health.read","schedule_kind":"invalid","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2320,7 +2293,7 @@ func TestScheduledTaskCreateCronMissingExprReturnsBadRequest(t *testing.T) {
 	svc := &scheduledTaskService{createTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"巡检","capability_name":"minio.bucket.health.read","schedule_kind":"cron","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2338,7 +2311,7 @@ func TestScheduledTaskCreateInvalidCronExprReturnsBadRequest(t *testing.T) {
 	svc := &scheduledTaskService{createErr: errors.New("invalid cron expression: 0 25 * * *")}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"巡检","capability_name":"minio.bucket.health.read","schedule_kind":"cron","cron_expr":"0 25 * * *","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2355,7 +2328,7 @@ func TestScheduledTaskListReturnsTasks(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{listTasks: []store.ScheduledTask{sampleScheduledTask()}}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2375,7 +2348,7 @@ func TestScheduledTaskListFiltersByEnabled(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{listTasks: []store.ScheduledTask{}}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks?enabled=true", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks?enabled=true", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2395,7 +2368,7 @@ func TestScheduledTaskGetReturnsTask(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{getTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks/task-1", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks/task-1", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2418,7 +2391,7 @@ func TestScheduledTaskGetNonExistentReturns404(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{getErr: store.ErrNotFound}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks/nonexistent", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks/nonexistent", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2433,7 +2406,7 @@ func TestScheduledTaskUpdateAdminSucceeds(t *testing.T) {
 	svc := &scheduledTaskService{updateTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"巡检-updated","capability_name":"minio.bucket.health.read","schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPatch, "/v1/scheduled-tasks/task-1", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPatch, "/v1/scheduled-tasks/task-1", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2457,7 +2430,7 @@ func TestScheduledTaskUpdateNonAdminReturnsForbidden(t *testing.T) {
 	svc := &scheduledTaskService{updateTask: sampleScheduledTask()}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"巡检","capability_name":"minio.bucket.health.read","schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPatch, "/v1/scheduled-tasks/task-1", body, "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPatch, "/v1/scheduled-tasks/task-1", body, "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2475,7 +2448,7 @@ func TestScheduledTaskUpdateNonExistentReturns404(t *testing.T) {
 	svc := &scheduledTaskService{updateErr: store.ErrNotFound}
 	router := scheduledTaskRouter(t, svc)
 	body := `{"name":"巡检","capability_name":"minio.bucket.health.read","schedule_kind":"preset","preset":"5m","timezone":"Asia/Shanghai","enabled":true}`
-	req := signedRequestWithMethod(t, http.MethodPatch, "/v1/scheduled-tasks/nonexistent", body, "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPatch, "/v1/scheduled-tasks/nonexistent", body, "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2489,7 +2462,7 @@ func TestScheduledTaskDeleteAdminReturnsNoContent(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodDelete, "/v1/scheduled-tasks/task-1", "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodDelete, "/v1/scheduled-tasks/task-1", "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2509,7 +2482,7 @@ func TestScheduledTaskDeleteNonAdminReturnsForbidden(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodDelete, "/v1/scheduled-tasks/task-1", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodDelete, "/v1/scheduled-tasks/task-1", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2526,7 +2499,7 @@ func TestScheduledTaskDeleteNonExistentReturns404(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{deleteErr: store.ErrNotFound}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodDelete, "/v1/scheduled-tasks/nonexistent", "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodDelete, "/v1/scheduled-tasks/nonexistent", "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2540,7 +2513,7 @@ func TestScheduledTaskTriggerAdminReturnsRun(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{triggerRun: sampleScheduledTaskRun()}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks/task-1/run", "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks/task-1/run", "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2563,7 +2536,7 @@ func TestScheduledTaskTriggerNonAdminReturnsForbidden(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{triggerRun: sampleScheduledTaskRun()}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks/task-1/run", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/scheduled-tasks/task-1/run", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2580,7 +2553,7 @@ func TestScheduledTaskListRunsReturnsHistory(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{listRunsResult: []store.ScheduledTaskRun{sampleScheduledTaskRun()}}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks/task-1/runs", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks/task-1/runs", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2603,7 +2576,7 @@ func TestScheduledTaskCountFailuresReturnsCount(t *testing.T) {
 	t.Parallel()
 	svc := &scheduledTaskService{failureCount: 3}
 	router := scheduledTaskRouter(t, svc)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks/failures/count", "", "viewer-1", []string{"viewer"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks/failures/count", "", "viewer-1", []string{"viewer"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2625,7 +2598,7 @@ func TestScheduledTaskRoutesReturn503WhenServiceNotConfigured(t *testing.T) {
 		httpapi.NewHMACAuthenticator([]byte("test-secret")),
 		execution.NewReadOnlyService(&readRunner{}, nil),
 	)
-	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks", "", "admin-1", []string{"admin"}, []string{"prod"})
+	req := signedRequestWithMethod(t, http.MethodGet, "/v1/scheduled-tasks", "", "admin-1", []string{"admin"})
 	res := httptest.NewRecorder()
 
 	router.ServeHTTP(res, req)
@@ -2722,12 +2695,12 @@ func createPendingPlan(t *testing.T, service *plans.Service) plans.Plan {
 
 func createInputHashMismatchPlan(t *testing.T, repository *store.MemoryActionPlanStore) store.PlanRecord {
 	t.Helper()
-	return createStoredPlanWithHash(t, repository, "corrupted-hash-plan", `{"environment":"prod","topic":"orders","retention_hours":72}`, "corrupted-input-hash", string(tools.Medium), "valid-confirmation-token")
+	return createStoredPlanWithHash(t, repository, "corrupted-hash-plan", `{"topic":"orders","retention_hours":72}`, "corrupted-input-hash", string(tools.Medium), "valid-confirmation-token")
 }
 
 func createMalformedPlan(t *testing.T, repository *store.MemoryActionPlanStore) store.PlanRecord {
 	t.Helper()
-	return createStoredPlan(t, repository, "malformed-plan", `{"environment":"prod","topic":"orders"}`, string(tools.High))
+	return createStoredPlan(t, repository, "malformed-plan", `{"topic":"orders"}`, string(tools.High))
 }
 
 func createStoredPlan(t *testing.T, repository *store.MemoryActionPlanStore, id, input, risk string) store.PlanRecord {
@@ -2980,7 +2953,7 @@ type tracePlanner struct{}
 func (tracePlanner) Plan(context.Context, identity.CurrentUser, string, []assistant.Turn, assistant.PageContext) (assistant.Intent, error) {
 	return assistant.Intent{
 		ToolName: tools.ClusterStatusRead,
-		Input:    map[string]any{"environment": "prod"},
+		Input:    map[string]any{},
 		Selection: &assistant.CapabilitySelection{
 			Selected:   tools.ClusterStatusRead,
 			Confidence: 0.9,
@@ -3040,7 +3013,7 @@ func hasAuditAction(events []store.AuditEvent, action string) bool {
 	return false
 }
 
-func signedRequest(t *testing.T, path, body, subject string, roles, environments []string) *http.Request {
+func signedRequest(t *testing.T, path, body, subject string, roles []string) *http.Request {
 	t.Helper()
 	method := http.MethodPost
 	if body == "" {
@@ -3050,7 +3023,6 @@ func signedRequest(t *testing.T, path, body, subject string, roles, environments
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t, map[string]any{
 		"sub":                  subject,
 		"roles":                roles,
-		"allowed_environments": environments,
 		"permissions":          []string{"*"},
 	}))
 	req.Header.Set("X-Request-ID", "request-1")
@@ -3058,13 +3030,12 @@ func signedRequest(t *testing.T, path, body, subject string, roles, environments
 }
 
 // signedRequestWithMethod 构造指定 HTTP 方法的签名请求，支持 PATCH / DELETE 等方法。
-func signedRequestWithMethod(t *testing.T, method, path, body, subject string, roles, environments []string) *http.Request {
+func signedRequestWithMethod(t *testing.T, method, path, body, subject string, roles []string) *http.Request {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t, map[string]any{
 		"sub":                  subject,
 		"roles":                roles,
-		"allowed_environments": environments,
 		"permissions":          []string{"*"},
 	}))
 	req.Header.Set("X-Request-ID", "request-1")
@@ -3074,13 +3045,12 @@ func signedRequestWithMethod(t *testing.T, method, path, body, subject string, r
 // signedPostRequest constructs a POST request with no body, signed with the
 // given subject's JWT. Used for routes like archive that require POST but
 // accept an empty body.
-func signedPostRequest(t *testing.T, path, subject string, roles, environments []string) *http.Request {
+func signedPostRequest(t *testing.T, path, subject string, roles []string) *http.Request {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, nil)
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t, map[string]any{
 		"sub":                  subject,
 		"roles":                roles,
-		"allowed_environments": environments,
 		"permissions":          []string{"*"},
 	}))
 	req.Header.Set("X-Request-ID", "request-1")
@@ -3132,21 +3102,18 @@ func httpAPIMiddlewareDefinitions() []tools.DynamicToolDefinition {
 		{
 			Tool: tools.Tool{Name: "glusterfs.volume.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "minio.bucket.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "kafka.consumer_lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
@@ -3161,7 +3128,6 @@ func httpAPIMiddlewareDefinitions() []tools.DynamicToolDefinition {
 				SupportsDryRun:      true,
 			},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment":     {Type: "string", Required: true},
 				"topic":           {Type: "string", Required: true},
 				"retention_hours": {Type: "integer", Required: true, Min: httpAPIMinBound(1), Max: httpAPIMaxBound(8760)},
 			},
@@ -3173,15 +3139,14 @@ func httpAPIMinBound(value float64) *float64 { return &value }
 func httpAPIMaxBound(value float64) *float64 { return &value }
 
 func retentionInput() map[string]any {
-	return map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}
+	return map[string]any{"topic": "orders", "retention_hours": 72}
 }
 
 func admin() identity.CurrentUser {
 	return identity.CurrentUser{
 		Subject:             "admin-1",
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{"prod"},
-		RequestID:           "request-admin",
+		Roles:     []string{"admin"},
+		RequestID: "request-admin",
 	}
 }
 
@@ -3215,7 +3180,6 @@ func TestJWTExpiredTokenRejected(t *testing.T) {
 	token := signedJWT(t, map[string]any{
 		"sub":                  "user-1",
 		"roles":                []string{"viewer"},
-		"allowed_environments": []string{"prod"},
 		"exp":                  expired,
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
@@ -3240,7 +3204,6 @@ func TestJWTNotYetValidTokenRejected(t *testing.T) {
 	token := signedJWT(t, map[string]any{
 		"sub":                  "user-1",
 		"roles":                []string{"viewer"},
-		"allowed_environments": []string{"prod"},
 		"nbf":                  future,
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
@@ -3278,7 +3241,6 @@ func TestJWTValidExpiryAccepted(t *testing.T) {
 	token := signedJWT(t, map[string]any{
 		"sub":                  "user-1",
 		"roles":                []string{"viewer"},
-		"allowed_environments": []string{"prod"},
 		"exp":                  expiry,
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
@@ -3317,7 +3279,6 @@ func TestJWTNoExpiryStillAccepted(t *testing.T) {
 	token := signedJWT(t, map[string]any{
 		"sub":                  "user-1",
 		"roles":                []string{"viewer"},
-		"allowed_environments": []string{"prod"},
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

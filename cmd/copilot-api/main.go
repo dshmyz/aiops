@@ -489,7 +489,8 @@ func main() {
 	options = append(options, httpapi.WithMCPService(httpapi.NewMCPServerService(mcpServerStore, mcpManager)))
 	// 告警→动作编排规则（DB 存储 + 内存缓存 + CRUD API）。
 	alertActionStore := store.NewSQLAlertActionRuleStore(db)
-	alertActionRegistry := alert.NewAlertActionRegistry(alertActionStore)
+	alertActionRegistry := alert.NewAlertActionRegistry(alertActionStore).
+		WithRunStore(store.NewSQLAlertActionRunStore(db))
 	if err := alertActionRegistry.Load(serviceContext); err != nil {
 		logger.Warn("load alert action rules", zap.Error(err))
 	}
@@ -497,12 +498,18 @@ func main() {
 	// 告警 webhook：可选自动研判 + 自动建 plan（COPILOT_ALERT_AUTO_DIAGNOSE /
 	// COPILOT_ALERT_AUTO_PLAN / COPILOT_ALERT_ACTIONS_JSON）。
 	alertWebhook := httpapi.NewAlertWebhookService(alertSvc, auditService)
+	// 把管理后台的 DB 规则注册表接入 webhook 链式研判：后台配的规则真正驱动
+	// 告警→动作的执行链。registry.Match 只返回启用规则，并支持热重载。
+	alertWebhook = alertWebhook.WithActions(alertActionRegistry)
+	// 兼容旧部署：env 静态规则（COPILOT_ALERT_ACTIONS_JSON）不再单独注入，
+	// 注册表已优先承载规则来源；若需要纯 env 场景可改走 NewStaticActionMatcher。
 	// LLM 智能研判（最高优先级）：需要 eino-openai 模式 + 显式开启。
 	// 内置 fallback 到确定性 Diagnoser，LLM 失败不影响告警接入。
 	var fallbackDiag *alert.Diagnoser
 	if os.Getenv("COPILOT_ALERT_AUTO_DIAGNOSE") == "1" {
 		planCreator := alert.NewPlanCreator(planService, alertSvc)
-		chainDiag := alert.NewChainDiagnoser(diagService, alertSvc, planCreator, readService.ExecuteRead)
+		chainDiag := alert.NewChainDiagnoser(diagService, alertSvc, planCreator, readService.ExecuteRead).
+			WithRunStore(store.NewSQLAlertActionRunStore(db))
 		alertWebhook = alertWebhook.WithChainDiagnoser(chainDiag)
 		// 同时创建确定性 Diagnoser 作为 LLM fallback，并接入处置闭环：
 		// 诊断产出的可执行推荐自动建 plan 等待人工确认。
@@ -522,12 +529,14 @@ func main() {
 			logger.Warn("COPILOT_ALERT_LLM_DIAGNOSE requires eino-openai provider; LLM diagnosis disabled")
 		}
 	}
-	if os.Getenv("COPILOT_ALERT_AUTO_PLAN") == "1" {
+	// COPILOT_ALERT_AUTO_PLAN 分支改为加载 env 静态规则作为回退：仅在注册表
+	// 未加载任何规则时注入（registry 已承载后台规则，二者二选一，env 不覆盖 DB）。
+	if os.Getenv("COPILOT_ALERT_AUTO_PLAN") == "1" && len(alertActionRegistry.List()) == 0 {
 		alertActions, loadErr := alert.LoadAlertActionsFromEnv()
 		if loadErr != nil {
 			logger.Warn("load alert actions", zap.Error(loadErr))
 		} else if len(alertActions) > 0 {
-			alertWebhook = alertWebhook.WithActions(alertActions)
+			alertWebhook = alertWebhook.WithActions(alert.NewStaticActionMatcher(alertActions))
 		}
 	}
 	options = append(options, httpapi.WithAlertWebhook(alertWebhook))
@@ -562,13 +571,6 @@ func main() {
 	}
 	authenticator := httpapi.NewHMACAuthenticator([]byte(os.Getenv("COPILOT_JWT_HMAC_SECRET")))
 
-	// Wire environment alias expander: expands canonical environment identifiers
-	// with their aliases during authentication so policy checks accept any name
-	// the user might type (e.g. "生产" → "prod").
-	aliasStore := store.NewSQLEnvironmentAliasStore(db)
-	aliasExpander := httpapi.NewCachedAliasExpander(aliasStore, 5*time.Minute)
-	authenticator.WithAliasExpander(aliasExpander)
-
 	// Multi-mode authentication: jwt (default) / cas / both.
 	authMode := httpapi.AuthMode(strings.ToLower(strings.TrimSpace(os.Getenv("COPILOT_AUTH_MODE"))))
 	if authMode == "" {
@@ -577,12 +579,11 @@ func main() {
 	var casAuth *httpapi.CASAuthenticator
 	if authMode == httpapi.AuthModeCAS || authMode == httpapi.AuthModeBoth {
 		casCfg := httpapi.CASConfig{
-			ServerURL:           os.Getenv("COPILOT_CAS_SERVER_URL"),
-			ServiceURL:          os.Getenv("COPILOT_CAS_SERVICE_URL"),
-			SessionSecret:       []byte(os.Getenv("COPILOT_JWT_HMAC_SECRET")),
-			SessionTTL:          casSessionTTL(logger),
-			DefaultRoles:        casJSONList("COPILOT_CAS_DEFAULT_ROLES", logger),
-			DefaultEnvironments: casJSONList("COPILOT_CAS_DEFAULT_ENVIRONMENTS", logger),
+			ServerURL:     os.Getenv("COPILOT_CAS_SERVER_URL"),
+			ServiceURL:    os.Getenv("COPILOT_CAS_SERVICE_URL"),
+			SessionSecret: []byte(os.Getenv("COPILOT_JWT_HMAC_SECRET")),
+			SessionTTL:    casSessionTTL(logger),
+			DefaultRoles:  casJSONList("COPILOT_CAS_DEFAULT_ROLES", logger),
 			// COPILOT_CAS_INSECURE_SKIP_VERIFY=1 时，CAS ticket 校验请求跳过 TLS
 			// 证书校验（对接自签/内网 HTTPS 的 CAS 服务器）。默认关闭（校验证书）。
 			InsecureSkipVerify: os.Getenv("COPILOT_CAS_INSECURE_SKIP_VERIFY") == "1",
@@ -592,13 +593,11 @@ func main() {
 		if err != nil {
 			logger.Fatal("configure CAS authenticator", zap.Error(err))
 		}
-		casAuth.WithAliasExpander(aliasExpander)
 		logger.Info("CAS authentication enabled",
 			zap.String("mode", string(authMode)),
 			zap.String("cas_server", casCfg.ServerURL),
 			zap.Duration("session_ttl", casCfg.SessionTTL),
 			zap.Strings("default_roles", casCfg.DefaultRoles),
-			zap.Strings("default_environments", casCfg.DefaultEnvironments),
 		)
 		if casCfg.InsecureSkipVerify {
 			logger.Warn("CAS TLS certificate verification disabled (COPILOT_CAS_INSECURE_SKIP_VERIFY=1)")
@@ -727,8 +726,8 @@ func casSessionTTL(logger *zap.Logger) time.Duration {
 }
 
 // casJSONList reads a JSON array string list from an env var (e.g. roles,
-// environments). Empty / invalid values return nil so the authenticator's
-// defaults [operator] / [prod,staging,dev] apply. Best-effort on purpose.
+// jwt_issuers). Empty / invalid values return nil so the authenticator's
+// defaults apply. Best-effort on purpose.
 func casJSONList(env string, logger *zap.Logger) []string {
 	raw := strings.TrimSpace(os.Getenv(env))
 	if raw == "" {
@@ -1047,7 +1046,6 @@ func (staticReadRunner) Read(_ context.Context, tool tools.Tool, input map[strin
 		// 经 CapabilityReadRunner 提供。这里如实返回"未配置数据源"。
 		return map[string]any{
 			"tool":           tool.Name,
-			"environment":    input["environment"],
 			"overall_status": "unknown",
 			"domains":        []map[string]any{},
 			"note":           "no data sources configured",
@@ -1058,18 +1056,17 @@ func (staticReadRunner) Read(_ context.Context, tool tools.Tool, input map[strin
 		// CapabilityReadRunner 提供。这里如实返回"未配置数据源"，而不是
 		// 谎报 available（修复前会让用户误以为集群健康）。
 		return map[string]any{
-			"tool":        tool.Name,
-			"environment": input["environment"],
-			"status":      "unknown",
-			"note":        "no data sources configured",
+			"tool":   tool.Name,
+			"status": "unknown",
+			"note":   "no data sources configured",
 		}, nil
 	default:
 		if !tools.IsStatic(tool.Name) {
 			// 非静态工具（已发布能力注册的动态工具）由 CapabilityReadRunner +
 			// HTTPAdapter 执行，不落静态 stub。
-			return map[string]any{"tool": tool.Name, "environment": input["environment"], "status": "unavailable"}, nil
+			return map[string]any{"tool": tool.Name, "status": "unavailable"}, nil
 		}
-		return map[string]any{"tool": tool.Name, "environment": input["environment"], "status": "unknown", "note": "no data sources configured"}, nil
+		return map[string]any{"tool": tool.Name, "status": "unknown", "note": "no data sources configured"}, nil
 	}
 }
 
@@ -1084,14 +1081,12 @@ func (r alertReadRunner) Read(ctx context.Context, tool tools.Tool, input map[st
 	if tool.Name != tools.AlertQuery {
 		return nil, fmt.Errorf("unsupported tool %q for alert read runner", tool.Name)
 	}
-	environment, _ := input["environment"].(string)
-	alerts, err := r.svc.ListActive(ctx, environment, 50)
+	alerts, err := r.svc.ListActive(ctx, 50)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{
 		"tool":        tool.Name,
-		"environment": environment,
 		"alerts":      alerts,
 		"count":       len(alerts),
 	}, nil
@@ -1100,7 +1095,7 @@ func (r alertReadRunner) Read(ctx context.Context, tool tools.Tool, input map[st
 // incidentViewReadRunner 是 incident.view 元工具的只读 runner（Phase 1）：给定
 // 一个告警/资源身份，把告警本体、相关审计事件、相关定时巡检 run、可跑只读能力
 // 与匹配 runbook 串成一张可回链的 incident 全景。alert 与其余证据无 FK，全部按
-// (domain, resource_type, resource_name, environment, 时间窗) 软匹配。
+// (domain, resource_type, resource_name, 时间窗) 软匹配。
 type incidentViewReadRunner struct {
 	alerts    *alert.Service
 	audit     *audit.Service
@@ -1216,7 +1211,7 @@ func (r incidentViewReadRunner) Read(ctx context.Context, tool tools.Tool, input
 }
 
 // resolvePivot 解析入参到 (domain, resource_type, resource_name) 与一个告警锚点。
-// 支持 incident_id 直达，或按 domain/resource_name/environment 定位最近告警。
+// 支持 incident_id 直达，或按 domain/resource_name 定位最近告警。
 func (r incidentViewReadRunner) resolvePivot(ctx context.Context, input map[string]any) (struct {
 	Domain       string
 	ResourceType string
@@ -1227,13 +1222,12 @@ func (r incidentViewReadRunner) resolvePivot(ctx context.Context, input map[stri
 		ResourceType string
 		ResourceName string
 	}
-	environment, _ := input["environment"].(string)
 	domain, _ := input["domain"].(string)
 	resType, _ := input["resource_type"].(string)
 	resName, _ := input["resource_name"].(string)
 
 	var anchor alert.Alert
-	alerts, aerr := r.alerts.Query(ctx, store.AlertFilter{Domain: domain, Environment: environment, Limit: 50})
+	alerts, aerr := r.alerts.Query(ctx, store.AlertFilter{Domain: domain, Limit: 50})
 	if aerr != nil {
 		return pivot, alert.Alert{}, aerr
 	}
@@ -1341,7 +1335,6 @@ func (r incidentViewReadRunner) availableProbes(pivot struct {
 	if pivot.Domain == "" || pivot.ResourceType == "" {
 		return nil
 	}
-	environment, _ := input["environment"].(string)
 	out := make([]map[string]any, 0, 4)
 	for _, c := range r.capabilities {
 		if c.Domain != pivot.Domain || c.ResourceType != pivot.ResourceType || c.Operation != tools.Read {
@@ -1349,13 +1342,10 @@ func (r incidentViewReadRunner) availableProbes(pivot struct {
 		}
 		probe := map[string]any{"tool_name": c.Name, "operation": "read"}
 		fields := make(map[string]any)
-		if environment != "" {
-			fields["environment"] = environment
-		}
 		if pivot.ResourceName != "" {
-			// 把 resource_name 填到最可能的 identity 字段（非 environment 的必填字符串）
+			// 把 resource_name 填到最可能的 identity 字段（必填字符串）。
 			for k, f := range c.InputSchema {
-				if k == "environment" || f.Type != "string" {
+				if f.Type != "string" {
 					continue
 				}
 				fields[k] = pivot.ResourceName
@@ -1449,7 +1439,6 @@ func (r eventReadRunner) Read(ctx context.Context, tool tools.Tool, input map[st
 	if tool.Name != tools.EventQuery {
 		return nil, fmt.Errorf("unsupported tool %q for event read runner", tool.Name)
 	}
-	environment, _ := input["environment"].(string)
 	query, _ := input["query"].(string)
 	filter := audit.ParseSearchQuery(query, time.Now().UTC())
 	// 审计事件单条含 metadata，50 条会超过 read 响应 10KB 上限。降到 10 条。
@@ -1471,11 +1460,10 @@ func (r eventReadRunner) Read(ctx context.Context, tool tools.Tool, input map[st
 		})
 	}
 	return map[string]any{
-		"tool":        tool.Name,
-		"environment": environment,
-		"query":       query,
-		"events":      events,
-		"count":       len(events),
+		"tool":   tool.Name,
+		"query":  query,
+		"events": events,
+		"count":  len(events),
 	}, nil
 }
 
@@ -1488,7 +1476,6 @@ func (r taskReadRunner) Read(ctx context.Context, tool tools.Tool, input map[str
 	if tool.Name != tools.TaskQuery {
 		return nil, fmt.Errorf("unsupported tool %q for task read runner", tool.Name)
 	}
-	environment, _ := input["environment"].(string)
 	limit := 20
 	if v, ok := input["limit"].(float64); ok {
 		limit = int(v)
@@ -1531,14 +1518,13 @@ func (r taskReadRunner) Read(ctx context.Context, tool tools.Tool, input map[str
 		})
 	}
 	return map[string]any{
-		"tool":        tool.Name,
-		"environment": environment,
-		"tasks":       views,
-		"count":       len(views),
+		"tool":   tool.Name,
+		"tasks":  views,
+		"count":  len(views),
 	}, nil
 }
 
-// buildNotifier constructs the notification chain from environment configuration.
+// buildNotifier constructs the notification chain from runtime configuration.
 // When COPILOT_FEISHU_WEBHOOK_URL is set, a FeishuNotifier is layered on top of
 // the LogNotifier so confirmation requests reach a real IM channel. Otherwise
 // the LogNotifier is used alone (local development default).

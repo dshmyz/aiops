@@ -18,28 +18,24 @@ func registerMiddlewareTools(t *testing.T) {
 		{
 			Tool: Tool{Name: "glusterfs.volume.health.read", Operation: Read, Risk: Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]DynamicInputField{
-				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: Tool{Name: "minio.bucket.health.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]DynamicInputField{
-				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: Tool{Name: "kafka.consumer_lag.read", Operation: Read, Risk: Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]DynamicInputField{
-				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: Tool{Name: "topic.retention.set", Operation: Write, Risk: Medium, RollbackDescription: "reset_to_previous", Domain: "kafka", ResourceType: "topic", SupportsDryRun: true},
 			InputSchema: map[string]DynamicInputField{
-				"environment":     {Type: "string", Required: true},
 				"topic":           {Type: "string", Required: true},
 				"retention_hours": {Type: "integer", Required: true, Min: boundOf(1), Max: boundOf(8760)},
 			},
@@ -81,7 +77,6 @@ func TestIsStaticIdentifiesBuiltInTools(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "minio.bucket.capacity.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 			"bucket":      {Type: "string", Required: true},
 		},
 	}}); err != nil {
@@ -98,7 +93,6 @@ func TestDynamicInputSchemaReturnsCopy(t *testing.T) {
 	err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "minio.bucket.capacity.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 			"cluster":     {Type: "string", Required: true},
 			"bucket":      {Type: "string", Required: true},
 		},
@@ -133,7 +127,7 @@ func TestValidateInputRejectsUnknownWriteParameters(t *testing.T) {
 	}
 
 	err := ValidateInput(tool, map[string]any{
-		"environment":     "prod",
+		
 		"topic":           "orders",
 		"retention_hours": 72,
 		"delete_all":      true,
@@ -151,14 +145,14 @@ func TestValidateInputUsesCanonicalRegisteredTool(t *testing.T) {
 	}
 	forged := Tool{Name: "topic.retention.set", Operation: Read, Risk: Low}
 	err := ValidateInput(forged, map[string]any{
-		"environment": "prod",
+		
 		"topic":       "orders",
 	})
 	if err == nil {
 		t.Fatal("ValidateInput accepted input valid only for a forged tool definition")
 	}
 	// ensure the canonical (registered) tool still accepts valid input
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72}); err != nil {
+	if err := ValidateInput(tool, map[string]any{"topic": "orders", "retention_hours": 72}); err != nil {
 		t.Fatalf("ValidateInput canonical = %v, want nil", err)
 	}
 }
@@ -176,7 +170,7 @@ func TestDomainReadToolsAreRegisteredReadOnlyTools(t *testing.T) {
 		if tool.Domain == "" || tool.ResourceType == "" {
 			t.Fatalf("tool %q missing domain metadata: %+v", name, tool)
 		}
-		if err := ValidateInput(tool, map[string]any{"environment": "prod", "name": "orders"}); err != nil {
+		if err := ValidateInput(tool, map[string]any{"name": "orders"}); err != nil {
 			t.Fatalf("ValidateInput(%q) returned %v", name, err)
 		}
 	}
@@ -188,7 +182,7 @@ func TestDomainReadToolsRejectUnknownParameters(t *testing.T) {
 	if !ok {
 		t.Fatalf("tool %q was not registered", "glusterfs.volume.health.read")
 	}
-	err := ValidateInput(tool, map[string]any{"environment": "prod", "name": "data", "shell": "rm -rf /"})
+	err := ValidateInput(tool, map[string]any{"name": "data", "shell": "rm -rf /"})
 	if err == nil {
 		t.Fatal("ValidateInput accepted unknown diagnostic parameter")
 	}
@@ -215,28 +209,23 @@ func TestAlertQueryValidateInput(t *testing.T) {
 	if !ok {
 		t.Fatalf("tool %q was not registered", AlertQuery)
 	}
-	// 合法：仅 environment
-	if err := ValidateInput(tool, map[string]any{"environment": "prod"}); err != nil {
+		if err := ValidateInput(tool, map[string]any{}); err != nil {
 		t.Fatalf("ValidateInput(prod) = %v, want nil", err)
 	}
 	// 合法：全部可选过滤
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "severity": "critical", "status": "firing", "domain": "kafka"}); err != nil {
+	if err := ValidateInput(tool, map[string]any{"severity": "critical", "status": "firing", "domain": "kafka"}); err != nil {
 		t.Fatalf("ValidateInput(all filters) = %v, want nil", err)
 	}
-	// 缺 environment
-	if err := ValidateInput(tool, map[string]any{"severity": "critical"}); err == nil {
-		t.Fatal("ValidateInput without environment accepted")
-	}
 	// 未知键
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "shell": "rm -rf /"}); err == nil {
+	if err := ValidateInput(tool, map[string]any{"shell": "rm -rf /"}); err == nil {
 		t.Fatal("ValidateInput accepted unknown key")
 	}
 	// 非法 severity
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "severity": "severe"}); err == nil {
+	if err := ValidateInput(tool, map[string]any{"severity": "severe"}); err == nil {
 		t.Fatal("ValidateInput accepted invalid severity")
 	}
 	// 非法 status
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "status": "acknowledged"}); err == nil {
+	if err := ValidateInput(tool, map[string]any{"status": "acknowledged"}); err == nil {
 		t.Fatal("ValidateInput accepted invalid status")
 	}
 }
@@ -259,16 +248,13 @@ func TestEventQueryValidateInput(t *testing.T) {
 	if !ok {
 		t.Fatalf("tool %q was not registered", EventQuery)
 	}
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "query": "上周谁拒绝了 plan"}); err != nil {
+	if err := ValidateInput(tool, map[string]any{"query": "上周谁拒绝了 plan"}); err != nil {
 		t.Fatalf("ValidateInput(valid) = %v, want nil", err)
 	}
-	if err := ValidateInput(tool, map[string]any{"environment": "prod"}); err == nil {
+	if err := ValidateInput(tool, map[string]any{}); err == nil {
 		t.Fatal("ValidateInput without query accepted")
 	}
-	if err := ValidateInput(tool, map[string]any{"query": "上周"}); err == nil {
-		t.Fatal("ValidateInput without environment accepted")
-	}
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "query": "x", "shell": "rm"}); err == nil {
+	if err := ValidateInput(tool, map[string]any{"query": "x", "shell": "rm"}); err == nil {
 		t.Fatal("ValidateInput accepted unknown key")
 	}
 }
@@ -291,20 +277,17 @@ func TestTaskQueryValidateInput(t *testing.T) {
 	if !ok {
 		t.Fatalf("tool %q was not registered", TaskQuery)
 	}
-	if err := ValidateInput(tool, map[string]any{"environment": "prod"}); err != nil {
+	if err := ValidateInput(tool, map[string]any{}); err != nil {
 		t.Fatalf("ValidateInput(env only) = %v, want nil", err)
 	}
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "status": "enabled", "limit": 10}); err != nil {
+	if err := ValidateInput(tool, map[string]any{"status": "enabled", "limit": 10}); err != nil {
 		t.Fatalf("ValidateInput(all) = %v, want nil", err)
 	}
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "status": "paused"}); err == nil {
+	if err := ValidateInput(tool, map[string]any{"status": "paused"}); err == nil {
 		t.Fatal("ValidateInput accepted invalid status")
 	}
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "limit": -5}); err == nil {
+	if err := ValidateInput(tool, map[string]any{"limit": -5}); err == nil {
 		t.Fatal("ValidateInput accepted negative limit")
-	}
-	if err := ValidateInput(tool, map[string]any{}); err == nil {
-		t.Fatal("ValidateInput without environment accepted")
 	}
 }
 
@@ -315,7 +298,6 @@ func TestRegisterDynamicToolsAddsCanonicalLookupAndValidation(t *testing.T) {
 	err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "minio.bucket.capacity.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 			"cluster":     {Type: "string", Required: true},
 			"bucket":      {Type: "string", Required: true},
 		},
@@ -337,10 +319,10 @@ func TestRegisterDynamicToolsAddsCanonicalLookupAndValidation(t *testing.T) {
 	if !found {
 		t.Fatalf("All() did not include dynamic tool %q", tool.Name)
 	}
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}); err != nil {
+	if err := ValidateInput(tool, map[string]any{"cluster": "m1", "bucket": "archive"}); err != nil {
 		t.Fatalf("ValidateInput dynamic returned %v", err)
 	}
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive", "extra": true}); err == nil {
+	if err := ValidateInput(tool, map[string]any{"cluster": "m1", "bucket": "archive", "extra": true}); err == nil {
 		t.Fatal("ValidateInput accepted unknown dynamic input")
 	}
 }
@@ -351,11 +333,11 @@ func TestRegisterDynamicToolsRejectsStaticAndDuplicateNames(t *testing.T) {
 
 	definition := DynamicToolDefinition{
 		Tool:        Tool{Name: "runtime.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
-		InputSchema: map[string]DynamicInputField{"environment": {Type: "string", Required: true}},
+		InputSchema: map[string]DynamicInputField{},
 	}
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool:        Tool{Name: ClusterStatusRead, Operation: Read, Risk: Low},
-		InputSchema: map[string]DynamicInputField{"environment": {Type: "string", Required: true}},
+		InputSchema: map[string]DynamicInputField{},
 	}}); err == nil {
 		t.Fatal("RegisterDynamicTools accepted a static tool conflict")
 	}
@@ -373,7 +355,7 @@ func TestRegisterDynamicToolsIsAtomicForInvalidBatch(t *testing.T) {
 
 	definition := DynamicToolDefinition{
 		Tool:        Tool{Name: "runtime.atomic.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
-		InputSchema: map[string]DynamicInputField{"environment": {Type: "string", Required: true}},
+		InputSchema: map[string]DynamicInputField{},
 	}
 	err := RegisterDynamicTools([]DynamicToolDefinition{
 		definition,
@@ -387,27 +369,6 @@ func TestRegisterDynamicToolsIsAtomicForInvalidBatch(t *testing.T) {
 	}
 }
 
-func TestRegisterDynamicToolsRequiresEnvironmentString(t *testing.T) {
-	ResetDynamicToolsForTest()
-	t.Cleanup(ResetDynamicToolsForTest)
-
-	for name, environment := range map[string]DynamicInputField{
-		"missing":    {},
-		"optional":   {Type: "string"},
-		"wrong type": {Type: "boolean", Required: true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			err := RegisterDynamicTools([]DynamicToolDefinition{{
-				Tool:        Tool{Name: "runtime.environment." + name, Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
-				InputSchema: map[string]DynamicInputField{"environment": environment},
-			}})
-			if err == nil {
-				t.Fatal("RegisterDynamicTools accepted an invalid environment schema")
-			}
-		})
-	}
-}
-
 func TestValidateInputDynamicSupportsSchemaTypesAndRequiredFields(t *testing.T) {
 	ResetDynamicToolsForTest()
 	t.Cleanup(ResetDynamicToolsForTest)
@@ -415,7 +376,6 @@ func TestValidateInputDynamicSupportsSchemaTypesAndRequiredFields(t *testing.T) 
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "runtime.types.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 			"count":       {Type: "integer", Required: true},
 			"ratio":       {Type: "number", Required: true},
 			"enabled":     {Type: "boolean", Required: true},
@@ -425,18 +385,18 @@ func TestValidateInputDynamicSupportsSchemaTypesAndRequiredFields(t *testing.T) 
 		t.Fatalf("RegisterDynamicTools returned %v", err)
 	}
 	tool, _ := Lookup("runtime.types.read")
-	valid := map[string]any{"environment": "prod", "count": 3, "ratio": 1.5, "enabled": true}
+	valid := map[string]any{"count": 3, "ratio": 1.5, "enabled": true}
 	if err := ValidateInput(tool, valid); err != nil {
 		t.Fatalf("ValidateInput accepted schema-valid input: %v", err)
 	}
 	for name, value := range map[string]any{"count": "3", "ratio": true, "enabled": "yes"} {
-		input := map[string]any{"environment": "prod", "count": 3, "ratio": 1.5, "enabled": true}
+		input := map[string]any{"count": 3, "ratio": 1.5, "enabled": true}
 		input[name] = value
 		if err := ValidateInput(tool, input); err == nil {
 			t.Fatalf("ValidateInput accepted invalid %s value", name)
 		}
 	}
-	missing := map[string]any{"environment": "prod", "count": 3, "ratio": 1.5}
+	missing := map[string]any{"count": 3, "ratio": 1.5}
 	if err := ValidateInput(tool, missing); err == nil {
 		t.Fatal("ValidateInput accepted input missing a required field")
 	}
@@ -449,7 +409,6 @@ func TestValidateInputDynamicRejectsInvalidNumbers(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "runtime.number.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 			"value":       {Type: "number", Required: true},
 		},
 	}}); err != nil {
@@ -463,7 +422,7 @@ func TestValidateInputDynamicRejectsInvalidNumbers(t *testing.T) {
 		"negative infinity":   math.Inf(-1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := ValidateInput(tool, map[string]any{"environment": "prod", "value": value}); err == nil {
+			if err := ValidateInput(tool, map[string]any{"value": value}); err == nil {
 				t.Fatal("ValidateInput accepted a non-finite or invalid number")
 			}
 		})
@@ -490,7 +449,6 @@ func TestValidateInputDynamicEnforcesDeclaredBounds(t *testing.T) {
 			ResourceType:        "topic",
 		},
 		InputSchema: map[string]DynamicInputField{
-			"environment":     {Type: "string", Required: true},
 			"topic":           {Type: "string", Required: true},
 			"retention_hours": {Type: "integer", Required: true, Min: boundOf(1), Max: boundOf(8760)},
 		},
@@ -511,7 +469,7 @@ func TestValidateInputDynamicEnforcesDeclaredBounds(t *testing.T) {
 		"inside range":        {hours: 72, accepted: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := ValidateInput(tool, map[string]any{"environment": "prod", "topic": "orders", "retention_hours": test.hours})
+			err := ValidateInput(tool, map[string]any{"topic": "orders", "retention_hours": test.hours})
 			if test.accepted && err != nil {
 				t.Fatalf("ValidateInput(%v) = %v, want accepted", test.hours, err)
 			}
@@ -531,14 +489,13 @@ func TestValidateInputDynamicSkipsBoundsForUnboundedFields(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "runtime.unbounded.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 			"count":       {Type: "integer", Required: true},
 		},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools returned %v", err)
 	}
 	tool, _ := Lookup("runtime.unbounded.read")
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "count": -999999}); err != nil {
+	if err := ValidateInput(tool, map[string]any{"count": -999999}); err != nil {
 		t.Fatalf("ValidateInput on unbounded field = %v, want accepted", err)
 	}
 }
@@ -559,7 +516,6 @@ func TestRegisterDynamicToolsRejectsUnsatisfiableBounds(t *testing.T) {
 			err := RegisterDynamicTools([]DynamicToolDefinition{{
 				Tool: Tool{Name: "runtime.bounds.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 				InputSchema: map[string]DynamicInputField{
-					"environment": {Type: "string", Required: true},
 					"value":       field,
 				},
 			}})
@@ -583,7 +539,6 @@ func TestDynamicInputSchemaCopiesBounds(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "runtime.clone.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 			"value":       {Type: "integer", Required: true, Min: boundOf(1), Max: boundOf(10)},
 		},
 	}}); err != nil {
@@ -597,7 +552,7 @@ func TestDynamicInputSchemaCopiesBounds(t *testing.T) {
 	*schema["value"].Max = 999999
 
 	tool, _ := Lookup("runtime.clone.read")
-	if err := ValidateInput(tool, map[string]any{"environment": "prod", "value": 500}); err == nil {
+	if err := ValidateInput(tool, map[string]any{"value": 500}); err == nil {
 		t.Fatal("mutating the returned copy widened the registry's bound")
 	}
 }
@@ -615,7 +570,6 @@ func TestUnregisterDynamicToolsRemovesRegistered(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "grafana.query.read", Operation: Read, Risk: Low, Domain: "grafana", ResourceType: "mcp"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 		},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools: %v", err)
@@ -640,7 +594,6 @@ func TestUnregisterDynamicToolsRemovesInputSchema(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "loki.search.read", Operation: Read, Risk: Low, Domain: "loki", ResourceType: "mcp"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 			"query":       {Type: "string", Required: true},
 		},
 	}}); err != nil {
@@ -683,7 +636,6 @@ func TestUnregisterDynamicToolsAllListUpdated(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "svc.tool1.read", Operation: Read, Risk: Low, Domain: "svc", ResourceType: "mcp"},
 		InputSchema: map[string]DynamicInputField{
-			"environment": {Type: "string", Required: true},
 		},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools: %v", err)

@@ -38,7 +38,7 @@ func TestKnownDomainsReflectsDynamicRegistration(t *testing.T) {
 	err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
 		Tool: tools.Tool{Name: "registrytest.ping.read", Operation: tools.Read, Risk: tools.Low, Domain: "registrytest", ResourceType: "endpoint"},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment": {Type: "string", Required: true},
+
 		},
 	}})
 	if err != nil {
@@ -70,7 +70,7 @@ func registerTestDomains(t *testing.T) {
 		defs = append(defs, tools.DynamicToolDefinition{
 			Tool: tools.Tool{Name: d.domain + ".test.read", Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
+
 			},
 		})
 	}

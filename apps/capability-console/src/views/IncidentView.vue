@@ -22,14 +22,12 @@ const {
 const domain = ref('');
 const resourceType = ref('');
 const resourceName = ref('');
-const environment = ref('');
 
 async function submit() {
   await run({
     domain: domain.value.trim() || undefined,
     resource_type: resourceType.value.trim() || undefined,
     resource_name: resourceName.value.trim() || undefined,
-    environment: environment.value.trim() || undefined,
   });
 }
 
@@ -98,7 +96,7 @@ const severityClass: Record<string, string> = {
     data-view="incident"
     eyebrow="Incident View"
     title="告警全景"
-    copy="输入资源身份（域 / 资源类型 / 资源名 / 环境），把告警与其相关审计、定时巡检、只读探测与匹配 Runbook 串成一张可回链的全景。"
+    copy="输入资源身份（域 / 资源类型 / 资源名），把告警与其相关审计、定时巡检、只读探测与匹配 Runbook 串成一张可回链的全景。"
   >
 
     <form class="incident-form" @submit.prevent="submit">
@@ -113,10 +111,6 @@ const severityClass: Record<string, string> = {
       <label class="field">
         <span>资源名</span>
         <input v-model="resourceName" placeholder="如 archive" data-test="incident-resource-name" />
-      </label>
-      <label class="field">
-        <span>环境</span>
-        <input v-model="environment" placeholder="如 prod" data-test="incident-environment" />
       </label>
       <button class="primary-button" type="submit" :disabled="loading" data-test="incident-run">
         {{ loading ? '加载中…' : '查看全景' }}
@@ -135,7 +129,7 @@ const severityClass: Record<string, string> = {
     <div v-if="!loading && hasSearched && result" class="incident-body">
       <!-- 资源为空：没有找到任何证据 -->
       <div v-if="result.counts && result.counts.audit === 0 && result.counts.runbooks === 0 && result.counts.recent_writes === 0" class="empty" data-test="incident-empty">
-        未找到该资源的告警证据。请检查 Domain / 资源类型 / 资源名 / 环境，或先经 webhook 吸入一条告警。
+        未找到该资源的告警证据。请检查 Domain / 资源类型 / 资源名，或先经 webhook 吸入一条告警。
       </div>
 
       <template v-else>
@@ -259,7 +253,7 @@ const severityClass: Record<string, string> = {
 <style scoped>
 .incident-form {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   gap: var(--space-3);
   align-items: end;
   padding: var(--space-3);

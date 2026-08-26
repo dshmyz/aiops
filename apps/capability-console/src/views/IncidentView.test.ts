@@ -15,7 +15,7 @@ function ok(body: unknown): Response {
 const panorama = {
   result: {
     incident_id: 'alert-1',
-    pivot: { domain: 'minio', resource_type: 'bucket', resource_name: 'archive', environment: 'prod' },
+    pivot: { domain: 'minio', resource_type: 'bucket', resource_name: 'archive' },
     alert: {
       title: 'bucket capacity over 85%',
       source: 'prometheus',
@@ -91,7 +91,6 @@ async function mountAndRun(fields: Record<string, string>) {
   setField('[data-test="incident-domain"]', fields.domain);
   setField('[data-test="incident-resource-type"]', fields.resource_type);
   setField('[data-test="incident-resource-name"]', fields.resource_name);
-  setField('[data-test="incident-environment"]', fields.environment);
   await wrapper.find('[data-test="incident-run"]').trigger('submit');
   await flushPromises();
   return wrapper;
@@ -103,7 +102,6 @@ describe('IncidentView', () => {
       domain: 'minio',
       resource_type: 'bucket',
       resource_name: 'archive',
-      environment: 'prod',
     });
 
     const counts = wrapper.find('[data-test="incident-counts"]').text();

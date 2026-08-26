@@ -28,11 +28,11 @@ func TestHTTPAdapterBuildsRequestAndNormalizesOutput(t *testing.T) {
 	capability.Backend.BaseURL = server.URL
 	adapter := capabilities.NewHTTPAdapter(http.DefaultClient)
 
-	result, err := adapter.Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := adapter.Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
 	}
-	if result.Kind != "observation" || result.Resource.Name != "archive" || result.Resource.Environment != "prod" || result.Data["usage_pct"] != float64(86) {
+	if result.Kind != "observation" || result.Resource.Name != "archive" || result.Data["usage_pct"] != float64(86) {
 		t.Fatalf("result = %+v, want normalized observation", result)
 	}
 	if result.Summary != "Bucket archive usage is 86%" {
@@ -55,7 +55,7 @@ func TestHTTPAdapterStatusMappingNormalizesSeverityPathValue(t *testing.T) {
 	capability.Backend.BaseURL = server.URL
 	capability.Output.SeverityPath = "$.data.status"
 	capability.Output.StatusMapping = map[string]string{"RED": "critical", "YELLOW": "warning", "running": "ok"}
-	input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}
+	input := map[string]any{"cluster": "m1", "bucket": "archive"}
 	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, input)
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -76,7 +76,7 @@ func TestHTTPAdapterStatusMappingUnmatchedKeepsValue(t *testing.T) {
 	capability.Backend.BaseURL = server.URL
 	capability.Output.SeverityPath = "$.data.status"
 	capability.Output.StatusMapping = map[string]string{"RED": "critical"}
-	input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}
+	input := map[string]any{"cluster": "m1", "bucket": "archive"}
 	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, input)
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -95,7 +95,7 @@ func TestHTTPAdapterRawResponseRedactedForAudit(t *testing.T) {
 	defer server.Close()
 	capability := validReadCapability()
 	capability.Backend.BaseURL = server.URL
-	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
 	}
@@ -121,7 +121,7 @@ func TestHTTPAdapterSupportsNonJSONTextResponse(t *testing.T) {
 	defer server.Close()
 	capability := validReadCapability()
 	capability.Backend.BaseURL = server.URL
-	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("non-JSON response should not fail: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestHTTPAdapterNonJSONTextIsTruncated(t *testing.T) {
 	defer server.Close()
 	capability := validReadCapability()
 	capability.Backend.BaseURL = server.URL
-	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
 	}
@@ -173,7 +173,7 @@ func TestHTTPAdapterTopLevelArrayBecomesStructured(t *testing.T) {
 	defer server.Close()
 	capability := validReadCapability()
 	capability.Backend.BaseURL = server.URL
-	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("top-level array should not fail: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestHTTPAdapterNon2xxCarriesRedactedBodyForAudit(t *testing.T) {
 	defer server.Close()
 	capability := validReadCapability()
 	capability.Backend.BaseURL = server.URL
-	_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err == nil {
 		t.Fatalf("non-2xx should fail")
 	}
@@ -224,9 +224,9 @@ func TestHTTPAdapterRejectsInvalidInput(t *testing.T) {
 	adapter := capabilities.NewHTTPAdapter(nil)
 
 	for name, input := range map[string]map[string]any{
-		"wrong string type": {"environment": "prod", "cluster": "m1", "bucket": 42},
-		"unknown input":     {"environment": "prod", "cluster": "m1", "bucket": "archive", "extra": "nope"},
-		"missing required":  {"environment": "prod", "cluster": "m1"},
+		"wrong string type": {"cluster": "m1", "bucket": 42},
+		"unknown input":     {"cluster": "m1", "bucket": "archive", "extra": "nope"},
+		"missing required":  {"cluster": "m1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := adapter.Execute(context.Background(), capability, input); err == nil {
@@ -259,7 +259,7 @@ func TestHTTPAdapterIntegerInputMatchesGovernedValidation(t *testing.T) {
 			capability := validReadCapability()
 			capability.Backend.BaseURL = server.URL
 			capability.InputSchema["limit"] = capabilities.InputField{Type: "integer", Required: true}
-			input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive", "limit": test.value}
+			input := map[string]any{"cluster": "m1", "bucket": "archive", "limit": test.value}
 
 			_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, input)
 			if test.wantErr && err == nil {
@@ -279,7 +279,7 @@ func TestHTTPAdapterRejectsUnpublishedAndWriteCapabilities(t *testing.T) {
 	}))
 	defer server.Close()
 	adapter := capabilities.NewHTTPAdapter(nil)
-	input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}
+	input := map[string]any{"cluster": "m1", "bucket": "archive"}
 
 	capability := validReadCapability()
 	capability.Backend.BaseURL = server.URL
@@ -306,7 +306,6 @@ func TestHTTPAdapterExecutesWriteCapabilityWithJSONBody(t *testing.T) {
 	adapter := capabilities.NewHTTPAdapter(nil)
 
 	result, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"environment": "prod",
 		"cluster":     "m1",
 		"bucket":      "archive",
 		"quota":       100,
@@ -324,10 +323,10 @@ func TestHTTPAdapterExecutesWriteCapabilityWithJSONBody(t *testing.T) {
 		t.Fatalf("content-type = %q, want application/json", capturedContentType)
 	}
 	body := string(capturedBody)
-	if !strings.Contains(body, `"quota":100`) || strings.Contains(body, `"environment"`) || strings.Contains(body, `"cluster"`) || strings.Contains(body, `"bucket"`) {
-		t.Fatalf("body = %q, want JSON body with only non-path, non-environment fields", body)
+	if !strings.Contains(body, `"quota":100`) || strings.Contains(body, `"cluster"`) || strings.Contains(body, `"bucket"`) {
+		t.Fatalf("body = %q, want JSON body with only non-path fields", body)
 	}
-	if result.Kind != "mutation" || result.Resource.Name != "archive" || result.Resource.Environment != "prod" {
+	if result.Kind != "mutation" || result.Resource.Name != "archive" {
 		t.Fatalf("result = %+v, want mutation normalized result", result)
 	}
 	if result.Summary != "Bucket archive quota set to 100" {
@@ -346,7 +345,6 @@ func TestHTTPAdapterExecutesWriteCapabilityWithEmptyResponseBody(t *testing.T) {
 	adapter := capabilities.NewHTTPAdapter(nil)
 
 	result, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"environment": "prod",
 		"cluster":     "m1",
 		"bucket":      "archive",
 		"quota":       200,
@@ -373,7 +371,6 @@ func TestHTTPAdapterWriteCapabilityRejectsBackendError(t *testing.T) {
 	capability.Backend.BaseURL = server.URL
 
 	_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{
-		"environment": "prod",
 		"cluster":     "m1",
 		"bucket":      "archive",
 		"quota":       -1,
@@ -393,7 +390,7 @@ func TestHTTPAdapterRejectsRawOutputMapping(t *testing.T) {
 	capability.Backend.BaseURL = server.URL
 	capability.Output.Fields = map[string]string{"raw": "$"}
 
-	if _, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}); err == nil || !strings.Contains(err.Error(), "raw output mapping") {
+	if _, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"}); err == nil || !strings.Contains(err.Error(), "raw output mapping") {
 		t.Fatal("Execute accepted raw output mapping")
 	}
 }
@@ -408,7 +405,7 @@ func TestHTTPAdapterRedactsSensitiveOutputPaths(t *testing.T) {
 	capability.Backend.BaseURL = server.URL
 	capability.Output.Fields["token_alias"] = "$.data.secret_token"
 
-	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
 	}
@@ -427,7 +424,7 @@ func TestHTTPAdapterSkipsNonScalarOutputFields(t *testing.T) {
 	capability := validReadCapability()
 	capability.Backend.BaseURL = server.URL
 	capability.Output.Fields["payload"] = "$.data"
-	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
 	}
@@ -445,7 +442,7 @@ func TestHTTPAdapterOnlyExtractsScalarNonSensitiveSeverity(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":{"severity":"warning","details":{"level":"critical"},"secret_token":"error"}}`))
 	}))
 	defer server.Close()
-	input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}
+	input := map[string]any{"cluster": "m1", "bucket": "archive"}
 	adapter := capabilities.NewHTTPAdapter(nil)
 
 	for name, path := range map[string]string{
@@ -497,7 +494,7 @@ func TestHTTPAdapterEscapesPathValues(t *testing.T) {
 	capability := validReadCapability()
 	capability.Backend.BaseURL = server.URL
 
-	if _, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m/1", "bucket": "archive/2026"}); err != nil {
+	if _, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m/1", "bucket": "archive/2026"}); err != nil {
 		t.Fatalf("Execute returned %v", err)
 	}
 }
@@ -511,7 +508,7 @@ func TestHTTPAdapterRejectsOversizedResponse(t *testing.T) {
 	capability := validReadCapability()
 	capability.Backend.BaseURL = server.URL
 
-	if _, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}); err == nil {
+	if _, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"}); err == nil {
 		t.Fatal("Execute accepted oversized response")
 	}
 }
@@ -540,7 +537,7 @@ func TestHTTPAdapterRetriesGetOnServerError(t *testing.T) {
 	}
 	adapter := capabilities.NewHTTPAdapterWithConfig(nil, cfg)
 
-	result, err := adapter.Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := adapter.Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
 	}
@@ -573,7 +570,6 @@ func TestHTTPAdapterDoesNotRetryPostRequests(t *testing.T) {
 	adapter := capabilities.NewHTTPAdapterWithConfig(nil, cfg)
 
 	_, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"environment": "prod",
 		"cluster":     "m1",
 		"bucket":      "archive",
 		"quota":       100,
@@ -603,7 +599,7 @@ func TestHTTPAdapterCircuitBreakerOpensAfterThreshold(t *testing.T) {
 		ResetTimeout:     5 * time.Second,
 	}
 	adapter := capabilities.NewHTTPAdapterWithConfig(nil, cfg)
-	input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}
+	input := map[string]any{"cluster": "m1", "bucket": "archive"}
 
 	for i := 0; i < 3; i++ {
 		_, err := adapter.Execute(context.Background(), capability, input)
@@ -641,7 +637,7 @@ func TestHTTPAdapterCircuitBreakerHalfOpenRecovery(t *testing.T) {
 		ResetTimeout:     50 * time.Millisecond,
 	}
 	adapter := capabilities.NewHTTPAdapterWithConfig(nil, cfg)
-	input := map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"}
+	input := map[string]any{"cluster": "m1", "bucket": "archive"}
 
 	for i := 0; i < 3; i++ {
 		_, _ = adapter.Execute(context.Background(), capability, input)
@@ -673,7 +669,6 @@ func TestHTTPAdapterAppendsQueryParamsToReadURL(t *testing.T) {
 
 	adapter := capabilities.NewHTTPAdapter(nil)
 	_, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"environment": "prod",
 		"cluster":     "m1",
 		"bucket":      "archive",
 		"detail":      "full",
@@ -701,7 +696,6 @@ func TestHTTPAdapterExcludesQueryParamsFromWriteBody(t *testing.T) {
 
 	adapter := capabilities.NewHTTPAdapter(nil)
 	_, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"environment": "prod",
 		"cluster":     "m1",
 		"bucket":      "archive",
 		"quota":       100,
@@ -737,7 +731,7 @@ func TestHTTPAdapterRetriesExhaustedReturnsError(t *testing.T) {
 	}
 	adapter := capabilities.NewHTTPAdapterWithConfig(nil, cfg)
 
-	_, err := adapter.Execute(context.Background(), capability, map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	_, err := adapter.Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err == nil || !strings.Contains(err.Error(), "HTTP 503") {
 		t.Fatalf("err = %v, want HTTP 503 after retries exhausted", err)
 	}
@@ -760,7 +754,7 @@ func TestHTTPAdapterInjectsBearerTokenOnRead(t *testing.T) {
 	}
 
 	result, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{
-		"environment": "prod", "cluster": "m1", "bucket": "archive",
+		"cluster": "m1", "bucket": "archive",
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -790,7 +784,7 @@ func TestHTTPAdapterInjectsBearerTokenOnWrite(t *testing.T) {
 	}
 
 	_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{
-		"environment": "prod", "cluster": "m1", "bucket": "archive", "quota": 100,
+		"cluster": "m1", "bucket": "archive", "quota": 100,
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -814,7 +808,7 @@ func TestHTTPAdapterNoAuthWhenTypeEmpty(t *testing.T) {
 	// BackendAuthConfig zero value — no auth
 
 	_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{
-		"environment": "prod", "cluster": "m1", "bucket": "archive",
+		"cluster": "m1", "bucket": "archive",
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)

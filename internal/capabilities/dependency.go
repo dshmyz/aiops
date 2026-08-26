@@ -176,26 +176,24 @@ func dependencyPhase(dep DependencySpec) string {
 // input. It reuses the verify-spec template form ("{field}" pulls from the
 // parent input, anything else is a literal) so operators only learn one
 // mapping syntax. Without a mapping the parent input is forwarded unchanged
-// and the dependency's own input schema rejects any mismatch.
+// and the dependency's own input schema rejects any mismatch. With a mapping,
+// the parent input is carried through as the base and mapping targets
+// override, so unmapped fields (cluster, resource names) reach the dependency
+// unchanged.
 func buildDependencyInput(dep DependencySpec, parentInput map[string]any) (map[string]any, error) {
 	if len(dep.InputMapping) == 0 {
 		return parentInput, nil
 	}
-	result := make(map[string]any, len(dep.InputMapping))
+	result := make(map[string]any, len(parentInput)+len(dep.InputMapping))
+	for name, value := range parentInput {
+		result[name] = value
+	}
 	for target, template := range dep.InputMapping {
 		value, err := applyTemplate(template, parentInput)
 		if err != nil {
 			return nil, fmt.Errorf("map input %q for dependency %q: %w", target, dep.Capability, err)
 		}
 		result[target] = value
-	}
-	// environment gates every policy decision, so carry it through even when
-	// the mapping omits it rather than failing the dependency's own schema
-	// check with a confusing "environment is required".
-	if _, ok := result["environment"]; !ok {
-		if env, ok := parentInput["environment"]; ok {
-			result["environment"] = env
-		}
 	}
 	return result, nil
 }

@@ -46,7 +46,7 @@ func TestAssistantReturnsMiddlewareDiagnosticPackage(t *testing.T) {
 		httpapi.WithAssistant(assistant.NewService(assistant.DeterministicPlanner{}, readService, planService, nil)),
 		httpapi.WithActionPlans(repository),
 	)
-	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"检查 prod glusterfs data volume 健康"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"检查 glusterfs data volume 健康"}`))
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t))
 	req.Header.Set("X-Request-ID", "assistant-diagnostic-e2e-request")
 	res := httptest.NewRecorder()
@@ -64,7 +64,7 @@ func TestAssistantReturnsMiddlewareDiagnosticPackage(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Type != "answer" || body.Tool != "glusterfs.volume.health.read" || body.Diagnostic.Environment != "prod" || len(body.Diagnostic.Observations) == 0 {
+	if body.Type != "answer" || body.Tool != "glusterfs.volume.health.read" || len(body.Diagnostic.Observations) == 0 {
 		t.Fatalf("body = %+v, want answer response with diagnostic package", body)
 	}
 	var auditCount int
@@ -110,7 +110,7 @@ func TestAssistantFormatterProducesBlocks(t *testing.T) {
 		httpapi.WithAssistant(svc),
 		httpapi.WithActionPlans(repository),
 	)
-	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"检查 prod glusterfs data volume 健康"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"检查 glusterfs data volume 健康"}`))
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t))
 	req.Header.Set("X-Request-ID", "assistant-formatter-e2e")
 	res := httptest.NewRecorder()
@@ -169,7 +169,7 @@ func TestAssistantWriteMessageStoresPendingPlanInSQLite(t *testing.T) {
 		httpapi.WithAssistant(assistant.NewService(writePlanner{}, readService, planService, nil)),
 		httpapi.WithActionPlans(repository),
 	)
-	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"把 prod 的 orders topic retention 改成 72 小时"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"把 orders topic retention 改成 72 小时"}`))
 	req.Header.Set("Authorization", "Bearer "+signedAdminJWT(t))
 	req.Header.Set("X-Request-ID", "assistant-e2e-request")
 	res := httptest.NewRecorder()
@@ -199,7 +199,7 @@ func TestAssistantWriteMessageStoresPendingPlanInSQLite(t *testing.T) {
 	if listRes.Code != http.StatusOK {
 		t.Fatalf("list status = %d body = %s, want 200", listRes.Code, listRes.Body.String())
 	}
-	if !strings.Contains(listRes.Body.String(), `"tool":"topic.retention.set"`) || !strings.Contains(listRes.Body.String(), `"environment":"prod"`) {
+	if !strings.Contains(listRes.Body.String(), `"tool":"topic.retention.set"`) {
 		t.Fatalf("list body = %s, want pending prod retention plan", listRes.Body.String())
 	}
 	if strings.Contains(listRes.Body.String(), "confirmation_token") {
@@ -244,21 +244,18 @@ func e2eMiddlewareDefinitions() []tools.DynamicToolDefinition {
 		{
 			Tool: tools.Tool{Name: "glusterfs.volume.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "minio.bucket.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "kafka.consumer_lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
 				"name":        {Type: "string", Required: true},
 			},
 		},
@@ -273,7 +270,6 @@ func e2eMiddlewareDefinitions() []tools.DynamicToolDefinition {
 				SupportsDryRun:      true,
 			},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment":     {Type: "string", Required: true},
 				"topic":           {Type: "string", Required: true},
 				"retention_hours": {Type: "integer", Required: true, Min: e2eMinBound(1), Max: e2eMaxBound(8760)},
 			},
@@ -304,9 +300,8 @@ func signedAdminJWT(t *testing.T) string {
 	t.Helper()
 	header := encodeSegment(t, map[string]any{"alg": "HS256", "typ": "JWT"})
 	claims := encodeSegment(t, map[string]any{
-		"sub":                  "admin-1",
-		"roles":                []string{"admin"},
-		"allowed_environments": []string{"prod"},
+		"sub":   "admin-1",
+		"roles": []string{"admin"},
 	})
 	return signToken(header, claims)
 }
@@ -327,7 +322,7 @@ type writePlanner struct{}
 func (writePlanner) Plan(context.Context, identity.CurrentUser, string, []assistant.Turn, assistant.PageContext) (assistant.Intent, error) {
 	return assistant.Intent{
 		ToolName: "topic.retention.set",
-		Input:    map[string]any{"environment": "prod", "topic": "orders", "retention_hours": 72},
+		Input:    map[string]any{"topic": "orders", "retention_hours": 72},
 	}, nil
 }
 
@@ -368,7 +363,7 @@ func TestEinoMockProviderIntegrationReadFlow(t *testing.T) {
 		return time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
 	}))
 	mockChat := &einoMockChatModel{
-		content: `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.92,"explanation":"check cluster status"}`,
+		content: `{"tool_name":"cluster.status.read","input":{},"confidence":0.92,"explanation":"check cluster status"}`,
 	}
 	planner := assistant.NewEinoPlanner(mockChat)
 	router := httpapi.NewRouter(
@@ -378,7 +373,7 @@ func TestEinoMockProviderIntegrationReadFlow(t *testing.T) {
 		httpapi.WithActionPlans(repository),
 	)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"查看 prod 集群状态"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"查看集群状态"}`))
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t))
 	req.Header.Set("X-Request-ID", "eino-e2e-read")
 	res := httptest.NewRecorder()
@@ -416,7 +411,7 @@ func TestEinoMockProviderIntegrationWriteFlow(t *testing.T) {
 		return time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
 	}))
 	mockChat := &einoMockChatModel{
-		content: `{"tool_name":"topic.retention.set","input":{"environment":"prod","topic":"orders","retention_hours":72},"confidence":0.95,"explanation":"set retention"}`,
+		content: `{"tool_name":"topic.retention.set","input":{"topic":"orders","retention_hours":72},"confidence":0.95,"explanation":"set retention"}`,
 	}
 	planner := assistant.NewEinoPlanner(mockChat)
 	router := httpapi.NewRouter(
@@ -426,7 +421,7 @@ func TestEinoMockProviderIntegrationWriteFlow(t *testing.T) {
 		httpapi.WithActionPlans(repository),
 	)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"把 prod 的 orders topic retention 改成 72 小时"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/messages", strings.NewReader(`{"message":"把 orders topic retention 改成 72 小时"}`))
 	req.Header.Set("Authorization", "Bearer "+signedAdminJWT(t))
 	req.Header.Set("X-Request-ID", "eino-e2e-write")
 	res := httptest.NewRecorder()
@@ -465,7 +460,7 @@ func TestEinoSSEStreamEndToEnd(t *testing.T) {
 		return time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
 	}))
 	// Split the JSON intent across multiple chunks to verify delta forwarding.
-	intentJSON := `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.91,"explanation":"read cluster status"}`
+	intentJSON := `{"tool_name":"cluster.status.read","input":{},"confidence":0.91,"explanation":"read cluster status"}`
 	mockChat := &einoMockChatModel{
 		chunks: []string{intentJSON[:20], intentJSON[20:60], intentJSON[60:]},
 	}
@@ -477,7 +472,7 @@ func TestEinoSSEStreamEndToEnd(t *testing.T) {
 		httpapi.WithActionPlans(repository),
 	)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/stream", strings.NewReader(`{"message":"查看 prod 集群状态"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/stream", strings.NewReader(`{"message":"查看集群状态"}`))
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t))
 	req.Header.Set("X-Request-ID", "eino-e2e-sse")
 	res := httptest.NewRecorder()

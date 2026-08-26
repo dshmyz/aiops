@@ -6,55 +6,48 @@ resource_type: topic
 operation: write
 risk: medium
 backend:
-    adapter: http
-    method: POST
-    path: /api/kafka/default/topics/{topic}/retention
-    timeout_ms: 5000
-    base_url: http://127.0.0.1:19090
+ adapter: http
+ method: POST
+ path: /api/kafka/default/topics/{topic}/retention
+ timeout_ms: 5000
+ base_url: http://127.0.0.1:19090
 input_schema:
-    environment:
-        type: string
-        required: true
-        description: 目标环境
-        enum: [prod, staging, dev]
-        examples: [prod]
-    topic:
-        type: string
-        required: true
-        description: 要调整保留期的 Kafka topic 名
-        examples: [orders, payments]
-    retention_hours:
-        type: integer
-        required: true
-        min: 1
-        max: 8760
-        description: 保留时长（小时）
-        examples: [72, 168]
+ topic:
+ type: string
+ required: true
+ description: 要调整保留期的 Kafka topic 名
+ examples: [orders, payments]
+ retention_hours:
+ type: integer
+ required: true
+ min: 1
+ max: 8760
+ description: 保留时长（小时）
+ examples: [72, 168]
 output:
-    kind: confirmation
-    severity_path: ""
-    summary_template: Retention for topic {topic} set to {retention_hours}h
-    fields: {}
+ kind: confirmation
+ severity_path: ""
+ summary_template: Retention for topic {topic} set to {retention_hours}h
+ fields: {}
 dry_run:
-    summary: 将把 {environment} 环境的 topic {topic} 的消息保留时间设置为 {retention_hours} 小时。
-    command: kafka-configs --bootstrap-server <broker> --entity-type topics --entity-name {topic} --alter --add-config retention.hours={retention_hours}
-    warnings:
-        - 缩短保留时间可能导致超过 {retention_hours} 小时的历史消息被删除，请确认下游消费和审计需求。
+ summary: 将把 topic {topic} 的消息保留时间设置为 {retention_hours} 小时。
+ command: kafka-configs --bootstrap-server <broker> --entity-type topics --entity-name {topic} --alter --add-config retention.hours={retention_hours}
+ warnings:
+ - 缩短保留时间可能导致超过 {retention_hours} 小时的历史消息被删除，请确认下游消费和审计需求。
 governance:
-    requires_action_plan: true
-    requires_approval: true
-    precheck_tools:
-        - kafka.topic.retention.read
-    rollback:
-        strategy: reset_to_previous
-        source: previous_value
+ requires_action_plan: true
+ requires_approval: true
+ precheck_tools:
+ - kafka.topic.retention.read
+ rollback:
+ strategy: reset_to_previous
+ source: previous_value
 auth:
-    roles:
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - operator
+ - admin
 ai:
-    description: Set Kafka topic retention hours via the demo middleware backend.
-    examples:
-        - set prod kafka orders topic retention to 72 hours
-        - 配置 prod kafka orders topic 保留 48 小时
+ description: Set Kafka topic retention hours via the demo middleware backend.
+ examples:
+ - set kafka orders topic retention to 72 hours
+ - 配置 kafka orders topic 保留 48 小时

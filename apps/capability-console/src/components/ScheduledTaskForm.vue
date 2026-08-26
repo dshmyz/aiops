@@ -210,7 +210,7 @@ function onCancel() {
         v-model="inputText"
         class="form-textarea"
         rows="5"
-        placeholder='{"environment":"prod","cluster":"m1","bucket":"archive"}'
+        placeholder='{"cluster":"m1","bucket":"archive"}'
       />
     </label>
 

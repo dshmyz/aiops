@@ -12,11 +12,11 @@ func TestValidateRequestFields(t *testing.T) {
 		request Request
 		wantErr bool
 	}{
-		{name: "合法", request: Request{Domain: "glusterfs", Environment: "prod"}, wantErr: false},
-		{name: "环境必填", request: Request{Domain: "glusterfs", Environment: "  "}, wantErr: true},
-		{name: "环境超长", request: Request{Domain: "glusterfs", Environment: strings.Repeat("e", 128)}, wantErr: true},
-		{name: "资源名超长", request: Request{Domain: "glusterfs", Environment: "prod", ResourceName: strings.Repeat("r", 128)}, wantErr: true},
-		{name: "资源名可为空", request: Request{Domain: "glusterfs", Environment: "prod", ResourceName: ""}, wantErr: false},
+		{name: "合法", request: Request{Domain: "glusterfs"}, wantErr: false},
+		{name: "域名必填", request: Request{Domain: "  "}, wantErr: true},
+		{name: "域名超长", request: Request{Domain: strings.Repeat("d", 128)}, wantErr: true},
+		{name: "资源名超长", request: Request{Domain: "glusterfs", ResourceName: strings.Repeat("r", 128)}, wantErr: true},
+		{name: "资源名可为空", request: Request{Domain: "glusterfs", ResourceName: ""}, wantErr: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

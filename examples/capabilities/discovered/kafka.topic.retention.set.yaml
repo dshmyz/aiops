@@ -6,54 +6,49 @@ resource_type: topic
 operation: write
 risk: medium
 backend:
-    adapter: http
-    method: POST
-    path: /api/kafka/{cluster}/topics/{topic}/retention
-    timeout_ms: 3000
-    base_url: http://127.0.0.1:19090
+ adapter: http
+ method: POST
+ path: /api/kafka/{cluster}/topics/{topic}/retention
+ timeout_ms: 3000
+ base_url: http://127.0.0.1:19090
 input_schema:
-    cluster:
-        type: string
-        required: true
-    environment:
-        type: string
-        required: true
-    retention_hours:
-        type: integer
-        required: true
-        min: 1
-        max: 8760
-    topic:
-        type: string
-        required: true
+ cluster:
+ type: string
+ required: true
+ retention_hours:
+ type: integer
+ required: true
+ min: 1
+ max: 8760
+ topic:
+ type: string
+ required: true
 output:
-    kind: confirmation
-    severity_path: ""
-    summary_template: Set topic {topic} retention to {retention_hours}h
-    fields: {}
+ kind: confirmation
+ severity_path: ""
+ summary_template: Set topic {topic} retention to {retention_hours}h
+ fields: {}
 governance:
-    requires_action_plan: true
-    requires_approval: true
-    precheck_tools:
-        - kafka.topic.retention.read
-    rollback:
-        strategy: restore previous retention via another confirmed action plan
-        source: ""
+ requires_action_plan: true
+ requires_approval: true
+ precheck_tools:
+ - kafka.topic.retention.read
+ rollback:
+ strategy: restore previous retention via another confirmed action plan
+ source: ""
 auth:
-    roles:
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - operator
+ - admin
 ai:
-    description: Set the retention window (in hours) for a Kafka topic. Use when
-        messages must be kept or purged for compliance, cost, or capacity reasons.
-    examples:
-        - set prod kafka orders topic retention to 72 hours
-        - 配置 prod kafka orders topic 保留 48 小时
+ description: Set the retention window (in hours) for a Kafka topic. Use when
+ messages must be kept or purged for compliance, cost, or capacity reasons.
+ examples:
+ - set kafka orders topic retention to 72 hours
+ - 配置 kafka orders topic 保留 48 小时
 verify:
-    read_capability: kafka.topic.retention.read
-    input_mapping:
-        cluster: '{cluster}'
-        environment: '{environment}'
-        topic: '{topic}'
-    timeout_ms: 3000
+ read_capability: kafka.topic.retention.read
+ input_mapping:
+ cluster: '{cluster}'
+ topic: '{topic}'
+ timeout_ms: 3000

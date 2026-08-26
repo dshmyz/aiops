@@ -3589,12 +3589,6 @@ nav button:focus-visible {
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
 
-.assistant-env-field {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 /* 缺口-3：页面上下文 badge，展示跳转带入的 domain/resource_type，可清除 */
 .assistant-page-context-badge {
   display: inline-flex;
@@ -3639,42 +3633,6 @@ nav button:focus-visible {
 
 .assistant-page-context-badge .ctx-clear:hover {
   background: rgba(10, 132, 255, 0.2);
-}
-
-.assistant-env-label {
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
-  font-weight: 500;
-}
-
-.env-selector {
-  width: 110px;
-  padding: 6px 28px 6px var(--space-3);
-  background-color: var(--color-bg-elevated);
-  /* 用内联 SVG 作为自定义下拉箭头，跨浏览器一致 */
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%2394a3b8' d='M0 0l5 6 5-6z'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  font-size: var(--font-sm);
-  font-family: var(--font-mono);
-  cursor: pointer;
-  outline: none;
-  transition: all 0.15s var(--ease-out);
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-}
-
-.env-selector:hover {
-  border-color: var(--color-border-strong);
-}
-
-.env-selector:focus {
-  border-color: var(--color-accent);
-  box-shadow: var(--shadow-focus);
 }
 
 /* 苹果风输入框：大圆角 + focus 光晕 */

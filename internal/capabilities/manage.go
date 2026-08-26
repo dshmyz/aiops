@@ -517,9 +517,7 @@ func buildQuickPublishCapability(request QuickPublishRequest) Capability {
 			risk = tools.High
 		}
 	}
-	inputSchema := map[string]InputField{
-		"environment": {Type: "string", Required: true},
-	}
+	inputSchema := map[string]InputField{}
 	for _, name := range pathVariables(request.Path) {
 		inputSchema[name] = InputField{Type: "string", Required: true}
 	}
@@ -552,8 +550,7 @@ func buildQuickPublishCapability(request QuickPublishRequest) Capability {
 			SummaryTemplate: request.SummaryTemplate,
 		},
 		Auth: AuthSpec{
-			Roles:             []string{"viewer", "operator", "admin"},
-			EnvironmentScoped: true,
+			Roles: []string{"viewer", "operator", "admin"},
 		},
 		AI: AISpec{
 			Description: request.Description,

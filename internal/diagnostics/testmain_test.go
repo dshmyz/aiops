@@ -15,28 +15,28 @@ func TestMain(m *testing.M) {
 		{
 			Tool: tools.Tool{Name: "glusterfs.volume.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
+
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "minio.bucket.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
+
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "kafka.consumer_group.lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
+
 				"name":        {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "topic.retention.set", Operation: tools.Write, Risk: tools.Medium, Domain: "kafka", ResourceType: "topic", RollbackDescription: "reset_to_previous"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment":     {Type: "string", Required: true},
+
 				"topic":           {Type: "string", Required: true},
 				"retention_hours": {Type: "integer", Required: true},
 			},

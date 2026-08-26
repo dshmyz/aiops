@@ -74,9 +74,8 @@ func (c *PlanCreator) CreatePlanForStep(ctx context.Context, alert Alert, action
 	input := step.RenderInput(alert)
 
 	user := identity.CurrentUser{
-		Subject:             "alert-auto-plan",
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{"prod", "staging", "dev"},
+		Subject: "alert-auto-plan",
+		Roles:   []string{"admin"},
 	}
 
 	decision := policy.Evaluate(user, tool, input)

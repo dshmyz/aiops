@@ -84,5 +84,5 @@ func TestCreateRunbookPlanRejectsNotPermittedDecision(t *testing.T) {
 }
 
 func viewerUser() identity.CurrentUser {
-	return identity.CurrentUser{Subject: "viewer-1", Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}, RequestID: "req-viewer"}
+	return identity.CurrentUser{Subject: "viewer-1", Roles: []string{"viewer"}, RequestID: "req-viewer"}
 }

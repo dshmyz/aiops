@@ -11,7 +11,7 @@ import (
 func TestEvaluateRejectsRoleWithoutToolPermission(t *testing.T) {
 	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, "topic.retention.set")
-	d := Evaluate(user("viewer", "prod"), writeTool, validRetentionInput("prod", 72))
+	d := Evaluate(user("viewer"), writeTool, validRetentionInput(72))
 	if d.Reason != PermissionDenied {
 		t.Fatalf("reason = %q, want %q", d.Reason, PermissionDenied)
 	}
@@ -20,15 +20,7 @@ func TestEvaluateRejectsRoleWithoutToolPermission(t *testing.T) {
 	}
 }
 
-func TestEvaluateRejectsEnvironmentOutsideIdentityProjection(t *testing.T) {
-	readTool := registeredTool(t, tools.ClusterStatusRead)
-	d := Evaluate(user("viewer", "staging"), readTool, map[string]any{"environment": "prod"})
-	if d.Reason != EnvironmentDenied {
-		t.Fatalf("reason = %q, want %q", d.Reason, EnvironmentDenied)
-	}
-}
-
-func TestEvaluateViewerDiagnosticReadToolsRespectEnvironmentProjection(t *testing.T) {
+func TestEvaluateViewerDiagnosticReadToolsAllowed(t *testing.T) {
 	registerMiddlewareTools(t)
 
 	for _, test := range []struct {
@@ -36,42 +28,37 @@ func TestEvaluateViewerDiagnosticReadToolsRespectEnvironmentProjection(t *testin
 		toolName  string
 		toolInput map[string]any
 	}{
-		{name: "glusterfs volume health", toolName: "glusterfs.volume.health.read", toolInput: map[string]any{"environment": "prod", "name": "data"}},
-		{name: "minio bucket health", toolName: "minio.bucket.health.read", toolInput: map[string]any{"environment": "prod", "name": "backups"}},
-		{name: "kafka consumer lag", toolName: "kafka.consumer_lag.read", toolInput: map[string]any{"environment": "prod", "name": "orders"}},
-		{name: "alert query", toolName: tools.AlertQuery, toolInput: map[string]any{"environment": "prod"}},
-		{name: "event query", toolName: tools.EventQuery, toolInput: map[string]any{"environment": "prod", "query": "上周谁拒绝了 plan"}},
-		{name: "task query", toolName: tools.TaskQuery, toolInput: map[string]any{"environment": "prod"}},
+		{name: "glusterfs volume health", toolName: "glusterfs.volume.health.read", toolInput: map[string]any{"name": "data"}},
+		{name: "minio bucket health", toolName: "minio.bucket.health.read", toolInput: map[string]any{"name": "backups"}},
+		{name: "kafka consumer lag", toolName: "kafka.consumer_lag.read", toolInput: map[string]any{"name": "orders"}},
+		{name: "alert query", toolName: tools.AlertQuery, toolInput: map[string]any{}},
+		{name: "event query", toolName: tools.EventQuery, toolInput: map[string]any{"query": "上周谁拒绝了 plan"}},
+		{name: "task query", toolName: tools.TaskQuery, toolInput: map[string]any{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tool := registeredTool(t, test.toolName)
 
-			allowed := Evaluate(user("viewer", "prod"), tool, test.toolInput)
+			allowed := Evaluate(user("viewer"), tool, test.toolInput)
 			if !allowed.Allowed || allowed.Reason != Permitted || allowed.RequiresConfirmation {
 				t.Fatalf("allowed decision = %+v, want permitted read", allowed)
-			}
-
-			denied := Evaluate(user("viewer", "staging"), tool, test.toolInput)
-			if denied.Allowed || denied.Reason != EnvironmentDenied {
-				t.Fatalf("outside-environment decision = %+v, want environment denied", denied)
 			}
 		})
 	}
 }
 
-func TestEvaluateRejectsUnsafeProductionParameter(t *testing.T) {
+func TestEvaluateRejectsUnsafeParameterBelowFloor(t *testing.T) {
 	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, "topic.retention.set")
-	d := Evaluate(user("admin", "prod"), writeTool, validRetentionInput("prod", 12))
+	d := Evaluate(user("admin"), writeTool, validRetentionInput(12))
 	if d.Reason != ParameterDenied {
 		t.Fatalf("reason = %q, want %q", d.Reason, ParameterDenied)
 	}
 }
 
-func TestEvaluateRejectsProductionWriteAboveRoleRiskLimit(t *testing.T) {
+func TestEvaluateRejectsWriteAboveRoleRiskLimit(t *testing.T) {
 	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, "topic.retention.set")
-	d := Evaluate(user("operator", "prod"), writeTool, validRetentionInput("prod", 72))
+	d := Evaluate(user("operator"), writeTool, validRetentionInput(72))
 	if d.Reason != RiskDenied {
 		t.Fatalf("reason = %q, want %q", d.Reason, RiskDenied)
 	}
@@ -80,7 +67,7 @@ func TestEvaluateRejectsProductionWriteAboveRoleRiskLimit(t *testing.T) {
 func TestEvaluateRequiresConfirmationForAllowedWrite(t *testing.T) {
 	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, "topic.retention.set")
-	d := Evaluate(user("admin", "prod"), writeTool, validRetentionInput("prod", 72))
+	d := Evaluate(user("admin"), writeTool, validRetentionInput(72))
 	if !d.Allowed {
 		t.Fatalf("admin write decision = %+v, want allowed", d)
 	}
@@ -92,7 +79,7 @@ func TestEvaluateRequiresConfirmationForAllowedWrite(t *testing.T) {
 func TestEvaluateUsesCanonicalToolMetadata(t *testing.T) {
 	registerMiddlewareTools(t)
 	forgedRead := tools.Tool{Name: "topic.retention.set", Operation: tools.Read, Risk: tools.Low}
-	d := Evaluate(user("admin", "prod"), forgedRead, validRetentionInput("prod", 72))
+	d := Evaluate(user("admin"), forgedRead, validRetentionInput(72))
 	if !d.Allowed || !d.RequiresConfirmation {
 		t.Fatalf("forged metadata changed canonical write policy: %+v", d)
 	}
@@ -101,10 +88,10 @@ func TestEvaluateUsesCanonicalToolMetadata(t *testing.T) {
 func TestEvaluateAcceptsValidJSONNumberParameter(t *testing.T) {
 	registerMiddlewareTools(t)
 	writeTool := registeredTool(t, "topic.retention.set")
-	input := validRetentionInput("prod", 72)
+	input := validRetentionInput(72)
 	input["retention_hours"] = json.Number("72")
 
-	d := Evaluate(user("admin", "prod"), writeTool, input)
+	d := Evaluate(user("admin"), writeTool, input)
 	if !d.Allowed || !d.RequiresConfirmation {
 		t.Fatalf("JSON number input decision = %+v, want an allowed confirmed write", d)
 	}
@@ -116,9 +103,8 @@ func TestEvaluateAllowsDynamicReadForRegisteredRole(t *testing.T) {
 	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
 		Tool: tools.Tool{Name: "minio.bucket.capacity.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment": {Type: "string", Required: true},
-			"cluster":     {Type: "string", Required: true},
-			"bucket":      {Type: "string", Required: true},
+			"cluster": {Type: "string", Required: true},
+			"bucket":  {Type: "string", Required: true},
 		},
 	}}); err != nil {
 		t.Fatalf("register dynamic: %v", err)
@@ -126,18 +112,17 @@ func TestEvaluateAllowsDynamicReadForRegisteredRole(t *testing.T) {
 	RegisterDynamicRolePermissions(map[string][]string{"minio.bucket.capacity.read": {"viewer"}})
 	t.Cleanup(ResetDynamicRolePermissionsForTest)
 
-	d := Evaluate(user("viewer", "prod"), registeredTool(t, "minio.bucket.capacity.read"), map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	d := Evaluate(user("viewer"), registeredTool(t, "minio.bucket.capacity.read"), map[string]any{"cluster": "m1", "bucket": "archive"})
 	if !d.Allowed || d.RequiresConfirmation {
 		t.Fatalf("dynamic read decision = %+v, want allowed read", d)
 	}
 }
 
-// TestEvaluateAppliesProductionFloorToDynamicWriteCapability covers the route
+// TestEvaluateAppliesParameterFloorToDynamicWriteCapability covers the route
 // the planner actually takes today: a published capability, not the static
-// tool. The floor used to be keyed on "topic.retention.set", so re-routing
-// the same operation to kafka.topic.retention.write skipped it and prod
-// retention could be set to 1 hour.
-func TestEvaluateAppliesProductionFloorToDynamicWriteCapability(t *testing.T) {
+// tool. The floor matches on the parameter, so re-routing the same operation
+// to a capability must still enforce it.
+func TestEvaluateAppliesParameterFloorToDynamicWriteCapability(t *testing.T) {
 	tools.ResetDynamicToolsForTest()
 	t.Cleanup(tools.ResetDynamicToolsForTest)
 	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
@@ -150,7 +135,6 @@ func TestEvaluateAppliesProductionFloorToDynamicWriteCapability(t *testing.T) {
 			ResourceType:        "topic",
 		},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment":     {Type: "string", Required: true},
 			"cluster":         {Type: "string", Required: true},
 			"topic":           {Type: "string", Required: true},
 			"retention_hours": {Type: "integer", Required: true, Min: bound(1), Max: bound(8760)},
@@ -163,20 +147,20 @@ func TestEvaluateAppliesProductionFloorToDynamicWriteCapability(t *testing.T) {
 
 	tool := registeredTool(t, "kafka.topic.retention.write")
 	input := func(hours any) map[string]any {
-		return map[string]any{"environment": "prod", "cluster": "c1", "topic": "orders", "retention_hours": hours}
+		return map[string]any{"cluster": "c1", "topic": "orders", "retention_hours": hours}
 	}
 
 	for name, test := range map[string]struct {
 		hours any
 		want  Reason
 	}{
-		"below production floor":  {hours: 1, want: ParameterDenied},
-		"above schema maximum":    {hours: 999999, want: InvalidInput},
+		"below floor":            {hours: 1, want: ParameterDenied},
+		"above schema maximum":   {hours: 999999, want: InvalidInput},
 		"json number below floor": {hours: json.Number("12"), want: ParameterDenied},
-		"at production floor":     {hours: 24, want: Permitted},
+		"at floor":               {hours: 24, want: Permitted},
 	} {
 		t.Run(name, func(t *testing.T) {
-			d := Evaluate(user("admin", "prod"), tool, input(test.hours))
+			d := Evaluate(user("admin"), tool, input(test.hours))
 			if d.Reason != test.want {
 				t.Fatalf("reason = %q, want %q", d.Reason, test.want)
 			}
@@ -184,22 +168,10 @@ func TestEvaluateAppliesProductionFloorToDynamicWriteCapability(t *testing.T) {
 	}
 }
 
-// TestEvaluateLeavesNonProductionAndReadsToSchemaBounds keeps the floor from
-// creeping outside its purpose: it is a production write guardrail, not a
-// general lower bound. Staging retention below 24h is a legitimate setting.
-func TestEvaluateLeavesNonProductionAndReadsToSchemaBounds(t *testing.T) {
-	registerMiddlewareTools(t)
-	writeTool := registeredTool(t, "topic.retention.set")
-	d := Evaluate(user("admin", "staging"), writeTool, validRetentionInput("staging", 1))
-	if !d.Allowed {
-		t.Fatalf("staging decision = %+v, want allowed", d)
-	}
-}
-
 // registerMiddlewareTools loads the middleware capabilities into the dynamic
 // registry and injects their role permissions, mirroring production: reads are
 // visible to all roles; the retention write requires operator/admin (its
-// environment risk is handled by the risk check, not the role table).
+// risk is handled by the risk check, not the role table).
 func registerMiddlewareTools(t *testing.T) {
 	t.Helper()
 	tools.ResetDynamicToolsForTest()
@@ -210,22 +182,19 @@ func registerMiddlewareTools(t *testing.T) {
 		{
 			Tool: tools.Tool{Name: "glusterfs.volume.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "minio.bucket.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "kafka.consumer_lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
@@ -239,7 +208,6 @@ func registerMiddlewareTools(t *testing.T) {
 				SupportsDryRun:      true,
 			},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment":     {Type: "string", Required: true},
 				"topic":           {Type: "string", Required: true},
 				"retention_hours": {Type: "integer", Required: true, Min: bound(1), Max: bound(8760)},
 			},
@@ -249,9 +217,9 @@ func registerMiddlewareTools(t *testing.T) {
 	}
 	RegisterDynamicRolePermissions(map[string][]string{
 		"glusterfs.volume.health.read": {"viewer", "operator", "admin"},
-		"minio.bucket.health.read":   {"viewer", "operator", "admin"},
-		"kafka.consumer_lag.read":    {"viewer", "operator", "admin"},
-		"topic.retention.set":       {"operator", "admin"},
+		"minio.bucket.health.read":     {"viewer", "operator", "admin"},
+		"kafka.consumer_lag.read":      {"viewer", "operator", "admin"},
+		"topic.retention.set":          {"operator", "admin"},
 	})
 }
 
@@ -268,62 +236,17 @@ func registeredTool(t *testing.T, name string) tools.Tool {
 	return tool
 }
 
-func user(role, environment string) identity.CurrentUser {
+func user(role string) identity.CurrentUser {
 	return identity.CurrentUser{
-		Subject:             "user-123",
-		Roles:               []string{role},
-		AllowedEnvironments: []string{environment},
-		RequestID:           "req-456",
+		Subject:   "user-123",
+		Roles:     []string{role},
+		RequestID: "req-456",
 	}
 }
 
-func validRetentionInput(environment string, hours int) map[string]any {
+func validRetentionInput(hours int) map[string]any {
 	return map[string]any{
-		"environment":     environment,
 		"topic":           "orders",
 		"retention_hours": hours,
-	}
-}
-
-func TestDefaultEnvironmentValue(t *testing.T) {
-	u := identity.CurrentUser{AllowedEnvironments: []string{"prod", "staging", "dev"}}
-	for _, test := range []struct {
-		name string
-		env  string
-		want string
-	}{
-		{name: "allowed kept", env: "staging", want: "staging"},
-		{name: "empty defaults to first", env: "", want: "prod"},
-		{name: "variant defaults to first", env: "production", want: "prod"},
-		{name: "unrelated defaults to first", env: "default", want: "prod"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := DefaultEnvironmentValue(u, test.env); got != test.want {
-				t.Fatalf("DefaultEnvironmentValue(%q) = %q, want %q", test.env, got, test.want)
-			}
-		})
-	}
-	empty := identity.CurrentUser{}
-	if got := DefaultEnvironmentValue(empty, "anything"); got != "anything" {
-		t.Fatalf("empty allowed list: got %q, want unchanged", got)
-	}
-}
-
-func TestDefaultEnvironment(t *testing.T) {
-	u := identity.CurrentUser{AllowedEnvironments: []string{"prod", "staging", "dev"}}
-	original := map[string]any{"environment": "production", "bucket": "archive"}
-	out := DefaultEnvironment(u, original)
-	if out["environment"] != "prod" {
-		t.Fatalf("defaulted environment = %v, want prod", out["environment"])
-	}
-	if out["bucket"] != "archive" {
-		t.Fatalf("other fields dropped: %v", out)
-	}
-	if original["environment"] != "production" {
-		t.Fatalf("original mutated: %v", original)
-	}
-	out2 := DefaultEnvironment(u, map[string]any{"environment": "staging"})
-	if out2["environment"] != "staging" {
-		t.Fatalf("allowed env not preserved: %v", out2["environment"])
 	}
 }

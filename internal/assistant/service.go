@@ -993,20 +993,17 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		}
 		toolName := resolveDiagnosticToolName(s.diagnostics, *intent.Diagnostic)
 		diagRequest := *intent.Diagnostic
-		// 参数卫生防线：先对用户原始输入做长度/必填校验，再应用默认环境规约。
-		// 顺序必须如此——DefaultEnvironmentValue 会把不被允许甚至超长的环境值
-		// 规约为允许值中的第一个，提前调用会让 validateRequest 永远收不到原值。
+		// 参数卫生防线：对用户原始输入做长度/必填校验。
 		if verr := diagnostics.ValidateRequestFields(diagRequest); verr != nil {
 			return Response{}, verr
 		}
-		diagRequest.Environment = policy.DefaultEnvironmentValue(user, diagRequest.Environment)
 		// Emit progress: tool_executing stage with the resolved tool name.
 		s.emitProgress(ProgressToolExecuting, toolName)
 		// Emit tool call start event for real-time SSE display
 		if s.toolCallEmitter != nil {
 			s.toolCallEmitter(ToolCallEvent{
 				Tool:  toolName,
-				Input: map[string]any{"domain": diagRequest.Domain, "environment": diagRequest.Environment},
+				Input: map[string]any{"domain": diagRequest.Domain},
 				Done:  false,
 			})
 		}
@@ -1023,7 +1020,7 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		if s.toolCallEmitter != nil {
 			s.toolCallEmitter(ToolCallEvent{
 				Tool:  toolName,
-				Input: map[string]any{"domain": diagRequest.Domain, "environment": diagRequest.Environment},
+				Input: map[string]any{"domain": diagRequest.Domain},
 				Done:  true,
 			})
 		}
@@ -1063,10 +1060,9 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		// 使 Summary 聚合时体现诊断结论而非只显示推荐读结果。
 		diagFact := ToolFact{
 			Tool:  toolName,
-			Input: map[string]any{"domain": diagRequest.Domain, "environment": diagRequest.Environment},
+			Input: map[string]any{"domain": diagRequest.Domain},
 			Result: map[string]any{
 				"summary":         diagSummary,
-				"environment":     pkg.Environment,
 				"domains":         pkg.Domains,
 				"recommendations": len(pkg.Recommendations),
 			},
@@ -1080,12 +1076,8 @@ func (s *Service) executeFromIntent(ctx context.Context, user identity.CurrentUs
 		s.recordDenied(ctx, user, intent.ToolName, policy.ToolNotRegistered)
 		return Response{}, fmt.Errorf("%w: %s", ErrPolicyDenied, policy.ToolNotRegistered)
 	}
-	// 读路径对 LLM 生成的 environment 兜底到用户首个允许环境，避免误伤；
-	// 写路径保持严格（environment 限定写身份）。
+	// 读路径的 input 直接透传（不再做默认环境规约），由策略层校验。
 	input := intent.Input
-	if tool.Operation == tools.Read {
-		input = policy.DefaultEnvironment(user, intent.Input)
-	}
 	decision := policy.Evaluate(user, tool, input)
 	if !decision.Allowed {
 		s.recordDenied(ctx, user, tool.Name, decision.Reason)

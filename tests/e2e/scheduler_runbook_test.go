@@ -85,7 +85,7 @@ func TestSchedulerRunbookEndToEndPermitted(t *testing.T) {
 	)
 
 	// 1) 创建 run_kind=runbook 定时任务
-	createBody := `{"name":"minio 保留期定时设置","run_kind":"runbook","runbook_slug":"` + schedulerRunbookWriteSlug + `","input":{"environment":"prod","bucket":"archive","retention_days":90},"schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
+	createBody := `{"name":"minio 保留期定时设置","run_kind":"runbook","runbook_slug":"` + schedulerRunbookWriteSlug + `","input":{"bucket":"archive","retention_days":90},"schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
 	createReq := schedulerRunbookReq(t, http.MethodPost, "/v1/scheduled-tasks", createBody)
 	createRes := httptest.NewRecorder()
 	router.ServeHTTP(createRes, createReq)
@@ -198,7 +198,7 @@ func TestSchedulerRunbookEndToEndDenied(t *testing.T) {
 		httpapi.WithRunbooks(runbookStore),
 	)
 
-	createBody := `{"name":"minio 保留期定时","run_kind":"runbook","runbook_slug":"minio-retention-low-template","input":{"environment":"prod","bucket":"archive","retention_days":90},"schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
+	createBody := `{"name":"minio 保留期定时","run_kind":"runbook","runbook_slug":"minio-retention-low-template","input":{"bucket":"archive","retention_days":90},"schedule_kind":"preset","preset":"daily","timezone":"Asia/Shanghai","enabled":true}`
 	createReq := schedulerRunbookReq(t, http.MethodPost, "/v1/scheduled-tasks", createBody)
 	createRes := httptest.NewRecorder()
 	router.ServeHTTP(createRes, createReq)
@@ -249,7 +249,7 @@ func registerSchedulerLowRiskWriteTool(t *testing.T) {
 				ResourceType:        "bucket",
 			},
 			InputSchema: map[string]tools.DynamicInputField{
-				"environment": {Type: "string", Required: true},
+
 				"bucket":      {Type: "string", Required: true},
 				"retention_days": {Type: "integer", Required: true,
 					Min: e2eMinBound(1), Max: e2eMaxBound(3650)},

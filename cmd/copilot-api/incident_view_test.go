@@ -90,7 +90,6 @@ func TestIncidentViewJoinsAlertAuditRunsRunbook(t *testing.T) {
 		Domain:       "minio",
 		ResourceType: "bucket",
 		ResourceName: "archive",
-		Environment:  "prod",
 		Status:       "firing",
 		FiredAt:      now.Add(-30 * time.Minute),
 		ReceivedAt:   now.Add(-30 * time.Minute),
@@ -102,11 +101,11 @@ func TestIncidentViewJoinsAlertAuditRunsRunbook(t *testing.T) {
 
 	// 相关审计（写）：同域同资源 archive，PlanID 指向含 "archive" 的 plan。
 	matchAuditID := seedPlan(t, repo, "plan-archive", "minio.bucket.retention.set",
-		`{"environment":"prod","bucket":"archive"}`, now.Add(-20*time.Minute))
+		`{"bucket":"archive"}`, now.Add(-20*time.Minute))
 
 	// 同域异资源：完整时间窗内、但 input 是 "other"，应被资源确认排除。
 	seedPlan(t, repo, "plan-other", "minio.bucket.retention.set",
-		`{"environment":"prod","bucket":"other"}`, now.Add(-20*time.Minute))
+		`{"bucket":"other"}`, now.Add(-20*time.Minute))
 
 	// 相关定时巡检 run：audit_event_id 桥接到 matchAuditID。
 	task, err := schedStore.CreateTask(context.Background(), store.ScheduledTask{
@@ -146,8 +145,7 @@ func TestIncidentViewJoinsAlertAuditRunsRunbook(t *testing.T) {
 		"domain":        "minio",
 		"resource_type": "bucket",
 		"resource_name": "archive",
-		"environment":   "prod",
-	})
+		})
 	if err != nil {
 		t.Fatalf("incident.view: %v", err)
 	}
@@ -198,7 +196,6 @@ func TestIncidentViewEmptyWhenNoAlert(t *testing.T) {
 		"domain":        "kafka",
 		"resource_type": "consumer_group",
 		"resource_name": "nope",
-		"environment":   "prod",
 	})
 	if err != nil {
 		t.Fatalf("incident.view: %v", err)

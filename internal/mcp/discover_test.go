@@ -104,10 +104,10 @@ func TestDiscoverConvertsMCPToolsToDynamicDefinitions(t *testing.T) {
 			InputSchema: mcp.MCPInputSchema{
 				Type: "object",
 				Properties: map[string]mcp.MCPPropertySchema{
-					"environment": {Type: "string", Description: "Target environment"},
-					"query":       {Type: "string", Description: "PromQL query"},
+					"cluster": {Type: "string", Description: "Target cluster"},
+					"query":   {Type: "string", Description: "PromQL query"},
 				},
-				Required: []string{"environment", "query"},
+				Required: []string{"cluster", "query"},
 			},
 		},
 	}}
@@ -130,10 +130,7 @@ func TestDiscoverConvertsMCPToolsToDynamicDefinitions(t *testing.T) {
 	if def.Tool.Risk != tools.Low {
 		t.Errorf("Risk = %v, want Low", def.Tool.Risk)
 	}
-	// input schema 应包含 environment 和 query
-	if _, ok := def.InputSchema["environment"]; !ok {
-		t.Error("InputSchema missing environment")
-	}
+	// input schema 应包含 query
 	if _, ok := def.InputSchema["query"]; !ok {
 		t.Error("InputSchema missing query")
 	}
@@ -163,13 +160,12 @@ func TestDiscoverInjectsEnvironmentWhenMissing(t *testing.T) {
 	if len(defs) != 1 {
 		t.Fatalf("defs len = %d, want 1", len(defs))
 	}
-	// 即使 MCP 工具没有 environment，转换后必须注入（tools.RegisterDynamicTools 强制要求）
-	env, ok := defs[0].InputSchema["environment"]
-	if !ok {
-		t.Fatal("InputSchema missing injected environment")
+	// MCP 工具无 environment 也不注入：environment 概念已移除，schema 原样透传
+	if _, ok := defs[0].InputSchema["environment"]; ok {
+		t.Fatal("InputSchema unexpectedly contains environment")
 	}
-	if env.Type != "string" || !env.Required {
-		t.Errorf("environment field = %+v, want required string", env)
+	if _, ok := defs[0].InputSchema["query"]; !ok {
+		t.Error("InputSchema missing query")
 	}
 }
 
@@ -277,7 +273,7 @@ func TestDiscoverSkipsUnsupportedPropertyTypes(t *testing.T) {
 
 func TestDiscoverResultPassesToolsValidation(t *testing.T) {
 	t.Parallel()
-	// 确保转换结果能通过 tools.RegisterDynamicTools 的校验（environment 必需）。
+	// 确保转换结果能通过 tools.RegisterDynamicTools 的校验。
 	tools.ResetDynamicToolsForTest()
 	defer tools.ResetDynamicToolsForTest()
 

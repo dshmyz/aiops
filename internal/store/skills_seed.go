@@ -665,13 +665,13 @@ var builtinSkills = []Skill{
 		Content: `# 告警查询指引 SOP
 
 ## 查询原则
-1. 优先用 alert.query 获取活动告警（status=firing），默认 environment=prod
+1. 优先用 alert.query 获取活动告警（status=firing）
 2. 可按 severity / domain 过滤；关键告警（critical）优先展示
 3. 结合 cluster.status.read 交叉验证集群整体健康
 
 ## 必须输出
-- **当前告警数** + 每条告警的标题、严重级别、环境、状态、触发时间
-- **影响面**：涉及的服务/环境/资源
+- **当前告警数** + 每条告警的标题、严重级别、状态、触发时间
+- **影响面**：涉及的服务/资源
 - **建议**：对 critical 告警给出下一步排查方向（只读）
 
 ## 安全边界

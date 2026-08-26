@@ -3,7 +3,6 @@ import { computed } from 'vue';
 import type { DiagnosticPackage } from '../types';
 import MarkdownContent from './MarkdownContent.vue';
 import {
-  labelForEnvironment,
   labelForRisk,
   labelForSeverity,
   labelForConfidence,
@@ -29,7 +28,6 @@ const isFramework = computed(() => {
         <span v-if="isFramework" class="badge tag-warning" data-test="framework-badge">通用检查框架（非实测数据）</span>
         <h3>{{ diagnostic.id }}</h3>
       </div>
-      <small>{{ labelForEnvironment(diagnostic.environment) }}</small>
     </div>
 
     <section v-if="diagnostic.resources.length > 0">

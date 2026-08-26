@@ -50,7 +50,6 @@ async function handleConfirm() {
     <h3>{{ plan.id }}</h3>
     <dl>
       <div><dt>tool</dt><dd>{{ plan.tool }}</dd></div>
-      <div><dt>environment</dt><dd>{{ plan.environment }}</dd></div>
       <div><dt>risk</dt><dd>{{ plan.risk }}</dd></div>
       <div><dt>status</dt><dd>{{ plan.status }}</dd></div>
       <div><dt>version</dt><dd>{{ plan.version }}</dd></div>

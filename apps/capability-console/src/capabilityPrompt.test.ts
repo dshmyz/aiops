@@ -22,8 +22,8 @@ function makeCapability(overrides: Partial<ManagedCapability> = {}): ManagedCapa
 
 describe('parseTestInput', () => {
   test('解析合法的 JSON 对象', () => {
-    expect(parseTestInput('{"environment":"prod","group":"g1"}')).toEqual({
-      environment: 'prod',
+    expect(parseTestInput('{"cluster":"m1","group":"g1"}')).toEqual({
+      cluster: 'm1',
       group: 'g1',
     });
   });
@@ -44,32 +44,25 @@ describe('parseTestInput', () => {
 });
 
 describe('buildAIPrompt', () => {
-  test('默认环境取 prod，resource/domain 取默认值', () => {
+  test('resource/domain 取默认值', () => {
     const prompt = buildAIPrompt(makeCapability(), {});
     expect(prompt).toContain('查询');
-    expect(prompt).toContain('prod');
     expect(prompt).toContain('kafka');
     expect(prompt).toContain('middleware');
   });
 
-  test('环境来自输入且参与拼接', () => {
-    const prompt = buildAIPrompt(makeCapability(), { environment: 'staging' });
-    expect(prompt).toContain('staging');
-    expect(prompt).not.toContain('prod');
-  });
-
-  test('非 environment 字段的字符串值按顺序参与拼接', () => {
+  test('字段值按顺序参与拼接', () => {
     const prompt = buildAIPrompt(
       makeCapability({ name: 'consumer_group.lag.read', resource_type: 'kafka', domain: 'middleware' }),
-      { environment: 'prod', group: 'g1', topic: 'orders' },
+      { group: 'g1', topic: 'orders' },
     );
-    expect(prompt).toBe('查询 prod g1 orders kafka 的 middleware 延迟');
+    expect(prompt).toBe('查询 g1 orders kafka 的 middleware 延迟');
   });
 
   test('空白字符串值被过滤，不影响其余拼接', () => {
     const prompt = buildAIPrompt(
       makeCapability(),
-      { environment: 'prod', group: '  ' },
+      { group: '  ' },
     );
     expect(prompt).not.toContain('group');
     expect(prompt).toContain('kafka');
@@ -78,7 +71,7 @@ describe('buildAIPrompt', () => {
   test('数字与布尔值转为字符串参与拼接', () => {
     const prompt = buildAIPrompt(
       makeCapability(),
-      { environment: 'prod', replicas: 3, force: true },
+      { replicas: 3, force: true },
     );
     expect(prompt).toContain('3');
     expect(prompt).toContain('true');

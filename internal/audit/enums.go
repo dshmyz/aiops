@@ -82,7 +82,6 @@ const (
 	DecisionToolNotRegistered          = "tool_not_registered"
 	DecisionPermissionDenied           = "permission_denied"
 	DecisionInvalidInput               = "invalid_input"
-	DecisionEnvironmentDenied          = "environment_denied"
 	DecisionParameterDenied            = "parameter_denied"
 	DecisionRiskDenied                 = "risk_denied"
 )
@@ -99,7 +98,6 @@ var allowedDecisions = map[string]struct{}{
 	DecisionToolNotRegistered:         {},
 	DecisionPermissionDenied:          {},
 	DecisionInvalidInput:              {},
-	DecisionEnvironmentDenied:         {},
 	DecisionParameterDenied:           {},
 	DecisionRiskDenied:                {},
 }

@@ -33,7 +33,7 @@ func runbookTask(id string, slug string) store.ScheduledTask {
 		CapabilityName: "",
 		RunKind:        store.RunKindRunbook,
 		RunbookSlug:    slug,
-		Input:          map[string]any{"environment": "prod"},
+		Input:          map[string]any{},
 		ScheduleKind:   store.ScheduleKindPreset,
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",

@@ -46,7 +46,6 @@ checkbox 列表更细：每步给出具体配置值、命令与验证方式。�
 - [ ] `COPILOT_CAS_SESSION_TTL`：会话有效期（如 `8h`），按安全要求收紧（如 `30m`～`8h`）。
 - [ ] `COPILOT_CAS_DEFAULT_ROLES`：CAS 未下发 `roles` 属性时的默认角色。**保持不含 `admin`**
       （默认 `["operator"]`）；admin 仅由 CAS 下发 `roles` 属性授予，见阶段 2。
-- [ ] `COPILOT_CAS_DEFAULT_ENVIRONMENTS`：默认允许环境（默认 `["prod","staging","dev"]`）。
 - [ ] `COPILOT_DEV_EXPOSE_CONFIRMATION_TOKEN=0`（生产强制）。
 
 ### 1.2 网络 / 安全

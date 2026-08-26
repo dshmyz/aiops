@@ -96,7 +96,7 @@ func TestMapAlertmanagerDefaultStatusAndSeverity(t *testing.T) {
 		t.Errorf("Severity = %q, want warning default", p[0].Severity)
 	}
 	if p[0].Environment != "" {
-		t.Errorf("Environment = %q, want empty (Normalize defaults prod)", p[0].Environment)
+		t.Errorf("Environment = %q, want empty (no environment label)", p[0].Environment)
 	}
 }
 

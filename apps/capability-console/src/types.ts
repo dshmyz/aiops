@@ -51,7 +51,6 @@ export interface Capability {
   output: OutputSpec;
   auth: {
     roles: string[];
-    environment_scoped: boolean;
   };
   ai: {
     description: string;
@@ -147,7 +146,6 @@ export interface NormalizedResult {
     domain: string;
     type: string;
     name: string;
-    environment: string;
   };
   severity: string;
   summary: string;
@@ -162,7 +160,6 @@ export interface ResourceRef {
   type: string;
   id: string;
   name: string;
-  environment: string;
   labels?: Record<string, string>;
 }
 
@@ -196,7 +193,6 @@ export interface Recommendation {
 
 export interface DiagnosticPackage {
   id: string;
-  environment: string;
   domains: string[];
   resources: ResourceRef[];
   observations: Observation[];
@@ -209,7 +205,6 @@ export interface DiagnosticPackage {
 export interface PendingPlanSummary {
   id: string;
   tool: string;
-  environment: string;
   risk: string;
   status: string;
   version: number;
@@ -672,7 +667,6 @@ export interface MarketplaceRating {
   rating: number;
   review?: string;
   version_used?: string;
-  environment?: string;
   created_at: string;
   updated_at: string;
 }
@@ -683,7 +677,6 @@ export interface MarketplaceStats {
   total_executions: number;
   success_rate: number;
   avg_duration_ms?: number;
-  executions_by_environment: Record<string, number>;
 }
 
 export interface MarketplaceSearchFilter {
@@ -966,7 +959,6 @@ export interface IncidentViewPivot {
   domain?: string;
   resource_type?: string;
   resource_name?: string;
-  environment?: string;
   since?: string;
   until?: string;
 }
@@ -1031,4 +1023,89 @@ export interface IncidentViewResult {
   runbooks: IncidentRunbook[];
   recent_writes: IncidentRecentWrites;
   counts: IncidentCounts;
+}
+
+// ---------------------------------------------------------------------------
+// 告警→动作编排（AlertActions）
+// ---------------------------------------------------------------------------
+
+/** 标签匹配操作符（后端 alert.MatchOperator）。空值按 exact 处理。 */
+export type AlertMatchOperator = '' | 'exact' | 'contains' | 'regex';
+
+/** 单条标签匹配条件（AND 语义）。 */
+export interface AlertLabelMatch {
+  key: string;
+  value?: string;
+  operator?: AlertMatchOperator;
+}
+
+/** 规则匹配条件：三字段 + labels（AND）+ 可选 OR 组（任一匹配即命中）。 */
+export interface AlertMatch {
+  alertname?: string;
+  severity?: string;
+  domain?: string;
+  labels?: AlertLabelMatch[];
+  any_of?: AlertMatch[];
+}
+
+/** 规则的一个执行步骤。 */
+export interface AlertActionStep {
+  tool: string;
+  input: Record<string, string>;
+}
+
+/** 告警→动作编排规则。 */
+export interface AlertAction {
+  name: string;
+  alert_match: AlertMatch;
+  tool_sequence: AlertActionStep[];
+  execute_last_step?: boolean;
+  description?: string;
+  enabled?: boolean;
+}
+
+/** 工具 input schema 字段（后端 tools.DynamicInputField 的前端投影）。 */
+export interface AdminToolField {
+  type?: string;
+  required?: boolean;
+  description?: string;
+  examples?: string[];
+  enum?: string[];
+}
+
+/** 可用工具（GET /v1/admin/tools）。 */
+export interface AdminTool {
+  name: string;
+  operation?: string;
+  risk?: string;
+  domain?: string;
+  resource_type?: string;
+  supports_dry_run?: boolean;
+  input_schema?: Record<string, AdminToolField>;
+}
+
+/** 一次执行历史记录（alert_action_runs）。 */
+export interface AlertActionRun {
+  id: number;
+  rule_name: string;
+  alert_id?: string;
+  alert_title?: string;
+  status: 'success' | 'failure';
+  steps: Array<{ step: number; tool: string; error?: string; degraded?: boolean }>;
+  summary?: string;
+  created_at: string;
+}
+
+/** 触发统计。 */
+export interface AlertActionRunStats {
+  total: number;
+  success: number;
+  failure: number;
+}
+
+/** 规则触发历史 + 统计（GET /v1/admin/alert-actions/:name/runs）。 */
+export interface AlertActionRunOverview {
+  rule?: string;
+  stats: AlertActionRunStats;
+  recent: AlertActionRun[];
 }

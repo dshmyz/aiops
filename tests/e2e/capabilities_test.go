@@ -48,9 +48,9 @@ func TestPublishedCapabilityExecutesThroughReadOnlyPath(t *testing.T) {
 	repository := store.NewMemoryActionPlanStore()
 	readRunner := capabilities.NewCapabilityReadRunner(staticRunner{}, loaded, capabilities.NewHTTPAdapter(http.DefaultClient))
 	readService := execution.NewReadOnlyService(readRunner, audit.NewService(repository))
-	user := identity.CurrentUser{Subject: "viewer-1", Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}, RequestID: "capability-e2e"}
+	user := identity.CurrentUser{Subject: "viewer-1", Roles: []string{"viewer"}, RequestID: "capability-e2e"}
 
-	result, err := readService.ExecuteRead(context.Background(), user, "minio.bucket.capacity.read", map[string]any{"environment": "prod", "cluster": "m1", "bucket": "archive"})
+	result, err := readService.ExecuteRead(context.Background(), user, "minio.bucket.capacity.read", map[string]any{"cluster": "m1", "bucket": "archive"})
 	if err != nil {
 		t.Fatalf("ExecuteRead returned %v", err)
 	}
@@ -84,9 +84,6 @@ backend:
   path: /api/minio/clusters/{cluster}/buckets/{bucket}/capacity
   timeout_ms: 3000
 input_schema:
-  environment:
-    type: string
-    required: true
   cluster:
     type: string
     required: true
@@ -100,6 +97,5 @@ output:
     usage_pct: $.data.usage_pct
 auth:
   roles: [viewer, operator, admin]
-  environment_scoped: true
 `
 }

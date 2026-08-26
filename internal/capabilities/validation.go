@@ -44,12 +44,8 @@ func Validate(capability Capability) error {
 	if capability.InputSchema == nil {
 		return errors.New("input_schema is required")
 	}
-	environment, ok := capability.InputSchema["environment"]
-	if !ok || environment.Type != "string" || !environment.Required {
-		return errors.New("input_schema.environment must be a required string")
-	}
-	if len(capability.Auth.Roles) == 0 || !capability.Auth.EnvironmentScoped {
-		return errors.New("auth.roles and auth.environment_scoped are required")
+	if len(capability.Auth.Roles) == 0 {
+		return errors.New("auth.roles are required")
 	}
 	for name, field := range capability.InputSchema {
 		if field.Type != "string" && field.Type != "integer" && field.Type != "boolean" {

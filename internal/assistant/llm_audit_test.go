@@ -38,7 +38,7 @@ func TestEinoPlannerRecordsLLMInvocationAudit(t *testing.T) {
 	t.Parallel()
 	repository := store.NewMemoryActionPlanStore()
 	auditService := audit.NewService(repository)
-	chat := usageFakeChatModel{content: `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.91,"explanation":"read cluster status"}`}
+	chat := usageFakeChatModel{content: `{"tool_name":"cluster.status.read","input":{},"confidence":0.91,"explanation":"read cluster status"}`}
 	planner := assistant.NewEinoPlanner(chat)
 	planner.WithLLMAudit(auditService, "gpt-test")
 
@@ -77,7 +77,7 @@ func TestEinoPlannerRecordsLLMInvocationAudit(t *testing.T) {
 
 func TestEinoPlannerNoAuditWhenNotWired(t *testing.T) {
 	t.Parallel()
-	chat := usageFakeChatModel{content: `{"tool_name":"cluster.status.read","input":{"environment":"prod"},"confidence":0.91,"explanation":"read cluster status"}`}
+	chat := usageFakeChatModel{content: `{"tool_name":"cluster.status.read","input":{},"confidence":0.91,"explanation":"read cluster status"}`}
 	planner := assistant.NewEinoPlanner(chat)
 	// 不注入 audit → Plan 正常执行，无 panic
 	if _, err := planner.Plan(context.Background(), user(), "查看集群状态", nil, assistant.PageContext{}); err != nil {

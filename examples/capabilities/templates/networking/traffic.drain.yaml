@@ -7,72 +7,67 @@ operation: write
 risk: high
 
 backend:
-    adapter: http
-    method: POST
-    path: /api/loadbalancer/{lb_name}/backends/{backend_id}/drain
-    timeout_ms: 60000
-    base_url: http://lb-management-api:8080
+ adapter: http
+ method: POST
+ path: /api/loadbalancer/{lb_name}/backends/{backend_id}/drain
+ timeout_ms: 60000
+ base_url: http://lb-management-api:8080
 
 input_schema:
-    lb_name:
-        type: string
-        required: true
-    backend_id:
-        type: string
-        required: true
-    drain_timeout:
-        type: integer
-        min: 30
-        max: 3600
-    wait_for_connections:
-        type: boolean
-    environment:
-        type: string
-        required: true
-
+ lb_name:
+ type: string
+ required: true
+ backend_id:
+ type: string
+ required: true
+ drain_timeout:
+ type: integer
+ min: 30
+ max: 3600
+ wait_for_connections:
+ type: boolean
 output:
-    kind: action
-    severity_path: $.status
-    summary_template: "Backend {backend_id} drained from load balancer {lb_name}"
-    fields:
-        active_connections_before: $.data.connections_before
-        active_connections_after: $.data.connections_after
-        drain_duration_seconds: $.data.duration
-        forced_close_count: $.data.forced_closes
+ kind: action
+ severity_path: $.status
+ summary_template: "Backend {backend_id} drained from load balancer {lb_name}"
+ fields:
+ active_connections_before: $.data.connections_before
+ active_connections_after: $.data.connections_after
+ drain_duration_seconds: $.data.duration
+ forced_close_count: $.data.forced_closes
 
 governance:
-    requires_action_plan: true
-    requires_approval: true
-    precheck_tools:
-        - service.health.check
-        - lb.backend.connections.count
-    rollback:
-        strategy: restore_backend
-        source: "Add backend back to load balancer pool if drain was premature"
+ requires_action_plan: true
+ requires_approval: true
+ precheck_tools:
+ - service.health.check
+ - lb.backend.connections.count
+ rollback:
+ strategy: restore_backend
+ source: "Add backend back to load balancer pool if drain was premature"
 
 auth:
-    roles:
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - operator
+ - admin
 
 ai:
-    description: |
-        Drain traffic from a backend server in a load balancer pool: new connections
-        are rejected and existing connections drain gracefully. Use for safe instance
-        shutdown during maintenance, rolling-deployment preparation, or removing an
-        unhealthy backend before repair.
+ description: |
+ Drain traffic from a backend server in a load balancer pool: new connections
+ are rejected and existing connections drain gracefully. Use for safe instance
+ shutdown during maintenance, rolling-deployment preparation, or removing an
+ unhealthy backend before repair.
 
-        Workflow: 1) load balancer stops sending new requests, 2) existing connections
-        complete naturally, 3) after drain_timeout or all connections close, the backend
-        is removed from the pool.
+ Workflow: 1) load balancer stops sending new requests, 2) existing connections
+ complete naturally, 3) after drain_timeout or all connections close, the backend
+ is removed from the pool.
 
-        Caution: verify at least N-1 healthy backends remain before draining; long-lived
-        connections (WebSocket, SSE) may delay drain completion; set drain_timeout
-        conservatively; monitor capacity after drain; remember to restore the backend.
-        For zero-downtime deploys drain one backend at a time.
+ Caution: verify at least N-1 healthy backends remain before draining; long-lived
+ connections (WebSocket, SSE) may delay drain completion; set drain_timeout
+ conservatively; monitor capacity after drain; remember to restore the backend.
+ For zero-downtime deploys drain one backend at a time.
 
-    examples:
-        - 把 prod 环境负载均衡器 api-lb 的后端 10.0.1.5:8080 流量切走
-        - drain backend 192.168.1.10:80 from load balancer nginx-lb in staging, timeout 600 seconds
-        - 将 dev 环境 lb-test 的 backend-01 从流量池中移除
+ examples:
+ - 把 负载均衡器 api-lb 的后端 10.0.1.5:8080 流量切走
+ - drain backend 192.168.1.10:80 from load balancer nginx-lb, timeout 600 seconds
+ - 将 lb-test 的 backend-01 从流量池中移除

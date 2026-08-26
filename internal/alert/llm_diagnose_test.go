@@ -120,7 +120,6 @@ func TestLLMDiagnoser_PlanThenReportFlow(t *testing.T) {
 		Title:       "Kafka consumer lag",
 		Severity:    alert.SeverityCritical,
 		Status:      alert.StatusFiring,
-		Environment: "prod",
 		FiredAt:     time.Now(),
 	}
 

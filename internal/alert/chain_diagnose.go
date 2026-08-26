@@ -2,12 +2,15 @@ package alert
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
+	"github.com/gracegaoya/ai-operations-copilot/internal/store"
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
@@ -30,6 +33,8 @@ type ChainDiagnoser struct {
 	alertSvc *Service
 	planExec PlanExecutor
 	readTool func(ctx context.Context, user identity.CurrentUser, toolName string, input map[string]any) (map[string]any, error)
+	runStore store.AlertActionRunStore
+	now      func() time.Time
 }
 
 // PlanExecutor 是处置步骤的执行接口：创建 plan 或直接执行。
@@ -49,7 +54,14 @@ func NewChainDiagnoser(
 		alertSvc: alertSvc,
 		planExec: planExec,
 		readTool: readTool,
+		now:      func() time.Time { return time.Now().UTC() },
 	}
+}
+
+// WithRunStore 配置执行历史落库。不配置时执行链不记录历史（向后兼容）。
+func (d *ChainDiagnoser) WithRunStore(s store.AlertActionRunStore) *ChainDiagnoser {
+	d.runStore = s
+	return d
 }
 
 // ExecuteChain 对一条 firing 告警执行一条告警动作的完整序列。
@@ -65,9 +77,8 @@ func (d *ChainDiagnoser) ExecuteChain(ctx context.Context, alert Alert, action A
 	}
 
 	user := identity.CurrentUser{
-		Subject:             "alert-chain",
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{"prod", "staging", "dev"},
+		Subject: "alert-chain",
+		Roles:   []string{"admin"},
 	}
 
 	var allResults []StepResult
@@ -108,6 +119,12 @@ func (d *ChainDiagnoser) ExecuteChain(ctx context.Context, alert Alert, action A
 		return
 	}
 
+	// 落执行历史（可选）：记录触发时间、命中告警、逐步结果与状态，供管理后台
+	// 展示触发次数、成功率与最近执行快照。落库失败只记日志，不阻断响应链路。
+	if d.runStore != nil {
+		d.recordRun(ctx, alert, action, allResults, summary)
+	}
+
 	desc := alert.Description
 	if desc != "" {
 		desc += "\n\n---\n\n[链式研判:" + action.Name + "]\n" + summary
@@ -117,6 +134,47 @@ func (d *ChainDiagnoser) ExecuteChain(ctx context.Context, alert Alert, action A
 	_ = d.alertSvc.UpdateDescription(ctx, alert.ID, desc)
 }
 
+// recordRun 把一次链式执行的历史写入 runStore。
+func (d *ChainDiagnoser) recordRun(ctx context.Context, alert Alert, action AlertAction, results []StepResult, summary string) {
+	type runStep struct {
+		Step     int    `json:"step"`
+		Tool     string `json:"tool"`
+		Error    string `json:"error,omitempty"`
+		Degraded bool   `json:"degraded,omitempty"`
+	}
+	steps := make([]runStep, 0, len(results))
+	status := "success"
+	for _, r := range results {
+		rs := runStep{Step: r.Step, Tool: r.Tool, Degraded: r.Degraded}
+		if r.Err != nil {
+			rs.Error = r.Err.Error()
+			status = "failure"
+		}
+		steps = append(steps, rs)
+	}
+	stepsRaw, err := json.Marshal(steps)
+	if err != nil {
+		log.Printf("[alert-chain] marshal run steps failed: %v", err)
+		stepsRaw = []byte("[]")
+	}
+	title := alert.Title
+	if title == "" {
+		title = alert.Labels["alertname"]
+	}
+	rec := store.AlertActionRunRecord{
+		RuleName:   action.Name,
+		AlertID:    alert.ID,
+		AlertTitle: title,
+		Status:     status,
+		Steps:      stepsRaw,
+		Summary:    summary,
+		CreatedAt:  d.now(),
+	}
+	if err := d.runStore.Append(ctx, rec); err != nil {
+		log.Printf("[alert-chain] record run for rule %q failed: %v", action.Name, err)
+	}
+}
+
 // executeStep 执行单步：优先走 diagnostics.Service（如果是 domain 诊断），
 // 否则直接调 ReadRunner。
 func (d *ChainDiagnoser) executeStep(ctx context.Context, user identity.CurrentUser, toolName string, input map[string]any) StepResult {
@@ -124,8 +182,7 @@ func (d *ChainDiagnoser) executeStep(ctx context.Context, user identity.CurrentU
 	domain := toolDomain(toolName)
 	if domain != "" && d.diag != nil {
 		pkg, err := d.diag.Run(ctx, user, diagnostics.Request{
-			Domain:      domain,
-			Environment: inputStr(input, "environment"),
+			Domain: domain,
 		})
 		if err == nil && len(pkg.Observations) > 0 {
 			// 域未接入能力时 diagnostics 返回"通用检查框架"包（framework=true），

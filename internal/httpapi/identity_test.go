@@ -35,9 +35,8 @@ func identityGet(t *testing.T, router http.Handler, token string) *httptest.Resp
 func TestServeIdentityMeReturnsSubjectAndRoles(t *testing.T) {
 	router := identityRouter()
 	token := signedJWT(t, map[string]any{
-		"sub":                  "goryun",
-		"roles":                []string{"admin", "operator"},
-		"allowed_environments": []string{"prod"},
+		"sub":   "goryun",
+		"roles": []string{"admin", "operator"},
 	})
 	res := identityGet(t, router, token)
 
@@ -74,9 +73,8 @@ func TestServeIdentityMeRequiresAuth(t *testing.T) {
 func TestServeIdentityMeViewerAllowed(t *testing.T) {
 	router := identityRouter()
 	token := signedJWT(t, map[string]any{
-		"sub":                  "viewer-1",
-		"roles":                []string{"viewer"},
-		"allowed_environments": []string{"prod"},
+		"sub":   "viewer-1",
+		"roles": []string{"viewer"},
 	})
 	res := identityGet(t, router, token)
 
@@ -133,9 +131,8 @@ func TestServeIdentityMeDevAdminDoesNotOverrideExplicitAuth(t *testing.T) {
 
 	// 合法 JWT → 用真实 subject，而非注入的 admin-1。
 	token := signedJWT(t, map[string]any{
-		"sub":                  "goryun",
-		"roles":                []string{"operator"},
-		"allowed_environments": []string{"prod"},
+		"sub":   "goryun",
+		"roles": []string{"operator"},
 	})
 	res = identityGet(t, router, token)
 	if res.Code != http.StatusOK {

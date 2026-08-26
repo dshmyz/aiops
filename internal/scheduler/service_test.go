@@ -26,19 +26,17 @@ func newTestService(t *testing.T, now time.Time) (*Service, *store.MemoryActionP
 
 func adminUser() identity.CurrentUser {
 	return identity.CurrentUser{
-		Subject:             "admin-1",
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{"prod"},
-		RequestID:           "req-admin",
+		Subject:   "admin-1",
+		Roles:     []string{"admin"},
+		RequestID: "req-admin",
 	}
 }
 
 func viewerUser() identity.CurrentUser {
 	return identity.CurrentUser{
-		Subject:             "viewer-1",
-		Roles:               []string{"viewer"},
-		AllowedEnvironments: []string{"prod"},
-		RequestID:           "req-viewer",
+		Subject:   "viewer-1",
+		Roles:     []string{"viewer"},
+		RequestID: "req-viewer",
 	}
 }
 
@@ -51,7 +49,7 @@ func TestServiceCreateAdminSucceeds(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "minio 巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -89,7 +87,7 @@ func TestServiceCreateNonAdminReturnsForbidden(t *testing.T) {
 	_, err := svc.Create(ctx, viewerUser(), CreateRequest{
 		Name:           "minio 巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -110,7 +108,7 @@ func TestServiceCreatePresetDailyCalculatesNextRunAt(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "daily 巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "daily",
 		Timezone:       "Asia/Shanghai",
@@ -136,7 +134,7 @@ func TestServiceCreateCronCalculatesNextRunAt(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "cron 巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "cron",
 		CronExpr:       "0 2 * * 1-5",
 		Timezone:       "Asia/Shanghai",
@@ -162,7 +160,7 @@ func TestServiceUpdateAdminRecalculatesNextRunAt(t *testing.T) {
 	original, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -177,7 +175,7 @@ func TestServiceUpdateAdminRecalculatesNextRunAt(t *testing.T) {
 	updated, err := svc.Update(ctx, adminUser(), original.ID, UpdateRequest{
 		Name:           "巡检-updated",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "daily",
 		Timezone:       "Asia/Shanghai",
@@ -213,7 +211,7 @@ func TestServiceUpdateNonAdminReturnsForbidden(t *testing.T) {
 	original, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -226,7 +224,7 @@ func TestServiceUpdateNonAdminReturnsForbidden(t *testing.T) {
 	_, err = svc.Update(ctx, viewerUser(), original.ID, UpdateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "1h",
 		Timezone:       "Asia/Shanghai",
@@ -246,7 +244,7 @@ func TestServiceUpdateNonExistentReturnsNotFound(t *testing.T) {
 	_, err := svc.Update(ctx, adminUser(), "nonexistent", UpdateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -266,7 +264,7 @@ func TestServiceDeleteAdminSucceeds(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -294,7 +292,7 @@ func TestServiceDeleteNonAdminReturnsForbidden(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -318,7 +316,7 @@ func TestServiceGetReturnsTaskForAnyUser(t *testing.T) {
 	created, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -348,7 +346,7 @@ func TestServiceListReturnsTasksForAnyUser(t *testing.T) {
 		if _, err := svc.Create(ctx, adminUser(), CreateRequest{
 			Name:           "巡检",
 			CapabilityName: "minio.bucket.health.read",
-			Input:          map[string]any{"environment": "prod", "name": "archive"},
+			Input:          map[string]any{"name": "archive"},
 			ScheduleKind:   "preset",
 			Preset:         "5m",
 			Timezone:       "Asia/Shanghai",
@@ -376,7 +374,7 @@ func TestServiceTriggerAdminExecutesWithoutUpdatingNextRunAt(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -427,7 +425,7 @@ func TestServiceTriggerNonAdminReturnsForbidden(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -455,7 +453,7 @@ func TestServiceListRunsReturnsHistory(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",
@@ -491,7 +489,7 @@ func TestServiceCountRecentFailures(t *testing.T) {
 	task, err := svc.Create(ctx, adminUser(), CreateRequest{
 		Name:           "巡检",
 		CapabilityName: "minio.bucket.health.read",
-		Input:          map[string]any{"environment": "prod", "name": "archive"},
+		Input:          map[string]any{"name": "archive"},
 		ScheduleKind:   "preset",
 		Preset:         "5m",
 		Timezone:       "Asia/Shanghai",

@@ -6,39 +6,35 @@ resource_type: consumer_group
 operation: read
 risk: low
 backend:
-    adapter: http
-    method: GET
-    path: /api/kafka/default/consumer-groups/{name}/lag
-    timeout_ms: 3000
-    base_url: http://127.0.0.1:19090
+ adapter: http
+ method: GET
+ path: /api/kafka/default/consumer-groups/{name}/lag
+ timeout_ms: 3000
+ base_url: http://127.0.0.1:19090
 input_schema:
-    environment:
-        type: string
-        required: true
-    name:
-        type: string
-        required: true
+ name:
+ type: string
+ required: true
 output:
-    kind: observation
-    severity_path: $.status
-    summary_template: Consumer group {name} lag is {lag}
-    fields:
-        lag: $.data.lag
-        members: $.data.members
+ kind: observation
+ severity_path: $.status
+ summary_template: Consumer group {name} lag is {lag}
+ fields:
+ lag: $.data.lag
+ members: $.data.members
 governance:
-    requires_action_plan: false
-    requires_approval: false
-    precheck_tools: []
-    rollback:
-        strategy: ""
-        source: ""
+ requires_action_plan: false
+ requires_approval: false
+ precheck_tools: []
+ rollback:
+ strategy: ""
+ source: ""
 auth:
-    roles:
-        - viewer
-        - operator
-        - admin
-    environment_scoped: true
+ roles:
+ - viewer
+ - operator
+ - admin
 ai:
-    description: Read Kafka consumer group lag from the demo middleware backend.
-    examples:
-        - 查询 prod kafka payments consumer_group 的延迟
+ description: Read Kafka consumer group lag from the demo middleware backend.
+ examples:
+ - 查询 kafka payments consumer_group 的延迟

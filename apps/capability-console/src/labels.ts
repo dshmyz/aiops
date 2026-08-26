@@ -56,18 +56,6 @@ export const planStatusLabel: Record<string, string> = {
   expired: '已过期',
 };
 
-export const environmentLabel: Record<string, string> = {
-  prod: '生产环境',
-  staging: '预发环境',
-  dev: '开发环境',
-  none: '不指定',
-};
-
-export function labelForEnvironment(value: string | undefined): string {
-  if (!value) return '-';
-  return environmentLabel[value] ?? value;
-}
-
 export function labelForRisk(value: string | undefined): string {
   if (!value) return '-';
   return riskLabel[value as CapabilityRisk] ?? value;

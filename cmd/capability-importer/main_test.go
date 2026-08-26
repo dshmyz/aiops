@@ -14,7 +14,7 @@ func TestMain(m *testing.M) {
 	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
 		Tool: tools.Tool{Name: "minio.importer.test.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 		InputSchema: map[string]tools.DynamicInputField{
-			"environment": {Type: "string", Required: true},
+
 		},
 	}}); err != nil {
 		panic("register importer test domain: " + err.Error())

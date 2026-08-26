@@ -440,18 +440,13 @@ func applyTemplate(template string, writeInput map[string]any) (any, error) {
 
 // verifyIdentity derives the identity used for the post-execution verify
 // call. The write has already passed its own policy gate, so verification
-// uses an internal admin identity scoped to the write's environment. This
-// keeps the read governed (policy + audit) without forcing the plan record
-// to carry the operator's full role set.
-func verifyIdentity(plan store.PlanRecord, writeInput map[string]any) identity.CurrentUser {
-	env, _ := writeInput["environment"].(string)
-	if env == "" {
-		env = "prod"
-	}
+// uses an internal admin identity. This keeps the read governed (policy +
+// audit) without forcing the plan record to carry the operator's full role
+// set.
+func verifyIdentity(plan store.PlanRecord, _ map[string]any) identity.CurrentUser {
 	return identity.CurrentUser{
-		Subject:             plan.ConfirmedBy,
-		Roles:               []string{"admin"},
-		AllowedEnvironments: []string{env},
-		RequestID:           plan.RequestID,
+		Subject:   plan.ConfirmedBy,
+		Roles:     []string{"admin"},
+		RequestID: plan.RequestID,
 	}
 }

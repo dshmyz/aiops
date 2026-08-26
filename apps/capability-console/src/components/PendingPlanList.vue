@@ -32,7 +32,7 @@ const emit = defineEmits<{
       <strong>{{ plan.tool }}</strong>
       <span class="plan-id">{{ plan.id }}</span>
       <small>
-        <span>{{ plan.environment }}</span> · <span>{{ plan.risk }}</span> · <span>{{ plan.status }}</span>
+        <span>{{ plan.risk }}</span> · <span>{{ plan.status }}</span>
       </small>
       <small>
         <span>{{ plan.created_by }}</span> · <span>{{ plan.expires_at }}</span>

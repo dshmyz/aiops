@@ -23,7 +23,6 @@ func TestSQLAlertStoreLifecycle(t *testing.T) {
 		Description:  "node-01 CPU > 90%",
 		Severity:     "critical",
 		Status:       "firing",
-		Environment:  "prod",
 		Domain:       "kafka",
 		ResourceType: "consumer_group",
 		ResourceName: "orders",
@@ -72,8 +71,8 @@ func TestSQLAlertStoreLifecycle(t *testing.T) {
 		t.Error("Upsert second created = true, want false")
 	}
 
-	// Query 按 filter 过滤
-	results, err := s.Query(ctx, AlertFilter{Status: "firing", Environment: "prod"})
+	// 查询按 filter 过滤
+	results, err := s.Query(ctx, AlertFilter{Status: "firing"})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -82,7 +81,7 @@ func TestSQLAlertStoreLifecycle(t *testing.T) {
 	}
 
 	// ListActive
-	active, err := s.ListActive(ctx, "prod", 50)
+	active, err := s.ListActive(ctx, 50)
 	if err != nil {
 		t.Fatalf("ListActive: %v", err)
 	}
@@ -116,16 +115,16 @@ func TestSQLAlertStoreQueryFilters(t *testing.T) {
 
 	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
 	for _, a := range []Alert{
-		{ExternalID: "a1", Source: "grafana", Title: "t1", Severity: "critical", Status: "firing", Environment: "prod", FiredAt: now, ReceivedAt: now, UpdatedAt: now},
-		{ExternalID: "a2", Source: "grafana", Title: "t2", Severity: "info", Status: "resolved", Environment: "prod", FiredAt: now, ReceivedAt: now, UpdatedAt: now},
-		{ExternalID: "a3", Source: "grafana", Title: "t3", Severity: "warning", Status: "firing", Environment: "staging", FiredAt: now, ReceivedAt: now, UpdatedAt: now},
+		{ExternalID: "a1", Source: "grafana", Title: "t1", Severity: "critical", Status: "firing", FiredAt: now, ReceivedAt: now, UpdatedAt: now},
+		{ExternalID: "a2", Source: "grafana", Title: "t2", Severity: "info", Status: "resolved", FiredAt: now, ReceivedAt: now, UpdatedAt: now},
+		{ExternalID: "a3", Source: "grafana", Title: "t3", Severity: "warning", Status: "firing", FiredAt: now, ReceivedAt: now, UpdatedAt: now},
 	} {
 		if _, _, err := s.Upsert(ctx, a); err != nil {
 			t.Fatalf("Upsert: %v", err)
 		}
 	}
 
-	severity, err := s.Query(ctx, AlertFilter{Severity: "critical", Environment: "prod"})
+	severity, err := s.Query(ctx, AlertFilter{Severity: "critical"})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -153,7 +152,6 @@ func TestSQLiteMigrationsIncludeCopilotAlerts(t *testing.T) {
 		description TEXT NULL,
 		severity TEXT NOT NULL DEFAULT 'warning',
 		status TEXT NOT NULL DEFAULT 'firing',
-		environment TEXT NOT NULL DEFAULT '',
 		domain TEXT NOT NULL DEFAULT '',
 		resource_type TEXT NOT NULL DEFAULT '',
 		resource_name TEXT NOT NULL DEFAULT '',
@@ -193,7 +191,7 @@ func TestSQLAlertStoreUpdateDescription(t *testing.T) {
 	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
 	created, _, err := s.Upsert(ctx, Alert{
 		ExternalID: "upd-1", Source: "alertmanager", Title: "t",
-		Severity: "critical", Status: "firing", Environment: "prod",
+		Severity: "critical", Status: "firing",
 		FiredAt: now, ReceivedAt: now, UpdatedAt: now,
 	})
 	if err != nil {

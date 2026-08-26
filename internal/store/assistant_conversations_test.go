@@ -17,7 +17,7 @@ func TestMemoryConversationStoreCreateAndList(t *testing.T) {
 	store := newTestAssistantStore()
 	now := time.Date(2026, time.July, 27, 10, 0, 0, 0, time.UTC)
 
-	conv1, err := store.CreateConversation(ctx, "alice", "minio 容量查询", "检查 prod minio archive 容量", now)
+	conv1, err := store.CreateConversation(ctx, "alice", "minio 容量查询", "检查 minio archive 容量", now)
 	if err != nil {
 		t.Fatalf("create conversation 1: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestMemoryConversationStoreAppendTurnsAndList(t *testing.T) {
 		ID:             "turn-1",
 		ConversationID: conv.ID,
 		Role:           "user",
-		Content:        "检查 prod minio archive 容量",
+		Content:        "检查 minio archive 容量",
 		CreatedAt:      now.Add(time.Minute),
 	})
 	if err != nil {

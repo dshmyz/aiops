@@ -62,9 +62,8 @@ func (s *Service) genericDiagnostic(v validatedRequest, request Request) (Packag
 	}
 	pkg := Package{
 		ID:              newID("diag"),
-		Environment:     v.environment,
 		Domains:         []string{domain},
-		Resources:       []ResourceRef{{Domain: domain, Type: resourceType, ID: resourceID, Name: name, Environment: v.environment}},
+		Resources:       []ResourceRef{{Domain: domain, Type: resourceType, ID: resourceID, Name: name}},
 		Observations:    []Observation{observation},
 		Findings:        []Finding{finding},
 		Recommendations: []Recommendation{recommendation},

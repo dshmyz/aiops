@@ -181,7 +181,7 @@ func (s *MCPServer) makeToolHandler(item capabilities.ManagedCapability) server.
 			return nil, fmt.Errorf("convert capability: %w", err)
 		}
 		args, _ := req.Params.Arguments.(map[string]any)
-		user := identity.CurrentUser{Roles: []string{"admin"}, AllowedEnvironments: []string{"prod", "staging", "dev"}}
+		user := identity.CurrentUser{Roles: []string{"admin"}}
 		decision := policy.Evaluate(user, tool, args)
 		if !decision.Allowed {
 			return mcp.NewToolResultError(fmt.Sprintf("权限拒绝：%s", decision.Reason)), nil

@@ -24,7 +24,7 @@ func TestParseIntentCarriesSuggestedSteps(t *testing.T) {
 		},
 		{
 			name: "diagnostic intent with suggested_steps",
-			json: `{"tool_name":null,"input":null,"diagnostic":{"domain":"kafka","environment":"prod","runbook":"health"},"confidence":0.9,"suggested_steps":5}`,
+			json: `{"tool_name":null,"input":null,"diagnostic":{"domain":"kafka","runbook":"health"},"confidence":0.9,"suggested_steps":5}`,
 			want:    5,
 			wantDiag: true,
 		},

@@ -196,7 +196,7 @@ describe('Capability Console', () => {
       }
       if (url === '/v1/assistant/messages') {
         const body = JSON.parse(String(_init?.body ?? '{}')) as { message?: string };
-        if (body.message === '查询 prod glusterfs') {
+        if (body.message === '查询 glusterfs') {
           return ok({ type: 'clarification_needed', message: '缺少参数: cluster, name' });
         }
         if (body.message === '把 orders retention 调成 72 小时') {
@@ -223,7 +223,7 @@ describe('Capability Console', () => {
             },
           });
         }
-        if (body.message === '查看 prod 任务') {
+        if (body.message === '查看 任务') {
           return ok({
             type: 'answer',
             tool: 'task.query',
@@ -254,7 +254,7 @@ describe('Capability Console', () => {
             severity: 'info',
             summary: 'Bucket archive usage is 77%',
             data: { usage_pct: 77 },
-            resource: { domain: 'minio', type: 'bucket', name: 'archive', environment: 'prod' },
+            resource: { domain: 'minio', type: 'bucket', name: 'archive' },
           },
         });
       }
@@ -264,7 +264,6 @@ describe('Capability Console', () => {
             {
               id: 'plan-1',
               tool: 'kafka.topic.retention.set',
-              environment: 'prod',
               risk: 'medium',
               status: 'pending_confirmation',
               version: 1,
@@ -279,14 +278,13 @@ describe('Capability Console', () => {
         return ok({
           id: 'plan-1',
           tool: 'kafka.topic.retention.set',
-          environment: 'prod',
           risk: 'medium',
           status: 'pending_confirmation',
           version: 1,
           expires_at: '2026-07-25T12:00:00Z',
           created_by: 'operator-1',
           created_at: '2026-07-25T10:00:00Z',
-          input: { environment: 'prod', cluster: 'k1', topic: 'orders', retention_hours: 72 },
+          input: { cluster: 'k1', topic: 'orders', retention_hours: 72 },
         });
       }
       if (url === '/v1/audit-events' || url.startsWith('/v1/audit-events?')) {
@@ -389,7 +387,7 @@ describe('Capability Console', () => {
 
     expect(wrapper.find('[data-test="assistant-suggestions"]').exists()).toBe(true);
 
-    await wrapper.find('[data-test="assistant-input"]').setValue('检查 prod glusterfs data volume 状态');
+    await wrapper.find('[data-test="assistant-input"]').setValue('检查 glusterfs data volume 状态');
     await wrapper.find('[data-test="assistant-send"]').trigger('click');
     await flushPromises();
 
@@ -541,11 +539,11 @@ describe('Capability Console', () => {
 
     const assistantCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input) === '/v1/assistant/messages');
     expect(assistantCall).toBeDefined();
-    expect(JSON.parse(String(assistantCall?.[1]?.body))).toEqual({ message: '测试消息', environment: 'prod' });
+    expect(JSON.parse(String(assistantCall?.[1]?.body))).toEqual({ message: '测试消息' });
   });
 
   // 缺口-3：management 选中 capability 后「问 AI」跳转，发送时携带 page_context
-  test('问 AI 跳转携带 pageContext，发送时带 page_context 而非 legacy environment', async () => {
+  test('问 AI 跳转携带 pageContext，发送时带 page_context', async () => {
     const wrapper = mountApp();
     await flushPromises();
     await openManagement(wrapper);
@@ -573,14 +571,13 @@ describe('Capability Console', () => {
       domain: 'minio',
       resource_type: 'bucket',
       resource_name: undefined,
-      environment: 'prod',
     });
-    // page_context 非空时不发 legacy environment 字段
+    // 环境概念已移除，发送体不应包含 environment 字段
     expect(body.environment).toBeUndefined();
   });
 
-  // 缺口-3：清除上下文 badge 后，发送回到 legacy environment 行为
-  test('清除页面上下文后发送回到 legacy environment', async () => {
+  // 缺口-3：清除上下文 badge 后，发送不带 page_context
+  test('清除页面上下文后发送不带 page_context', async () => {
     const wrapper = mountApp();
     await flushPromises();
     await openManagement(wrapper);
@@ -595,7 +592,7 @@ describe('Capability Console', () => {
     await flushPromises();
     expect(wrapper.find('[data-test="assistant-page-context-badge"]').exists()).toBe(false);
 
-    // 发送消息，应回到 legacy environment
+    // 发送消息，应无 page_context
     await wrapper.find('[data-test="assistant-input"]').setValue('检查集群状态');
     await wrapper.find('[data-test="assistant-input"]').trigger('keydown', { key: 'Enter', shiftKey: false });
     await flushPromises();
@@ -603,7 +600,7 @@ describe('Capability Console', () => {
     const call = vi.mocked(fetch).mock.calls.find(([u]) => String(u) === '/v1/assistant/messages');
     expect(call).toBeDefined();
     const body = JSON.parse(String(call?.[1]?.body));
-    expect(body.environment).toBe('prod');
+    expect(body.environment).toBeUndefined();
     expect(body.page_context).toBeUndefined();
   });
 
@@ -727,49 +724,6 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="assistant-input-hint"]').text()).toContain('Shift+Enter');
   });
 
-  test('renders environment selector with default prod option', async () => {
-    const wrapper = mountApp();
-    await flushPromises();
-
-    expect(wrapper.find('[data-test="assistant-env-selector"]').exists()).toBe(true);
-    expect((wrapper.find('[data-test="assistant-env-selector"]').element as HTMLSelectElement).value).toBe('prod');
-  });
-
-  test('includes selected environment as metadata field when sending', async () => {
-    const wrapper = mountApp();
-    await flushPromises();
-
-    // 选择 staging 环境
-    await wrapper.find('[data-test="assistant-env-selector"]').setValue('staging');
-    await wrapper.find('[data-test="assistant-input"]').setValue('检查 minio bucket 容量');
-    await wrapper.find('[data-test="assistant-send"]').trigger('click');
-    await flushPromises();
-
-    const assistantCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input) === '/v1/assistant/messages');
-    expect(assistantCall).toBeDefined();
-    const body = JSON.parse(String(assistantCall?.[1]?.body));
-    // 消息原文不变
-    expect(body.message).toBe('检查 minio bucket 容量');
-    // 环境作为独立字段
-    expect(body.environment).toBe('staging');
-  });
-
-  test('omits environment field when set to none', async () => {
-    const wrapper = mountApp();
-    await flushPromises();
-
-    await wrapper.find('[data-test="assistant-env-selector"]').setValue('none');
-    await wrapper.find('[data-test="assistant-input"]').setValue('检查 minio bucket 容量');
-    await wrapper.find('[data-test="assistant-send"]').trigger('click');
-    await flushPromises();
-
-    const assistantCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input) === '/v1/assistant/messages');
-    expect(assistantCall).toBeDefined();
-    const body = JSON.parse(String(assistantCall?.[1]?.body));
-    expect(body.message).toBe('检查 minio bucket 容量');
-    expect(body.environment).toBeUndefined();
-  });
-
   test('lays out capability management as a guided workflow', async () => {
     const wrapper = mountApp();
     await flushPromises();
@@ -815,17 +769,16 @@ describe('Capability Console', () => {
     const wrapper = mountApp();
     await flushPromises();
 
-    await wrapper.find('[data-test="assistant-input"]').setValue('检查 prod glusterfs data volume 状态');
+    await wrapper.find('[data-test="assistant-input"]').setValue('检查 glusterfs data volume 状态');
     await wrapper.find('[data-test="assistant-send"]').trigger('click');
     await flushPromises();
 
     const assistantCall = fetchMock.mock.calls.find(([input]) => String(input) === '/v1/assistant/messages');
     expect(assistantCall).toBeDefined();
     expect(JSON.parse(String(assistantCall?.[1]?.body))).toEqual({
-      message: '检查 prod glusterfs data volume 状态',
-      environment: 'prod',
+      message: '检查 glusterfs data volume 状态',
     });
-    expect(wrapper.find('[data-test="assistant-transcript"]').text()).toContain('检查 prod glusterfs data volume 状态');
+    expect(wrapper.find('[data-test="assistant-transcript"]').text()).toContain('检查 glusterfs data volume 状态');
     expect(wrapper.find('[data-test="assistant-latest-detail"]').text()).toContain('glusterfs.volume.health.read');
     expect(wrapper.find('[data-test="assistant-latest-detail"]').text()).toContain('Volume data is healthy');
   });
@@ -834,7 +787,7 @@ describe('Capability Console', () => {
     const wrapper = mountApp();
     await flushPromises();
 
-    await wrapper.find('[data-test="assistant-input"]').setValue('查询 prod glusterfs');
+    await wrapper.find('[data-test="assistant-input"]').setValue('查询 glusterfs');
     await wrapper.find('[data-test="assistant-send"]').trigger('click');
     await flushPromises();
 
@@ -937,14 +890,13 @@ describe('Capability Console', () => {
         return ok({
           id: 'plan-inline-1',
           tool: 'kafka.topic.retention.set',
-          environment: 'prod',
           risk: 'medium',
           status: 'pending_confirmation',
           version: 1,
           expires_at: '2026-07-25T12:00:00Z',
           created_by: 'operator-1',
           created_at: '2026-07-25T10:00:00Z',
-          input: { environment: 'prod', cluster: 'k1', topic: 'orders', retention_hours: 72 },
+          input: { cluster: 'k1', topic: 'orders', retention_hours: 72 },
         });
       }
       return ok({});
@@ -1013,7 +965,7 @@ describe('Capability Console', () => {
     const wrapper = mountApp();
     await flushPromises();
 
-    await wrapper.find('[data-test="assistant-input"]').setValue('查看 prod 任务');
+    await wrapper.find('[data-test="assistant-input"]').setValue('查看 任务');
     await wrapper.find('[data-test="assistant-send"]').trigger('click');
     await flushPromises();
 
@@ -1046,7 +998,6 @@ describe('Capability Console', () => {
         return ok({
           id: 'plan-inline-2',
           tool: 'kafka.topic.retention.set',
-          environment: 'prod',
           risk: 'medium',
           status: 'pending_confirmation',
           version: 1,
@@ -1415,7 +1366,7 @@ describe('Capability Console', () => {
           backend: { adapter: 'http', method: 'GET', path: '/api/minio/{cluster}/buckets/{bucket}/capacity', timeout_ms: 3000 },
           input_schema: {},
           output: { kind: 'observation', severity_path: '', summary_template: '', fields: {} },
-          auth: { roles: [], environment_scoped: true },
+          auth: { roles: [], },
           ai: { description: '', examples: [] },
         },
         recommendation: 'recommended',
@@ -1499,9 +1450,9 @@ describe('Capability Console', () => {
     await wrapper.find('[data-test="new-draft"]').trigger('click');
     await wrapper.find('[data-test="capability-name"]').setValue('minio.bucket.capacity.read');
     await wrapper.find('[data-test="add-input-field"]').trigger('click');
-    await wrapper.find('[data-test="input-name-1"]').setValue('bucket');
-    await wrapper.find('[data-test="input-type-1"]').setValue('string');
-    await wrapper.find('[data-test="input-required-1"]').setValue(true);
+    await wrapper.find('[data-test="input-name-0"]').setValue('bucket');
+    await wrapper.find('[data-test="input-type-0"]').setValue('string');
+    await wrapper.find('[data-test="input-required-0"]').setValue(true);
 
     await wrapper.find('[data-test="add-output-field"]').trigger('click');
     await wrapper.find('[data-test="output-name-0"]').setValue('usage_pct');
@@ -1666,7 +1617,7 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="publish-checklist"]').text()).toContain('同名发布');
     expect(wrapper.find('[data-test="publish-current"]').text()).toContain('已有已发布版本');
     expect(wrapper.find('[data-test="publish-current"]').attributes('disabled')).toBeDefined();
-    await wrapper.find('[data-test="test-input"]').setValue('{"environment":"prod","cluster":"m1","bucket":"archive"}');
+    await wrapper.find('[data-test="test-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     expect(wrapper.find('[data-test="ai-preflight"]').text()).toContain('使用同名已发布版本');
     expect(wrapper.find('[data-test="run-ai-preflight"]').attributes('disabled')).toBeUndefined();
 
@@ -1676,7 +1627,7 @@ describe('Capability Console', () => {
     const assistantCall = fetchMock.mock.calls.find(([input]) => String(input) === '/v1/assistant/messages');
     expect(assistantCall).toBeDefined();
     expect(JSON.parse(String(assistantCall?.[1]?.body))).toEqual({
-      message: '查询 prod m1 archive bucket 的 minio 容量',
+      message: '查询 m1 archive bucket 的 minio 容量',
     });
     expect(wrapper.find('[data-test="ai-preflight-state"]').text()).toContain('已返回答案');
   });
@@ -1693,11 +1644,10 @@ describe('Capability Console', () => {
     const panel = wrapper.find('[data-test="ai-preflight"]');
     expect(panel.text()).toContain('用 AI 试问一次');
     expect(JSON.parse((wrapper.find('[data-test="test-input"]').element as HTMLTextAreaElement).value)).toEqual({
-      environment: 'prod',
       cluster: 'm1',
       bucket: 'archive',
     });
-    expect(wrapper.find('[data-test="ai-prompt"]').element).toHaveProperty('value', '查询 prod m1 archive bucket 的 minio 容量');
+    expect(wrapper.find('[data-test="ai-prompt"]').element).toHaveProperty('value', '查询 m1 archive bucket 的 minio 容量');
     expect(wrapper.find('[data-test="run-ai-preflight"]').attributes('disabled')).toBeDefined();
     expect(panel.text()).toContain('发布后可运行');
   });
@@ -1730,11 +1680,10 @@ describe('Capability Console', () => {
           risk: 'low',
           backend: { method: 'GET', base_url: body.backend_base_url, path: body.path, timeout_ms: 3000 },
           input_schema: {
-            environment: { type: 'string', required: true },
             cluster: { type: 'string', required: true },
           },
           output: { kind: 'observation', summary_template: 'Read cluster', fields: {} },
-          auth: { roles: ['viewer', 'operator', 'admin'], environment_scoped: true },
+          auth: { roles: ['viewer', 'operator', 'admin'] },
           ai: { description: body.description, examples: [] },
           validation: { valid: true },
         });
@@ -1813,14 +1762,14 @@ describe('Capability Console', () => {
     await openReview(wrapper);
 
     await wrapper.find('[data-test="edit-glusterfs.volume.health.read"]').trigger('click');
-    await wrapper.find('[data-test="test-input"]').setValue('{"environment":"prod","cluster":"g1","name":"data"}');
+    await wrapper.find('[data-test="test-input"]').setValue('{"cluster":"g1","name":"data"}');
     await wrapper.find('[data-test="run-ai-preflight"]').trigger('click');
     await flushPromises();
 
     const assistantCall = fetchMock.mock.calls.find(([input]) => String(input) === '/v1/assistant/messages');
     expect(assistantCall).toBeDefined();
     expect(JSON.parse(String(assistantCall?.[1]?.body))).toEqual({
-      message: '查询 prod g1 data volume 的 glusterfs 健康',
+      message: '查询 g1 data volume 的 glusterfs 健康',
     });
     expect(wrapper.find('[data-test="ai-preflight-state"]').text()).toContain('已返回答案');
     expect(wrapper.find('[data-test="ai-preflight-result"]').text()).toContain('glusterfs.volume.health.read');
@@ -1833,7 +1782,7 @@ describe('Capability Console', () => {
     await openReview(wrapper);
 
     await wrapper.find('[data-test="edit-glusterfs.volume.health.read"]').trigger('click');
-    await wrapper.find('[data-test="ai-prompt"]').setValue('查询 prod glusterfs');
+    await wrapper.find('[data-test="ai-prompt"]').setValue('查询 glusterfs');
     await wrapper.find('[data-test="run-ai-preflight"]').trigger('click');
     await flushPromises();
 
@@ -1847,7 +1796,7 @@ describe('Capability Console', () => {
     await openReview(wrapper);
 
     await wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').trigger('click');
-    await wrapper.find('[data-test="test-input"]').setValue('{"environment":"prod","cluster":"m1","bucket":"archive"}');
+    await wrapper.find('[data-test="test-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     await wrapper.find('[data-test="validate-capability"]').trigger('click');
     await wrapper.find('[data-test="test-capability"]').trigger('click');
     await flushPromises();
@@ -2503,7 +2452,6 @@ describe('Capability Console', () => {
     expect(JSON.parse(String(assistantCall?.[1]?.body))).toEqual({
       message: '再查一次 minio',
       conversation_id: 'conv-active',
-      environment: 'prod',
     });
   });
 
@@ -2785,7 +2733,7 @@ describe('Capability Console', () => {
 
     const retryCall = fetchMock.mock.calls.find(([input]) => String(input) === '/v1/assistant/messages');
     expect(retryCall).toBeDefined();
-    expect(JSON.parse(String(retryCall?.[1]?.body))).toEqual({ message: '会失败的消息', environment: 'prod' });
+    expect(JSON.parse(String(retryCall?.[1]?.body))).toEqual({ message: '会失败的消息' });
     // The retry succeeded, so the error should clear and the answer should appear.
     expect(wrapper.find('[data-test="assistant-error"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="assistant-latest-detail"]').text()).toContain('重试成功');
@@ -2892,7 +2840,7 @@ describe('Capability Console', () => {
     // Fill the form
     await wrapper.find('[data-test="scheduled-task-name"]').setValue('minio 每日巡检');
     await wrapper.find('[data-test="scheduled-task-capability"]').setValue('minio.bucket.capacity.read');
-    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"environment":"prod","cluster":"m1","bucket":"archive"}');
+    await wrapper.find('[data-test="scheduled-task-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
     await wrapper.find('[data-test="schedule-preset-option"][data-preset="daily"]').trigger('click');
 
     // Submit
@@ -2909,7 +2857,7 @@ describe('Capability Console', () => {
       capability_name: 'minio.bucket.capacity.read',
       run_kind: 'read',
       runbook_slug: null,
-      input: { environment: 'prod', cluster: 'm1', bucket: 'archive' },
+      input: { cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'preset',
       preset: 'daily',
       cron_expr: null,
@@ -2926,7 +2874,7 @@ describe('Capability Console', () => {
       name: 'minio 每日巡检',
       subject: 'admin-1',
       capability_name: 'minio.bucket.capacity.read',
-      input: { environment: 'prod' },
+      input: { cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'preset',
       preset: 'daily',
       cron_expr: null,
@@ -2999,7 +2947,7 @@ describe('Capability Console', () => {
       name: 'minio 每日巡检',
       subject: 'admin-1',
       capability_name: 'minio.bucket.capacity.read',
-      input: { environment: 'prod' },
+      input: { cluster: 'm1', bucket: 'archive' },
       schedule_kind: 'preset',
       preset: 'daily',
       cron_expr: null,

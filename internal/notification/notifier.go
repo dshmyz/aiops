@@ -8,7 +8,6 @@ type ConfirmationRequest struct {
 	PlanID            string         `json:"plan_id"`
 	ConfirmationToken string         `json:"confirmation_token"`
 	ToolName          string         `json:"tool_name"`
-	Environment       string         `json:"environment"`
 	Risk              string         `json:"risk"`
 	Subject           string         `json:"subject"`
 	Input             map[string]any `json:"input"`

@@ -76,16 +76,15 @@ func (s *SQLAlertStore) Upsert(ctx context.Context, a Alert) (Alert, bool, error
 
 	if s.sqlite {
 		_, err = s.db.ExecContext(ctx, `INSERT INTO copilot_alerts
-			(id, external_id, source, title, description, severity, status, environment,
+			(id, external_id, source, title, description, severity, status,
 			 domain, resource_type, resource_name, labels, raw, fired_at, resolved_at,
 			 received_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(source, external_id) DO UPDATE SET
 				title = excluded.title,
 				description = excluded.description,
 				severity = excluded.severity,
 				status = excluded.status,
-				environment = excluded.environment,
 				domain = excluded.domain,
 				resource_type = excluded.resource_type,
 				resource_name = excluded.resource_name,
@@ -95,21 +94,20 @@ func (s *SQLAlertStore) Upsert(ctx context.Context, a Alert) (Alert, bool, error
 				resolved_at = excluded.resolved_at,
 				updated_at = excluded.updated_at`,
 			a.ID, a.ExternalID, a.Source, a.Title, nullableString(a.Description), a.Severity,
-			a.Status, a.Environment, a.Domain, a.ResourceType, a.ResourceName,
+			a.Status, a.Domain, a.ResourceType, a.ResourceName,
 			string(labelsJSON), nullableJSON(rawJSON), a.FiredAt, resolvedAt,
 			a.ReceivedAt, a.UpdatedAt)
 	} else {
 		_, err = s.db.ExecContext(ctx, `INSERT INTO copilot_alerts
-			(id, external_id, source, title, description, severity, status, environment,
+			(id, external_id, source, title, description, severity, status,
 			 domain, resource_type, resource_name, labels, raw, fired_at, resolved_at,
 			 received_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON DUPLICATE KEY UPDATE
 				title = VALUES(title),
 				description = VALUES(description),
 				severity = VALUES(severity),
 				status = VALUES(status),
-				environment = VALUES(environment),
 				domain = VALUES(domain),
 				resource_type = VALUES(resource_type),
 				resource_name = VALUES(resource_name),
@@ -119,7 +117,7 @@ func (s *SQLAlertStore) Upsert(ctx context.Context, a Alert) (Alert, bool, error
 				resolved_at = VALUES(resolved_at),
 				updated_at = VALUES(updated_at)`,
 			a.ID, a.ExternalID, a.Source, a.Title, nullableString(a.Description), a.Severity,
-			a.Status, a.Environment, a.Domain, a.ResourceType, a.ResourceName,
+			a.Status, a.Domain, a.ResourceType, a.ResourceName,
 			string(labelsJSON), nullableJSON(rawJSON), a.FiredAt, resolvedAt,
 			a.ReceivedAt, a.UpdatedAt)
 	}
@@ -131,7 +129,7 @@ func (s *SQLAlertStore) Upsert(ctx context.Context, a Alert) (Alert, bool, error
 
 func (s *SQLAlertStore) Get(ctx context.Context, id string) (Alert, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT id, external_id, source, title, description,
-		severity, status, environment, domain, resource_type, resource_name,
+		severity, status, domain, resource_type, resource_name,
 		labels, raw, fired_at, resolved_at, received_at, updated_at
 		FROM copilot_alerts WHERE id = ?`, id)
 	a, err := scanAlert(row)
@@ -169,16 +167,12 @@ func (s *SQLAlertStore) Query(ctx context.Context, f AlertFilter) ([]Alert, erro
 		where = append(where, "severity = ?")
 		args = append(args, f.Severity)
 	}
-	if f.Environment != "" {
-		where = append(where, "environment = ?")
-		args = append(args, f.Environment)
-	}
 	if f.Domain != "" {
 		where = append(where, "domain = ?")
 		args = append(args, f.Domain)
 	}
 	query := `SELECT id, external_id, source, title, description,
-		severity, status, environment, domain, resource_type, resource_name,
+		severity, status, domain, resource_type, resource_name,
 		labels, raw, fired_at, resolved_at, received_at, updated_at
 		FROM copilot_alerts`
 	if len(where) > 0 {
@@ -203,24 +197,18 @@ func (s *SQLAlertStore) Query(ctx context.Context, f AlertFilter) ([]Alert, erro
 	return out, rows.Err()
 }
 
-func (s *SQLAlertStore) ListActive(ctx context.Context, environment string, limit int) ([]Alert, error) {
+func (s *SQLAlertStore) ListActive(ctx context.Context, limit int) ([]Alert, error) {
 	if limit <= 0 {
 		limit = defaultAlertLimit
 	}
 	if limit > maxAlertLimit {
 		limit = maxAlertLimit
 	}
-	args := []any{"firing"}
-	where := "status = ?"
-	if environment != "" {
-		where += " AND environment = ?"
-		args = append(args, environment)
-	}
 	query := `SELECT id, external_id, source, title, description,
-		severity, status, environment, domain, resource_type, resource_name,
+		severity, status, domain, resource_type, resource_name,
 		labels, raw, fired_at, resolved_at, received_at, updated_at
-		FROM copilot_alerts WHERE ` + where + ` ORDER BY severity DESC, updated_at DESC LIMIT ?`
-	args = append(args, limit)
+		FROM copilot_alerts WHERE status = ? ORDER BY severity DESC, updated_at DESC LIMIT ?`
+	args := []any{"firing", limit}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -255,7 +243,7 @@ func (s *SQLAlertStore) Resolve(ctx context.Context, externalID, source string) 
 		return Alert{}, ErrNotFound
 	}
 	row := s.db.QueryRowContext(ctx, `SELECT id, external_id, source, title, description,
-		severity, status, environment, domain, resource_type, resource_name,
+		severity, status, domain, resource_type, resource_name,
 		labels, raw, fired_at, resolved_at, received_at, updated_at
 		FROM copilot_alerts WHERE source = ? AND external_id = ?`, source, externalID)
 	return scanAlert(row)
@@ -271,7 +259,7 @@ func scanAlert(row alertScanner) (Alert, error) {
 	var description, resolvedAt sql.NullString
 	err := row.Scan(
 		&a.ID, &a.ExternalID, &a.Source, &a.Title, &description,
-		&a.Severity, &a.Status, &a.Environment, &a.Domain, &a.ResourceType, &a.ResourceName,
+		&a.Severity, &a.Status, &a.Domain, &a.ResourceType, &a.ResourceName,
 		&labelsJSON, &rawJSON, &a.FiredAt, &resolvedAt, &a.ReceivedAt, &a.UpdatedAt,
 	)
 	if err != nil {

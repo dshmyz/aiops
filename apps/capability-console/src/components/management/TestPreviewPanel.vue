@@ -21,7 +21,7 @@ const props = defineProps<{ capabilities: UseCapabilities }>();
             <option v-for="opt in row.enum" :key="opt" :value="opt">{{ opt }}</option>
           </select>
           <select v-else-if="row.type === 'boolean'" :data-test="`test-param-${row.name}`" class="filter-select" :value="String(capabilities.testInputFieldValue(row.name))" @change="capabilities.setTestInputField(row.name, ($event.target as HTMLSelectElement).value === 'true', row.type)"><option value="">未设置</option><option value="true">true</option><option value="false">false</option></select>
-          <input v-else :data-test="`test-param-${row.name}`" class="filter-input" :type="row.type === 'integer' || row.type === 'number' ? 'number' : 'text'" :value="capabilities.testInputFieldValue(row.name)" :placeholder="row.name === 'environment' ? 'prod' : (row.examples && row.examples[0]) ? `例如 ${row.examples[0]}` : `填写 ${row.name}`" @input="capabilities.setTestInputField(row.name, ($event.target as HTMLInputElement).value, row.type)" />
+          <input v-else :data-test="`test-param-${row.name}`" class="filter-input" :type="row.type === 'integer' || row.type === 'number' ? 'number' : 'text'" :value="capabilities.testInputFieldValue(row.name)" :placeholder="(row.examples && row.examples[0]) ? `例如 ${row.examples[0]}` : `填写 ${row.name}`" @input="capabilities.setTestInputField(row.name, ($event.target as HTMLInputElement).value, row.type)" />
           <em v-if="row.description" class="test-param-hint">{{ row.description }}</em>
         </label>
       </div>

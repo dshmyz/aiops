@@ -53,9 +53,6 @@ var supportedPropertyTypes = map[string]bool{
 //   - Operation 默认 Read（MCP 协议不区分读写；写操作需在工具元数据层面
 //     另行标记，当前不处理）。Risk 默认 Low。
 //   - 输入 schema 按 supportedPropertyTypes 过滤，丢弃不支持类型的字段。
-//   - 若 MCP 工具 schema 不含 environment 字段，自动注入 required string
-//     environment，满足 tools.RegisterDynamicTools 的强制要求，并保持项目
-//    多环境隔离的一致性。
 //
 // 部分成功语义：单台服务器连接失败（或某工具转换失败）时跳过该服务器并
 // 记录日志，其余健康服务器照常注册——一台坏服务器不拖垮全部工具（修复前
@@ -100,13 +97,6 @@ func convertMCPTool(serverName string, mt MCPTool) (tools.DynamicToolDefinition,
 	fullName := serverName + "." + toolName
 
 	schema := buildInputSchema(mt.InputSchema)
-
-	// tools.RegisterDynamicTools 强制要求 environment 为 required string。
-	// 若 MCP 工具自带 environment 且满足要求则保留；否则注入。
-	env, hasEnv := schema["environment"]
-	if !hasEnv || env.Type != "string" || !env.Required {
-		schema["environment"] = tools.DynamicInputField{Type: "string", Required: true}
-	}
 
 	return tools.DynamicToolDefinition{
 		Tool: tools.Tool{

@@ -28,8 +28,8 @@ func enrichTestService(t *testing.T) *Service {
 	tools.ResetDynamicToolsForTest()
 	policy.ResetDynamicRolePermissionsForTest()
 	err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{
-		{Tool: tools.Tool{Name: "demo.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "demo", ResourceType: "volume"}, InputSchema: map[string]tools.DynamicInputField{"environment": {Type: "string", Required: true}, "name": {Type: "string", Required: true}}},
-		{Tool: tools.Tool{Name: "demo.retention.set", Operation: tools.Write, Risk: tools.Medium, Domain: "demo", ResourceType: "volume", RollbackDescription: "reset_to_previous", SupportsDryRun: true}, InputSchema: map[string]tools.DynamicInputField{"environment": {Type: "string", Required: true}, "name": {Type: "string", Required: true}}},
+		{Tool: tools.Tool{Name: "demo.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "demo", ResourceType: "volume"}, InputSchema: map[string]tools.DynamicInputField{"name": {Type: "string", Required: true}}},
+		{Tool: tools.Tool{Name: "demo.retention.set", Operation: tools.Write, Risk: tools.Medium, Domain: "demo", ResourceType: "volume", RollbackDescription: "reset_to_previous", SupportsDryRun: true}, InputSchema: map[string]tools.DynamicInputField{"name": {Type: "string", Required: true}}},
 	})
 	if err != nil {
 		t.Fatalf("register tools: %v", err)
@@ -44,7 +44,7 @@ func enrichTestService(t *testing.T) *Service {
 }
 
 func adminUser() identity.CurrentUser {
-	return identity.CurrentUser{Subject: "tester", Roles: []string{"admin"}, AllowedEnvironments: []string{"prod"}}
+	return identity.CurrentUser{Subject: "tester", Roles: []string{"admin"}}
 }
 
 // TestEnrichRecommendationSkipsWithReason 验证未落地的推荐如实带原因（工具未注册 /
@@ -69,10 +69,10 @@ func TestEnrichRecommendationSkipsWithReason(t *testing.T) {
 
 	t.Run("policy denied", func(t *testing.T) {
 		// viewer 无 demo.retention.set 写权限。
-		viewer := identity.CurrentUser{Subject: "viewer", Roles: []string{"viewer"}, AllowedEnvironments: []string{"prod"}}
+		viewer := identity.CurrentUser{Subject: "viewer", Roles: []string{"viewer"}}
 		resp := &Response{}
 		_, executed, status := s.enrichRecommendation(ctx, viewer, diagnostics.Recommendation{
-			ToolName: "demo.retention.set", CandidateInput: map[string]any{"environment": "prod", "name": "data"},
+			ToolName: "demo.retention.set", CandidateInput: map[string]any{"name": "data"},
 		}, resp)
 		if executed {
 			t.Fatal("executed = true, want false for denied write")
@@ -88,7 +88,7 @@ func TestEnrichRecommendationExecutesRead(t *testing.T) {
 	s := enrichTestService(t)
 	resp := &Response{}
 	fact, executed, status := s.enrichRecommendation(context.Background(), adminUser(), diagnostics.Recommendation{
-		ToolName: "demo.health.read", CandidateInput: map[string]any{"environment": "prod", "name": "data"},
+		ToolName: "demo.health.read", CandidateInput: map[string]any{"name": "data"},
 	}, resp)
 	if !executed {
 		t.Fatalf("executed = false, want true for read tool (status=%+v)", status)
@@ -110,7 +110,7 @@ func TestEnrichRecommendationCreatesPlan(t *testing.T) {
 	s := enrichTestService(t)
 	resp := &Response{}
 	_, executed, status := s.enrichRecommendation(context.Background(), adminUser(), diagnostics.Recommendation{
-		ToolName: "demo.retention.set", CandidateInput: map[string]any{"environment": "prod", "name": "data"},
+		ToolName: "demo.retention.set", CandidateInput: map[string]any{"name": "data"},
 	}, resp)
 	if executed {
 		t.Fatal("executed = true, want false for write (plan pending)")

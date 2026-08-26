@@ -17,9 +17,7 @@ type fakeRuleStore struct {
 func (f *fakeRuleStore) List(_ context.Context) ([]store.AlertActionRuleRecord, error) {
 	out := make([]store.AlertActionRuleRecord, 0, len(f.records))
 	for _, r := range f.records {
-		if r.Enabled {
-			out = append(out, r)
-		}
+		out = append(out, r)
 	}
 	return out, nil
 }
@@ -139,8 +137,12 @@ func TestAlertActionRegistryUpsertPreservesDisabledState(t *testing.T) {
 	if rec.Enabled {
 		t.Fatal("explicitly disabled rule should persist Enabled=false in DB")
 	}
-	if len(registry.List()) != 0 {
-		t.Fatalf("List() = %d after disable, want 0 (disabled rules excluded)", len(registry.List()))
+	// List() 现在返回全部规则（含停用，供管理界面展示），但 Match 不再命中停用规则。
+	if len(registry.List()) != 1 {
+		t.Fatalf("List() = %d after disable, want 1 (all rules, disabled included for admin view)", len(registry.List()))
+	}
+	if matched := registry.Match(alert.Alert{Severity: "critical", Domain: "demo"}); len(matched) != 0 {
+		t.Fatalf("Match() = %d after disable, want 0 (disabled rules excluded from matching)", len(matched))
 	}
 
 	// 3. 编辑停用中的规则，不带 Enabled 字段 → 保留禁用状态
@@ -154,8 +156,63 @@ func TestAlertActionRegistryUpsertPreservesDisabledState(t *testing.T) {
 	if rec.Enabled {
 		t.Fatal("editing a disabled rule without an enabled field must preserve disabled state (regression: previously resurrected to enabled)")
 	}
-	if len(registry.List()) != 0 {
-		t.Fatalf("List() = %d after editing disabled rule, want 0", len(registry.List()))
+	if len(registry.List()) != 1 {
+		t.Fatalf("List() = %d after editing disabled rule, want 1", len(registry.List()))
+	}
+}
+
+// TestAlertActionRegistrySetEnabled 验证启停开关：SetEnabled 只改启停位并热重载，
+// 停用后 Match 不再命中、启用后恢复命中，且不影响其他字段。
+func TestAlertActionRegistrySetEnabled(t *testing.T) {
+	fs := &fakeRuleStore{}
+	registry := alert.NewAlertActionRegistry(fs)
+	ctx := context.Background()
+
+	if err := registry.Upsert(ctx, sampleAlertAction("toggle-me")); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	// 停用
+	if err := registry.SetEnabled(ctx, "toggle-me", false); err != nil {
+		t.Fatalf("SetEnabled(false): %v", err)
+	}
+	rec, err := fs.Get(ctx, "toggle-me")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if rec.Enabled {
+		t.Fatal("SetEnabled(false) should persist Enabled=false")
+	}
+	if matched := registry.Match(alert.Alert{Severity: "critical", Domain: "demo"}); len(matched) != 0 {
+		t.Fatalf("Match after disable = %d, want 0", len(matched))
+	}
+
+	// 重新启用
+	if err := registry.SetEnabled(ctx, "toggle-me", true); err != nil {
+		t.Fatalf("SetEnabled(true): %v", err)
+	}
+	rec, err = fs.Get(ctx, "toggle-me")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !rec.Enabled {
+		t.Fatal("SetEnabled(true) should persist Enabled=true")
+	}
+	if matched := registry.Match(alert.Alert{Severity: "critical", Domain: "demo"}); len(matched) != 1 {
+		t.Fatalf("Match after enable = %d, want 1", len(matched))
+	}
+	// 其他字段不受影响（DB 记录里 JSON 字段仍是原字节，非空即未被覆写）
+	if rec.Description != "容量告警处置" || len(rec.ToolSequence) == 0 || len(rec.AlertMatch) == 0 {
+		t.Fatalf("SetEnabled changed unrelated fields: %+v", rec)
+	}
+}
+
+// TestAlertActionRegistrySetEnabledNotFound 验证对不存在规则 SetEnabled 返回 ErrNotFound。
+func TestAlertActionRegistrySetEnabledNotFound(t *testing.T) {
+	registry := alert.NewAlertActionRegistry(&fakeRuleStore{})
+	err := registry.SetEnabled(context.Background(), "missing", true)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("SetEnabled(missing) err = %v, want ErrNotFound", err)
 	}
 }
 
@@ -186,5 +243,41 @@ func TestAlertActionSerializeRoundTrip(t *testing.T) {
 	})
 	if len(matched) != 1 {
 		t.Fatalf("Match = %d rules, want 1", len(matched))
+	}
+}
+
+// TestAlertActionRegistryImplementsMatcher 验证 DB 注册表实现了 ActionMatcher 接口，
+// 可直接注入 webhook 服务驱动链式研判（后台配置真正生效的接线契约）。
+func TestAlertActionRegistryImplementsMatcher(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeRuleStore{}
+	registry := alert.NewAlertActionRegistry(store)
+	if err := registry.Upsert(ctx, alert.AlertAction{
+		Name:            "m1",
+		Description:     "kafka lag",
+		ExecuteLastStep: false,
+		AlertMatch:      alert.AlertMatch{AlertName: "HighLag"},
+		ToolSequence:    []alert.AlertActionStep{{Tool: "kafka.consumer_group.lag.read"}},
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	var matcher alert.ActionMatcher = registry // 编译期断言：registry 实现 ActionMatcher
+	if got := matcher.Match(alert.Alert{Labels: map[string]string{"alertname": "HighLag"}}); len(got) != 1 {
+		t.Fatalf("Match via interface = %d, want 1", len(got))
+	}
+	// 停用后接口层面不再命中。
+	if err := registry.SetEnabled(ctx, "m1", false); err != nil {
+		t.Fatalf("SetEnabled: %v", err)
+	}
+	if got := matcher.Match(alert.Alert{Labels: map[string]string{"alertname": "HighLag"}}); len(got) != 0 {
+		t.Fatalf("Match after disable = %d, want 0", len(got))
+	}
+	// 大小写不敏感放宽：接口层面也应命中。
+	if err := registry.SetEnabled(ctx, "m1", true); err != nil {
+		t.Fatalf("SetEnabled: %v", err)
+	}
+	if got := matcher.Match(alert.Alert{Labels: map[string]string{"alertname": "highlag"}}); len(got) != 1 {
+		t.Fatalf("Match case-insensitive = %d, want 1", len(got))
 	}
 }

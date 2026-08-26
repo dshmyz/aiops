@@ -47,7 +47,7 @@ export function makeCapabilities(overrides: Partial<UseCapabilities> = {}): UseC
     error: ref(''),
     loading: ref(false),
     configured: ref(true),
-    testInputText: ref('{"environment":"prod"}'),
+    testInputText: ref('{}'),
     searchText: ref(''),
     statusFilter: ref('all'),
     domainFilter: ref('all'),

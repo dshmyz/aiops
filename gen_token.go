@@ -14,10 +14,9 @@ func main() {
 		os.Exit(1)
 	}
 	claims := jwt.MapClaims{
-		"sub":                  "admin-1",
-		"roles":                []string{"admin"},
-		"allowed_environments": []string{"prod", "staging", "dev"},
-		"exp":                  time.Now().Add(24 * time.Hour).Unix(),
+		"sub":   "admin-1",
+		"roles": []string{"admin"},
+		"exp":   time.Now().Add(24 * time.Hour).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	s, _ := token.SignedString(secret)

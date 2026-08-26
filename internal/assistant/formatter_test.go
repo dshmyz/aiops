@@ -215,17 +215,17 @@ func TestCodeFallbackFormatterAggregatesFactSet(t *testing.T) {
 		FactSet: []assistant.ToolFact{
 			{
 				Tool:   "system.posture.read",
-				Input:  map[string]any{"environment": "prod"},
+				Input:  map[string]any{},
 				Result: map[string]any{"overall_status": "degraded", "domains": []any{}},
 			},
 			{
 				Tool:   "kafka.consumer_lag.read",
-				Input:  map[string]any{"environment": "prod", "name": "orders"},
+				Input:  map[string]any{"name": "orders"},
 				Result: map[string]any{"status": "warning", "lag": 1840},
 			},
 			{
 				Tool:   "glusterfs.volume.health.read",
-				Input:  map[string]any{"environment": "prod", "name": "data"},
+				Input:  map[string]any{"name": "data"},
 				Result: map[string]any{"status": "warning", "capacity_pct": 82.5},
 			},
 		},
