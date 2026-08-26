@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/v1': {
-          target: 'http://127.0.0.1:8090',
+          target: 'http://127.0.0.1:18080',
           changeOrigin: true,
           headers: {
             Authorization: `Bearer ${devAdminToken}`,
