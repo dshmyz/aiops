@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue';
 import type { ConversationSummary } from '../types';
 import type { ArchivedView } from '../composables/useConversations';
 import { formatRelativeTime, formatAbsoluteTime } from '../conversationFormat';
 
-defineProps<{
+const props = defineProps<{
   conversations: ConversationSummary[];
   activeConversationID: string | null;
   loading: boolean;
@@ -18,6 +19,54 @@ const emit = defineEmits<{
   (event: 'update:searchQuery', value: string): void;
   (event: 'update:archivedView', value: ArchivedView): void;
 }>();
+
+/* ---- 键盘导航：方向键在会话间移动，Enter 打开 ---- */
+const listEl = ref<HTMLUListElement | null>(null);
+const keyboardIndex = ref(0);
+
+const itemEls = computed<HTMLElement[]>(() =>
+  Array.from(listEl.value?.querySelectorAll<HTMLElement>('[data-test="conversation-item"]') ?? []),
+);
+
+function resetKeyboardIndex() {
+  // 跟随当前激活会话；找不到则回到第一项
+  const idx = props.conversations.findIndex((c) => c.id === props.activeConversationID);
+  keyboardIndex.value = idx >= 0 ? idx : 0;
+}
+
+function focusItem(index: number) {
+  const els = itemEls.value;
+  if (!els.length) return;
+  const next = Math.min(Math.max(index, 0), els.length - 1);
+  keyboardIndex.value = next;
+  els[next]?.focus();
+}
+
+function handleListKeydown(event: KeyboardEvent) {
+  const key = event.key;
+  if (key !== 'ArrowDown' && key !== 'ArrowUp' && key !== 'ArrowLeft' && key !== 'ArrowRight') return;
+  event.preventDefault();
+  const dir = key === 'ArrowDown' || key === 'ArrowRight' ? 1 : -1;
+  const target = keyboardIndex.value + dir;
+  focusItem(target < 0 ? props.conversations.length - 1 : target % Math.max(props.conversations.length, 1));
+}
+
+function handleItemKeydown(event: KeyboardEvent, conversationID: string, index: number) {
+  keyboardIndex.value = index;
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    emit('select', conversationID);
+  }
+}
+
+function handleTabKeydown(event: KeyboardEvent) {
+  // Tab 组左右键切换（符合 WAI-ARIA tabs 模式）
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  event.preventDefault();
+  emit('update:archivedView', archivedView.value === 'active' ? 'archived' : 'active');
+}
+
+const archivedView = computed(() => props.archivedView);
 </script>
 
 <template>
@@ -33,7 +82,7 @@ const emit = defineEmits<{
       </button>
     </header>
 
-    <div class="conversation-tabs" role="tablist">
+    <div class="conversation-tabs" role="tablist" @keydown="handleTabKeydown">
       <button
         data-test="conversation-tab-active"
         role="tab"
@@ -97,15 +146,27 @@ const emit = defineEmits<{
       {{ searchQuery ? '没有匹配的会话' : '还没有会话记录' }}
     </div>
 
-    <ul v-else class="conversation-list">
+    <ul
+      v-else
+      ref="listEl"
+      class="conversation-list"
+      role="listbox"
+      aria-label="会话列表"
+      @keydown="handleListKeydown"
+    >
       <li
-        v-for="conversation in conversations"
+        v-for="(conversation, index) in conversations"
         :key="conversation.id"
         data-test="conversation-item"
         :data-conversation-id="conversation.id"
         class="conversation-item"
         :class="{ active: conversation.id === activeConversationID }"
+        role="option"
+        :aria-selected="conversation.id === activeConversationID"
+        tabindex="0"
         @click="emit('select', conversation.id)"
+        @focusin="keyboardIndex = index"
+        @keydown="handleItemKeydown($event, conversation.id, index)"
       >
         <div class="conversation-item-header">
           <strong class="conversation-title">{{ conversation.title }}</strong>
@@ -283,6 +344,17 @@ const emit = defineEmits<{
 
 .conversation-item.active {
   background: var(--color-bg-active);
+}
+
+/* 键盘焦点：复用全局 focus-visible 蓝色描边；鼠标点击不显示圆圈 */
+.conversation-item:focus {
+  outline: none;
+}
+
+.conversation-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+  background: var(--color-bg-hover);
 }
 
 .conversation-item-header {

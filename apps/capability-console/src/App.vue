@@ -994,6 +994,16 @@ onUnmounted(() => {
                   <kbd>Enter</kbd> 发送 · <kbd>Shift+Enter</kbd> 换行
                 </span>
                 <button
+                  data-test="theme-toggle-input"
+                  type="button"
+                  class="input-theme-button"
+                  :title="isDarkTheme ? '切换到浅色模式' : '切换到深色模式'"
+                  :aria-label="isDarkTheme ? '切换到浅色模式' : '切换到深色模式'"
+                  @click="toggleTheme"
+                >
+                  <SfSymbol :name="isDarkTheme ? 'sun' : 'moon'" :size="15" />
+                </button>
+                <button
                   v-if="!assistantEntryLoading"
                   data-test="assistant-send"
                   class="primary-inline"

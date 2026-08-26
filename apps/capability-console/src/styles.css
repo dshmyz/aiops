@@ -3717,6 +3717,31 @@ nav button:focus-visible {
   margin-left: auto;
 }
 
+.input-theme-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: all 0.15s var(--ease-out);
+}
+
+.input-theme-button:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.input-theme-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 .stop-button {
   padding: 8px 16px;
   background: var(--color-danger);

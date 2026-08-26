@@ -166,4 +166,75 @@ describe('ConversationSidebar', () => {
 
     expect(wrapper.find('[data-test="conversation-archive"]').exists()).toBe(false);
   });
+
+  test('conversation items are keyboard focusable with listbox semantics', () => {
+    const wrapper = mount(ConversationSidebar, {
+      props: { ...baseProps, conversations, activeConversationID: 'conv-1' },
+    });
+
+    const list = wrapper.find('.conversation-list');
+    expect(list.attributes('role')).toBe('listbox');
+
+    const items = wrapper.findAll('[data-test="conversation-item"]');
+    expect(items[0].attributes('tabindex')).toBe('0');
+    expect(items[0].attributes('role')).toBe('option');
+    expect(items[0].attributes('aria-selected')).toBe('true');
+    expect(items[1].attributes('aria-selected')).toBe('false');
+  });
+
+  test('Enter on a focused conversation item selects it', async () => {
+    const wrapper = mount(ConversationSidebar, {
+      props: { ...baseProps, conversations },
+    });
+
+    await wrapper.findAll('[data-test="conversation-item"]')[1].trigger('keydown', { key: 'Enter' });
+    expect(wrapper.emitted('select')?.[0]).toEqual(['conv-2']);
+
+    // Space 也应触发选择
+    await wrapper.findAll('[data-test="conversation-item"]')[0].trigger('keydown', { key: ' ' });
+    expect(wrapper.emitted('select')?.[1]).toEqual(['conv-1']);
+  });
+
+  // 注意：focus() 只对已挂到文档中的元素生效，这两个方向键测试需 attachTo
+  test('ArrowDown moves keyboard focus to next conversation (wraps around)', async () => {
+    const wrapper = mount(ConversationSidebar, {
+      props: { ...baseProps, conversations },
+      attachTo: document.body,
+    });
+    const items = wrapper.findAll('[data-test="conversation-item"]');
+
+    await items[0].trigger('keydown', { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[1].element);
+
+    await items[1].trigger('keydown', { key: 'ArrowDown' }); // 末项后回绕到第一项
+    expect(document.activeElement).toBe(items[0].element);
+    wrapper.unmount();
+  });
+
+  test('ArrowUp moves keyboard focus to previous conversation', async () => {
+    const wrapper = mount(ConversationSidebar, {
+      props: { ...baseProps, conversations },
+      attachTo: document.body,
+    });
+    const items = wrapper.findAll('[data-test="conversation-item"]');
+
+    await items[1].trigger('keydown', { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(items[0].element);
+    wrapper.unmount();
+  });
+
+  test('tab arrow keys switch between active and archived views', async () => {
+    const wrapper = mount(ConversationSidebar, {
+      props: { ...baseProps },
+    });
+
+    const tablist = wrapper.find('[role="tablist"]');
+    await tablist.trigger('keydown', { key: 'ArrowRight' });
+    expect(wrapper.emitted('update:archivedView')?.[0]).toEqual(['archived']);
+
+    wrapper.setProps({ archivedView: 'archived' });
+    await wrapper.vm.$nextTick();
+    await tablist.trigger('keydown', { key: 'ArrowLeft' });
+    expect(wrapper.emitted('update:archivedView')?.[1]).toEqual(['active']);
+  });
 });
