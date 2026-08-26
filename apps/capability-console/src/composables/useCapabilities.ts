@@ -176,9 +176,10 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
   // 能力存储是否已配置（后端 /v1/capabilities 的 configured 字段）。未配置时
   // 列表为空是"未启用"，前端据此展示配置提示而非"零能力"。
   const configured = ref(true);
-  // 落地默认落在「能力清单（评审发布）」而非导入向导：返回用户想先看到已接入的
-  // 能力库，而不是每次都从 Swagger 收件箱开始。需要导入时点向导第 1 步即可。
-  const managementPhase = ref<ManagementPhase>('review');
+  // 进入管理页的默认落地阶段：首次为「接入 API」（source），引导用户先接入能力；
+  // 已有能力库时由 loadCapabilities 加载后维持，需要评审点向导/清单即可。
+  // （loadCapabilities 里 JSON 空列表时的降级逻辑保留，作为无能力场景的一致性兜底。）
+  const managementPhase = ref<ManagementPhase>('source');
 
   // 子 composable
   const editor = useCapabilityEditor({
@@ -212,11 +213,13 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
   // 列表加载
   const selectCapability = editor.selectCapability;
 
+  // 列表是否已完成首次加载。首次加载时按数据落地阶段：存在能力库落在「评审发布」，
+  // 能力库为空（含未配置/未启用）落在「接入 API」引导用户先接入；后续刷新保持当前阶段，不打断流程。
+  let initialLoaded = false;
+
   async function loadCapabilities() {
     loading.value = true;
     error.value = '';
-    // 零能力（首次/未配置）时，把进入管理页默认落在「接入 API」引导用户，而不是空评审清单。
-    const wasEmpty = capabilities.value.length === 0;
     try {
       const result = await listCapabilities();
       capabilities.value = result.capabilities;
@@ -224,9 +227,11 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
       configured.value = result.configured;
       if (capabilities.value.length > 0) {
         selectCapability(capabilities.value[0]);
-      } else if (wasEmpty && managementPhase.value === 'review') {
+        if (!initialLoaded) managementPhase.value = 'review';
+      } else if (!initialLoaded) {
         managementPhase.value = 'source';
       }
+      initialLoaded = true;
     } catch (err) {
       error.value = err instanceof Error ? err.message : '加载 Capability 失败';
     } finally {

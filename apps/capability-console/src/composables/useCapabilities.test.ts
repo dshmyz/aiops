@@ -109,3 +109,32 @@ describe('useCapabilities — testInputText 残留', () => {
     expect(caps.testInputText.value).toBe('{"environment":"staging"}');
   });
 });
+
+describe('useCapabilities — 加载落地阶段', () => {
+  it('能力库为空时首次加载落在 source（接入 API）', async () => {
+    mockedList.mockResolvedValue({ configured: true, capabilities: [] });
+    const caps = useCapabilities();
+    await caps.loadCapabilities();
+    expect(caps.managementPhase.value).toBe('source');
+  });
+
+  it('存在能力库时首次加载落在 review（评审发布）', async () => {
+    mockedList.mockResolvedValue({ configured: true, capabilities: [makeCapability()] });
+    const caps = useCapabilities();
+    await caps.loadCapabilities();
+    expect(caps.managementPhase.value).toBe('review');
+  });
+
+  it('首次加载定稿后，后续刷新保持当前阶段不打断', async () => {
+    mockedList.mockResolvedValue({ configured: true, capabilities: [] });
+    const caps = useCapabilities();
+    await caps.loadCapabilities();
+    expect(caps.managementPhase.value).toBe('source');
+
+    // 用户已进入评审阶段后刷新，即使能力库仍为空也不打回 source
+    caps.managementPhase.value = 'review';
+    mockedList.mockResolvedValue({ configured: true, capabilities: [] });
+    await caps.loadCapabilities();
+    expect(caps.managementPhase.value).toBe('review');
+  });
+});
