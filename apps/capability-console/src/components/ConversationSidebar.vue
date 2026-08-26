@@ -323,7 +323,7 @@ const emit = defineEmits<{
 }
 
 .conversation-preview {
-  font-size: var(--font-xs, 12px);
+  font-size: var(--font-sm);
   color: var(--color-text-tertiary);
   margin: 0;
   overflow: hidden;
@@ -332,8 +332,9 @@ const emit = defineEmits<{
 }
 
 .conversation-time {
-  font-size: 10px;
-  color: var(--color-text-muted);
+  /* 原用 text-muted（对比度 ~1.8:1，几乎不可见）+ 10px；升为 tertiary 12px 达 AA */
+  font-size: var(--font-sm);
+  color: var(--color-text-tertiary);
   display: block;
   margin-top: 2px;
 }

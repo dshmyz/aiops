@@ -15,10 +15,12 @@
   --color-border-strong: rgba(255, 255, 255, 0.18);
   --color-border-accent: rgba(10, 132, 255, 0.4);
 
-  /* Text - macOS system gray labels */
+  /* Text - macOS system gray labels
+     tertiary 提亮至 0.45（原 0.3 在深底上对比度仅 2.6:1，不达 AA 4.5:1），
+     muted 0.18 仅用于装饰性内容，正文一律不用 */
   --color-text-primary: #ffffff;
   --color-text-secondary: rgba(235, 235, 245, 0.6);
-  --color-text-tertiary: rgba(235, 235, 245, 0.3);
+  --color-text-tertiary: rgba(235, 235, 245, 0.45);
   --color-text-muted: rgba(235, 235, 245, 0.18);
 
   /* Accent - SF Blue */
@@ -119,7 +121,7 @@
 
   --color-text-primary: #000000;
   --color-text-secondary: rgba(60, 60, 67, 0.6);
-  --color-text-tertiary: rgba(60, 60, 67, 0.3);
+  --color-text-tertiary: rgba(60, 60, 67, 0.45);
   --color-text-muted: rgba(60, 60, 67, 0.18);
 
   --color-accent: #007aff;
