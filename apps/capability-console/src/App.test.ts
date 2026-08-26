@@ -462,7 +462,7 @@ describe('Capability Console', () => {
       const url = String(input);
       if (url === '/v1/capabilities') return ok({ capabilities: [] });
       if (url === '/v1/assistant/messages') {
-        return ok({ type: 'clarification_needed', message: '请指明目标环境与资源' });
+        return ok({ type: 'clarification_needed', message: '请指明资源范围' });
       }
       return ok({});
     }));
