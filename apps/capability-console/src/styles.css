@@ -1579,7 +1579,10 @@ nav button:focus-visible {
 .workflow-candidates {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* 与 .workflow-start 一致：整卡内容随外层 .workflow-console 滚动，避免
+     多层 overflow:hidden 把 flex 列表锁死在固定高度导致只剩几十像素。 */
+  overflow-y: auto;
+  align-items: stretch;
   gap: var(--space-4);
 }
 
@@ -1594,10 +1597,12 @@ nav button:focus-visible {
 .stage-header p { font-size: var(--font-base); color: var(--color-text-secondary); }
 
 .candidate-stage {
-  flex: 1;
+  /* 由外层 .workflow-candidates 负责滚动，这里不再 flex:1+overflow:hidden
+     锁高，改为内容自然堆叠，确保每个候选行都可完整展示（不挤压）。 */
+  flex: none;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   background: var(--color-bg-elevated);
   border: none;
   border-radius: var(--radius-xl);
@@ -1625,10 +1630,10 @@ nav button:focus-visible {
 .candidate-source-strip .el-button { flex-shrink: 0; }
 
 .import-preview {
-  flex: 1;
+  flex: none;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* Candidate stats: 3×2 卡片矩阵，每张卡有独立阴影和语义色 */
@@ -1956,8 +1961,8 @@ nav button:focus-visible {
 }
 
 .candidate-list {
-  flex: 1;
-  overflow-y: auto;
+  flex: none;
+  overflow: visible;
   padding: var(--space-5);
 }
 
@@ -2184,8 +2189,7 @@ nav button:focus-visible {
 }
 
 .commit-summary.sticky-commit {
-  position: sticky;
-  bottom: 0;
+  position: relative;
   margin: 0;
   padding: var(--space-4) var(--space-5);
   background: var(--material-thick);

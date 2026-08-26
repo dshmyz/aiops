@@ -44,6 +44,8 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'jsdom',
       setupFiles: './src/test/setup.ts',
+      // 全量并行时重型用例（整卡渲染 + 加载能力 mock）偶发超过默认 5s，统一放宽到 10s
+      testTimeout: 10000,
     },
   };
 });
