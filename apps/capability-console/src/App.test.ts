@@ -341,26 +341,31 @@ describe('Capability Console', () => {
     vi.unstubAllGlobals();
   });
 
-  test('opens on the AI assistant entry and keeps capability management behind navigation', async () => {
-    const wrapper = mountApp();
-    await flushPromises();
-
-    expect(wrapper.find('[data-test="assistant-entry"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="assistant-entry"]').text()).toContain('AI 运维助手');
-    // management-entry uses v-show (keeps DOM but hides via display:none),
-    // so we assert the inline display style instead of existence.
-    const managementEl = wrapper.find('[data-test="management-entry"]').element as HTMLElement;
-    expect(managementEl.style.display).toBe('none');
-
-    await openManagement(wrapper);
-
-    expect(wrapper.find('[data-test="assistant-entry"]').exists()).toBe(false);
-    expect(managementEl.style.display).not.toBe('none');
-    expect(wrapper.find('[data-test="management-entry"]').text()).toContain('把后台 API 翻译成 AI 工具');
-    // 落地落在能力清单（review）而非导入向导
-    expect(wrapper.find('[data-test="workflow-review"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="capability-table-body"]').text()).toContain('minio.bucket.capacity.read');
-  });
+  test(
+    'opens on the AI assistant entry and keeps capability management behind navigation',
+    async () => {
+      const wrapper = mountApp();
+      await flushPromises();
+  
+      expect(wrapper.find('[data-test="assistant-entry"]').exists()).toBe(true);
+      expect(wrapper.find('[data-test="assistant-entry"]').text()).toContain('AI 运维助手');
+      // management-entry uses v-show (keeps DOM but hides via display:none),
+      // so we assert the inline display style instead of existence.
+      const managementEl = wrapper.find('[data-test="management-entry"]').element as HTMLElement;
+      expect(managementEl.style.display).toBe('none');
+  
+      await openManagement(wrapper);
+  
+      expect(wrapper.find('[data-test="assistant-entry"]').exists()).toBe(false);
+      expect(managementEl.style.display).not.toBe('none');
+      expect(wrapper.find('[data-test="management-entry"]').text()).toContain('把后台 API 翻译成 AI 工具');
+      // 落地落在能力清单（review）而非导入向导
+      expect(wrapper.find('[data-test="workflow-review"]').exists()).toBe(true);
+      expect(wrapper.find('[data-test="capability-table-body"]').text()).toContain('minio.bucket.capacity.read');
+    },
+    // 全量并行运行时会 mount 整个 App + 加载全部能力 mock，偶发超过默认 5s 超时，单独放宽
+    15000,
+  );
 
   test('renders quick-start example prompts when transcript is empty', async () => {
     const wrapper = mountApp();
