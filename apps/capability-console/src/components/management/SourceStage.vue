@@ -19,7 +19,7 @@ defineProps<{ capabilities: UseCapabilities }>();
         <div>
           <p class="eyebrow">第一步</p>
           <h2>先接入一批后台 API</h2>
-          <p>现在只做一件事：把 Swagger 拉进来，系统会先生成候选能力。没有真实环境时，可先启动仓库里的 mock 示例（<code>node examples/mock-middleware-api.js</code>），再用地址 <code>http://127.0.0.1:19090/v3/api-docs</code> 跑通 MinIO、Kafka、GlusterFS。</p>
+          <p>现在只做一件事：把 Swagger 拉进来，系统会先生成候选能力。没有真实环境时，点击下方"载入内置示例"即可用本地 mock 跑通 MinIO、Kafka、GlusterFS。</p>
         </div>
       </header>
       <section data-test="import-wizard" class="import-wizard compact-import" aria-label="Swagger 接入">
@@ -36,6 +36,7 @@ defineProps<{ capabilities: UseCapabilities }>();
           @update:base-url="capabilities.importBackendBaseURL.value = $event"
           @preview="capabilities.previewSwaggerURL"
           @clear-preview="capabilities.clearImportPreview"
+          @load-example="capabilities.loadBuiltinExample"
         />
         <strong v-if="capabilities.importMessage.value" data-test="import-result" class="import-message">{{ capabilities.importMessage.value }}</strong>
         <div data-test="import-commit-summary" class="commit-summary commit-summary-empty">

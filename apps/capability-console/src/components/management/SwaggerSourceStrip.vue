@@ -20,6 +20,7 @@ const emit = defineEmits<{
   'update:baseUrl': [value: string];
   'preview': [];
   'clear-preview': [];
+  'load-example': [];
 }>();
 
 function onUrlInput(event: Event) {
@@ -63,5 +64,14 @@ function onBaseUrlInput(event: Event) {
     >
       {{ props.buttonText }}
     </el-button>
+    <button
+      data-test="load-builtin-example"
+      class="example-link"
+      type="button"
+      :disabled="props.loading"
+      @click="emit('load-example')"
+    >
+      载入内置示例（MinIO / Kafka / GlusterFS）
+    </button>
   </div>
 </template>

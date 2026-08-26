@@ -123,6 +123,8 @@ export interface UseCapabilities {
   testSelected: () => Promise<void>;
   previewSwaggerURL: () => Promise<void>;
   clearImportPreview: () => void;
+  loadBuiltinExample: () => Promise<void>;
+  builtinExampleActive: ComputedRef<boolean>;
   commitSwaggerImport: () => Promise<void>;
   updateCandidateOverride: (id: string, patch: Partial<ImportCandidateOverride>) => void;
   toggleImportIgnored: (name: string, ignored: boolean) => void;
@@ -382,6 +384,8 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     testSelected: editor.testSelected,
     previewSwaggerURL: importWizard.previewSwaggerURL,
     clearImportPreview: importWizard.clearImportPreview,
+    loadBuiltinExample: importWizard.loadBuiltinExample,
+    builtinExampleActive: importWizard.builtinExampleActive,
     commitSwaggerImport: importWizard.commitSwaggerImport,
     updateCandidateOverride: importWizard.updateCandidateOverride,
     toggleImportIgnored: importWizard.toggleImportIgnored,

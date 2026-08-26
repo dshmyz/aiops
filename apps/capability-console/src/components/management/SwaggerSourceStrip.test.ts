@@ -38,6 +38,17 @@ describe('SwaggerSourceStrip', () => {
     expect(wrapper.emitted('preview')).toBeTruthy();
   });
 
+  test('点击载入内置示例按钮触发 load-example 事件', async () => {
+    const wrapper = mountStrip();
+    await wrapper.find('[data-test="load-builtin-example"]').trigger('click');
+    expect(wrapper.emitted('load-example')).toBeTruthy();
+  });
+
+  test('loading 时载入内置示例按钮禁用', () => {
+    const wrapper = mountStrip({ loading: true });
+    expect((wrapper.find('[data-test="load-builtin-example"]').element as HTMLButtonElement).disabled).toBe(true);
+  });
+
   test('loading 为 true 时预览按钮显示加载态', () => {
     const wrapper = mountStrip({ loading: true });
     const button = wrapper.find('[data-test="preview-openapi-url"]');

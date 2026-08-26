@@ -1435,6 +1435,28 @@ nav button:focus-visible {
   justify-self: start;
 }
 
+.import-strip .example-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--color-accent);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.15s var(--ease-out);
+}
+
+.import-strip .example-link:hover:not(:disabled) {
+  color: var(--color-accent-strong, var(--color-accent));
+}
+
+.import-strip .example-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .import-strip label {
   display: flex;
   flex-direction: column;
