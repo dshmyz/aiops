@@ -724,6 +724,47 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="assistant-input-hint"]').text()).toContain('Shift+Enter');
   });
 
+  test('recalls sent messages with arrow keys (terminal-style history)', async () => {
+    const wrapper = mountApp();
+    await flushPromises();
+
+    const input = wrapper.find('[data-test="assistant-input"]');
+    // 发送两条消息，进入历史
+    await input.setValue('检查集群健康');
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    await input.setValue('查询 kafka 延迟');
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    // 空输入按 ↑ → 回到最后一条
+    await input.trigger('keydown', { key: 'ArrowUp' });
+    expect((input.element as HTMLTextAreaElement).value).toBe('查询 kafka 延迟');
+    // 继续 ↑ → 更早一条
+    await input.trigger('keydown', { key: 'ArrowUp' });
+    expect((input.element as HTMLTextAreaElement).value).toBe('检查集群健康');
+    // ↓ → 前进回最近一条
+    await input.trigger('keydown', { key: 'ArrowDown' });
+    expect((input.element as HTMLTextAreaElement).value).toBe('查询 kafka 延迟');
+    // 再 ↓ → 越过末尾退出历史，输入框清空
+    await input.trigger('keydown', { key: 'ArrowDown' });
+    expect((input.element as HTMLTextAreaElement).value).toBe('');
+  });
+
+  test('shows character count when input has content', async () => {
+    const wrapper = mountApp();
+    await flushPromises();
+
+    // 空输入不显示计数
+    expect(wrapper.find('[data-test="assistant-char-count"]').exists()).toBe(false);
+
+    const input = wrapper.find('[data-test="assistant-input"]');
+    await input.setValue('检查集群健康');
+    const counter = wrapper.find('[data-test="assistant-char-count"]');
+    expect(counter.exists()).toBe(true);
+    expect(counter.text()).toBe('6 字');
+  });
+
   test('lays out capability management as a guided workflow', async () => {
     const wrapper = mountApp();
     await flushPromises();

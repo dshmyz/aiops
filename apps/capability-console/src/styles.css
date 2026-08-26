@@ -3764,22 +3764,28 @@ nav button:focus-visible {
   transform: translateY(0) scale(0.98);
 }
 
+/* 快捷键提示：纯文字弱化处理——此前 kbd 带边框底色视觉权重过高，
+   喧宾夺主压过了发送按钮；现在只是一行随选随忘的浅色小字。 */
 .input-hint {
   font-size: var(--font-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-muted);
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  user-select: none;
 }
 
-.input-hint kbd {
-  padding: 2px 6px;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-text-secondary);
+/* 字符计数：仅在有内容时出现；超阈值转警示色提醒可能影响回答质量 */
+.input-char-count {
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.input-char-count.warn {
+  color: var(--color-warning);
+  font-weight: 600;
 }
 
 .assistant-detail pre {

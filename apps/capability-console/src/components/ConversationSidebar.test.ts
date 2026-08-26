@@ -237,4 +237,59 @@ describe('ConversationSidebar', () => {
     await tablist.trigger('keydown', { key: 'ArrowLeft' });
     expect(wrapper.emitted('update:archivedView')?.[1]).toEqual(['active']);
   });
+
+  /* ---- 日期分组 ---- */
+  const now = new Date();
+  const daysAgo = (n: number, hour = 10) => {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - n, hour, 0, 0);
+    return d.toISOString();
+  };
+  const datedConversations: ConversationSummary[] = [
+    { ...conversations[0], id: 'conv-today-1', last_active_at: daysAgo(0, 9) },
+    { ...conversations[0], id: 'conv-today-2', last_active_at: daysAgo(0, 8) },
+    { ...conversations[0], id: 'conv-yesterday', last_active_at: daysAgo(1) },
+    { ...conversations[0], id: 'conv-older', last_active_at: daysAgo(4) },
+  ];
+
+  test('renders date group headers between conversation groups', () => {
+    const wrapper = mount(ConversationSidebar, {
+      props: { ...baseProps, conversations: datedConversations },
+    });
+
+    const headers = wrapper.findAll('[data-test="conversation-date-header"]');
+    // 今天(2) / 昨天(1) / 4天前(1) → 3 个分组标题
+    expect(headers).toHaveLength(3);
+    expect(headers[0].text()).toBe('今天');
+    expect(headers[1].text()).toBe('昨天');
+    expect(headers[2].text()).toBe(olderLabel());
+
+  });
+
+  // 辅助：4 天前的分组标签（同月/跨月文案由 formatDateGroup 决定，这里按同样规则算期望值）
+  function olderLabel(): string {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 4);
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
+  }
+
+  test('keyboard arrow navigation still spans across date groups', async () => {
+    const wrapper = mount(ConversationSidebar, {
+      props: { ...baseProps, conversations: datedConversations },
+      attachTo: document.body,
+    });
+    const items = wrapper.findAll('[data-test="conversation-item"]');
+    // 分组标题不打断扁平索引：4 个会话项仍然连续
+    expect(items).toHaveLength(4);
+
+    await items[1].trigger('keydown', { key: 'ArrowDown' }); // 今天第2条 → 跨过"昨天"标题
+    expect(document.activeElement).toBe(items[2].element);
+    wrapper.unmount();
+  });
+
+  test('does not render date headers when list is empty', () => {
+    const wrapper = mount(ConversationSidebar, {
+      props: { ...baseProps },
+    });
+
+    expect(wrapper.findAll('[data-test="conversation-date-header"]')).toHaveLength(0);
+  });
 });

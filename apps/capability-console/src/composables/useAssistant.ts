@@ -59,6 +59,9 @@ export interface UseAssistant {
   assistantInlineConfirmationToken: Ref<string | undefined>;
   latestDetailText: Ref<string>;
   send: () => Promise<void>;
+  /** 输入历史：空输入框按 ↑ 回溯上一条已发送消息，↓ 前进；返回 null 表示退出历史浏览 */
+  recallInputHistory: (direction: 1 | -1) => string | null;
+  recallHistoryActive: Ref<boolean>;
   retry: () => Promise<void>;
   regenerate: (turn: ConversationTurn) => Promise<void>;
   stop: () => void;
@@ -465,8 +468,52 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     if (!rawMessage || assistantEntryLoading.value) {
       return;
     }
+    // 记录输入历史（终端式 ↑ 回溯）；连续去重，最新在末尾
+    if (inputHistory.value[inputHistory.value.length - 1] !== rawMessage) {
+      inputHistory.value.push(rawMessage);
+      if (inputHistory.value.length > 50) {
+        inputHistory.value.shift();
+      }
+    }
+    historyCursor.value = inputHistory.value.length; // 重置游标到"最新"位
+    recallHistoryActive.value = false;
     assistantInput.value = '';
     await submitAssistantMessage(rawMessage);
+  }
+
+  /* ---- 输入历史：终端式 ↑/↓ 回溯已发送消息 ---- */
+  const inputHistory = ref<string[]>([]);
+  const historyCursor = ref(0);
+  const recallHistoryActive = ref(false);
+
+  /**
+   * direction=-1（↑）：输入框为空时回到最后一条；已在历史中则继续向前。
+   * direction=1（↓）：向后前进；越过最新一条后退出历史模式并清空输入框（终端惯例）。
+   * 正在生成/输入框非空且未处于历史浏览时不劫持方向键。
+   */
+  function recallInputHistory(direction: 1 | -1): string | null {
+    if (assistantEntryLoading.value || inputHistory.value.length === 0) {
+      return null;
+    }
+    if (!recallHistoryActive.value) {
+      if (direction === 1 || assistantInput.value.trim() !== '') {
+        return null; // ↓ 或非空输入：不进入历史模式
+      }
+      recallHistoryActive.value = true;
+      historyCursor.value = inputHistory.value.length - 1;
+      return inputHistory.value[historyCursor.value];
+    }
+    historyCursor.value += direction;
+    if (historyCursor.value >= inputHistory.value.length) {
+      // 越过末尾：退出历史模式，恢复空输入
+      recallHistoryActive.value = false;
+      historyCursor.value = inputHistory.value.length;
+      return '';
+    }
+    if (historyCursor.value < 0) {
+      historyCursor.value = 0;
+    }
+    return inputHistory.value[historyCursor.value];
   }
 
   async function retry() {
@@ -575,6 +622,8 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     assistantInlineConfirmationToken,
     latestDetailText,
     send,
+    recallInputHistory,
+    recallHistoryActive,
     retry,
     regenerate,
     stop,

@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import type { ConversationSummary } from '../types';
 import type { ArchivedView } from '../composables/useConversations';
-import { formatRelativeTime, formatAbsoluteTime } from '../conversationFormat';
+import { formatRelativeTime, formatAbsoluteTime, formatDateGroup } from '../conversationFormat';
 
 const props = defineProps<{
   conversations: ConversationSummary[];
@@ -20,6 +20,33 @@ const emit = defineEmits<{
   (event: 'update:archivedView', value: ArchivedView): void;
 }>();
 
+/* ---- 日期分组：按 last_active_at 的日期给列表加分段标题 ---- */
+interface GroupedRow {
+  kind: 'header';
+  key: string;
+  label: string;
+}
+interface ConversationRow {
+  kind: 'item';
+  conversation: ConversationSummary;
+  index: number; // 会话在扁平列表中的下标，供键盘导航使用
+}
+type SidebarRow = GroupedRow | ConversationRow;
+
+const groupedRows = computed<SidebarRow[]>(() => {
+  const rows: SidebarRow[] = [];
+  let lastKey = '';
+  props.conversations.forEach((conversation, index) => {
+    const group = formatDateGroup(conversation.last_active_at);
+    if (group.key !== lastKey) {
+      rows.push({ kind: 'header', key: group.key, label: group.label });
+      lastKey = group.key;
+    }
+    rows.push({ kind: 'item', conversation, index });
+  });
+  return rows;
+});
+
 /* ---- 键盘导航：方向键在会话间移动，Enter 打开 ---- */
 const listEl = ref<HTMLUListElement | null>(null);
 const keyboardIndex = ref(0);
@@ -27,12 +54,6 @@ const keyboardIndex = ref(0);
 const itemEls = computed<HTMLElement[]>(() =>
   Array.from(listEl.value?.querySelectorAll<HTMLElement>('[data-test="conversation-item"]') ?? []),
 );
-
-function resetKeyboardIndex() {
-  // 跟随当前激活会话；找不到则回到第一项
-  const idx = props.conversations.findIndex((c) => c.id === props.activeConversationID);
-  keyboardIndex.value = idx >= 0 ? idx : 0;
-}
 
 function focusItem(index: number) {
   const els = itemEls.value;
@@ -154,34 +175,44 @@ const archivedView = computed(() => props.archivedView);
       aria-label="会话列表"
       @keydown="handleListKeydown"
     >
-      <li
-        v-for="(conversation, index) in conversations"
-        :key="conversation.id"
-        data-test="conversation-item"
-        :data-conversation-id="conversation.id"
-        class="conversation-item"
-        :class="{ active: conversation.id === activeConversationID }"
-        role="option"
-        :aria-selected="conversation.id === activeConversationID"
-        tabindex="0"
-        @click="emit('select', conversation.id)"
-        @focusin="keyboardIndex = index"
-        @keydown="handleItemKeydown($event, conversation.id, index)"
-      >
-        <div class="conversation-item-header">
-          <strong class="conversation-title">{{ conversation.title }}</strong>
-          <button
-            v-if="archivedView === 'active'"
-            data-test="conversation-archive"
-            class="conversation-archive-button"
-            @click.stop="emit('archive', conversation.id)"
-          >
-            归档
-          </button>
-        </div>
-        <p class="conversation-preview">{{ conversation.last_message_preview }}</p>
-        <time class="conversation-time" :title="formatAbsoluteTime(conversation.last_active_at)">{{ formatRelativeTime(conversation.last_active_at) }}</time>
-      </li>
+      <template v-for="row in groupedRows" :key="row.kind === 'header' ? `h-${row.key}` : row.conversation.id">
+        <li
+          v-if="row.kind === 'header'"
+          :data-test="`conversation-date-header`"
+          class="conversation-date-header"
+          role="presentation"
+          aria-hidden="true"
+        >
+          {{ row.label }}
+        </li>
+        <li
+          v-else
+          :data-conversation-id="row.conversation.id"
+          data-test="conversation-item"
+          class="conversation-item"
+          :class="{ active: row.conversation.id === activeConversationID }"
+          role="option"
+          :aria-selected="row.conversation.id === activeConversationID"
+          tabindex="0"
+          @click="emit('select', row.conversation.id)"
+          @focusin="keyboardIndex = row.index"
+          @keydown="handleItemKeydown($event, row.conversation.id, row.index)"
+        >
+          <div class="conversation-item-header">
+            <strong class="conversation-title">{{ row.conversation.title }}</strong>
+            <button
+              v-if="archivedView === 'active'"
+              data-test="conversation-archive"
+              class="conversation-archive-button"
+              @click.stop="emit('archive', row.conversation.id)"
+            >
+              归档
+            </button>
+          </div>
+          <p class="conversation-preview">{{ row.conversation.last_message_preview }}</p>
+          <time class="conversation-time" :title="formatAbsoluteTime(row.conversation.last_active_at)">{{ formatRelativeTime(row.conversation.last_active_at) }}</time>
+        </li>
+      </template>
     </ul>
   </aside>
 </template>
@@ -326,6 +357,22 @@ const archivedView = computed(() => props.archivedView);
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+}
+
+/* 日期分组标题：sticky 头，滚动时悬浮在分组顶部。
+   背景继承 sidebar 的 elevated 底色，避免条目从标题下透出。 */
+.conversation-date-header {
+  position: sticky;
+  top: calc(-1 * var(--space-2)); /* 抵消 list 顶部 padding，贴住滚动容器顶端 */
+  z-index: 1;
+  padding: var(--space-2) var(--space-1) var(--space-1);
+  margin: var(--space-1) 0 2px;
+  background: var(--color-bg-elevated);
+  font-size: var(--font-xs, 12px);
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  letter-spacing: 0.03em;
+  user-select: none;
 }
 
 /* 会话项：苹果风圆角卡片，无 border-bottom，用 margin 分隔 */

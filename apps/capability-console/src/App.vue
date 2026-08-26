@@ -186,6 +186,8 @@ const {
   assistantInlineConfirmationToken,
   latestDetailText: assistantLatestDetailText,
   send: sendAssistantEntryMessage,
+  recallInputHistory,
+  recallHistoryActive,
   retry: retryLastAssistantMessage,
   regenerate: regenerateAssistantMessage,
   stop: stopAssistantEntry,
@@ -472,6 +474,20 @@ function handleAssistantKeydown(event: KeyboardEvent) {
     }
   }
 
+  // 输入历史：空输入 ↑ 回溯上一条已发送消息，历史浏览中 ↓ 前进（终端惯例）
+  if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.shiftKey && !event.isComposing) {
+    const recalled = recallInputHistory(event.key === 'ArrowDown' ? 1 : -1);
+    if (recalled !== null) {
+      event.preventDefault();
+      assistantInput.value = recalled;
+      void nextTick(() => {
+        autoGrowTextarea();
+        focusTextareaEnd();
+      });
+      return;
+    }
+  }
+
   // 输入 `/` 在行首或空输入时触发指令面板（无已发布能力则跳过）
   if (
     event.key === '/' &&
@@ -526,6 +542,10 @@ const clarificationQuickPicks = computed(() => allSlashCommands.value.slice(0, 3
 
 // textarea 自动增高：内容增长时撑到上限，超限出现内部滚动
 const ASSISTANT_INPUT_MAX_HEIGHT = 168;
+
+// 字符计数提示：粘贴超长日志时给边界感知（超过阈值变警示色）
+const CHAR_COUNT_WARN = 4000;
+const assistantInputCharCount = computed(() => assistantInput.value.length);
 function autoGrowTextarea() {
   const ta = assistantTextareaRef.value;
   if (!ta) return;
@@ -990,8 +1010,15 @@ onUnmounted(() => {
                 >×</button>
               </div>
               <div class="assistant-input-actions">
-                <span data-test="assistant-input-hint" class="input-hint">
-                  <kbd>Enter</kbd> 发送 · <kbd>Shift+Enter</kbd> 换行
+                <span
+                  v-if="assistantInputCharCount > 0"
+                  data-test="assistant-char-count"
+                  class="input-char-count"
+                  :class="{ warn: assistantInputCharCount > CHAR_COUNT_WARN }"
+                  :title="assistantInputCharCount > CHAR_COUNT_WARN ? '内容较长，可能影响回答质量' : undefined"
+                >{{ assistantInputCharCount }} 字</span>
+                <span data-test="assistant-input-hint" class="input-hint" aria-hidden="true">
+                  Enter 发送 · Shift+Enter 换行
                 </span>
                 <button
                   data-test="theme-toggle-input"
