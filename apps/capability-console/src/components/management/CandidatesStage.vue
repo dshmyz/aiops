@@ -28,6 +28,7 @@ defineProps<{ capabilities: UseCapabilities }>();
         :loading="capabilities.importPreviewLoading.value"
         button-text="重新预览"
         button-type="default"
+        :show-example-link="false"
         @update:url="capabilities.importOpenAPIURLText.value = $event"
         @update:base-url="capabilities.importBackendBaseURL.value = $event"
         @preview="capabilities.previewSwaggerURL"
