@@ -601,4 +601,8 @@ var sqliteMigrations = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS alert_action_runs_rule_idx ON alert_action_runs (rule_name, created_at)`,
 	`CREATE INDEX IF NOT EXISTS alert_action_runs_alert_idx ON alert_action_runs (alert_id)`,
+	// 环境差异化概念已退役：角色不再按环境作用域授权，认证期把友好名
+	// （如"生产"）映射到规范环境的别名展开已移除。清理历史库中由早期
+	// 版本建出的孤儿表（mirrors migrations/023_drop_environment_aliases.sql）。
+	`DROP TABLE IF EXISTS copilot_environment_aliases`,
 }
