@@ -38,10 +38,10 @@ err() { printf '[start] ERROR: %s\n' "$*" >&2; }
 # 已有存活实例
 if existing="$(read_live_pid "$API_PID")"; then
   if [ "$force" -eq 1 ]; then
-    log "已有实例 pid=$existing，--force 触发重启"
+    log "已有实例 pid=${existing}，--force 触发重启"
     "$SCRIPTS_DIR/stop.sh"
   else
-    log "copilot-api 已在运行 (pid=$existing, $API_BASE)。如要重启用 --force 或先 scripts/stop.sh"
+    log "copilot-api 已在运行 (pid=${existing}, $API_BASE)。如要重启用 --force 或先 scripts/stop.sh"
   fi
 else
   : # 未运行，继续启动
