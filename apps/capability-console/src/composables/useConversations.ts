@@ -77,8 +77,8 @@ function processFromPayload(turn: ConversationTurn): TurnProcess | undefined {
   return payload.process as TurnProcess;
 }
 
-// hydrateProcess 把后端持久化的 process 填回瞬态字段（thinking/steps），仅当顶层
-// 缺席时补——流式期间内存里的实时值优先，二者内容本就同源。
+// hydrateProcess 把后端持久化的 process 填回瞬态字段（thinking/steps/progress_stages），
+// 仅当顶层缺席时补——流式期间内存里的实时值优先，二者内容本就同源。
 function hydrateProcess(turn: ConversationTurn): ConversationTurn {
   const process = processFromPayload(turn);
   if (!process) return turn;
@@ -88,6 +88,13 @@ function hydrateProcess(turn: ConversationTurn): ConversationTurn {
   }
   if ((!next.steps || next.steps.length === 0) && Array.isArray(process.steps) && process.steps.length) {
     next.steps = process.steps;
+  }
+  if (
+    (!next.progress_stages || next.progress_stages.length === 0) &&
+    Array.isArray(process.progress_stages) &&
+    process.progress_stages.length
+  ) {
+    next.progress_stages = process.progress_stages;
   }
   return next;
 }

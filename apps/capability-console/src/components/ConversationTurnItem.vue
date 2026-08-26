@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { ConversationTurn, Block, DiagnosticPackage, AssistantStep, PlanSummary, RecommendationStatus } from '../types';
+import type { ConversationTurn, Block, DiagnosticPackage, AssistantStep, PlanSummary, RecommendationStatus, ToolCall } from '../types';
 import { formatRelativeTime, formatAbsoluteTime, formatResponseType } from '../conversationFormat';
 import AssistantSteps from './AssistantSteps.vue';
 import BlockRenderer from './BlockRenderer.vue';
@@ -10,7 +10,7 @@ import MarkdownContent from './MarkdownContent.vue';
 import MessageFeedbackButtons from './MessageFeedbackButtons.vue';
 import ProgressTimeline from './ProgressTimeline.vue';
 import SfSymbol from './SfSymbol.vue';
-import { mergeExecutionProgress } from '../conversationProgress';
+import { mergeExecutionProgress, mergeStepToolEntries } from '../conversationProgress';
 
 const props = defineProps<{
   turn: ConversationTurn;
@@ -74,14 +74,44 @@ function toggleThinking() {
 const toolCallsExpanded = ref(true);
 const hasToolCalls = computed(() => Boolean(props.turn.tool_calls && props.turn.tool_calls.length > 0));
 
-// 进度阶段时间线：当 turn 累积了 progress_stages 时显示
-const hasProgress = computed(() => Boolean(props.turn.progress_stages && props.turn.progress_stages.length > 0));
-
-// 合并阶段与工具调用为一条 Trae 式执行进度流（阶段骨架 + 工具子项）。
-// 诊断/读路径的工具调用锚定在 tool_executing 阶段下。
-const progressEntries = computed(() =>
-  mergeExecutionProgress(props.turn.progress_stages ?? [], props.turn.tool_calls ?? [], Boolean(props.streaming)),
+// 进度阶段时间线：当有阶段（流式）或有回放步骤（刷新后持久化的执行证据）时显示
+const hasProgress = computed(() =>
+  Boolean(
+    (props.turn.progress_stages && props.turn.progress_stages.length > 0) ||
+    replayedSteps.value.length > 0,
+  ),
 );
+
+// 回放步骤来源：刷新后 progress_stages/tool_calls 不在 turn 上，但后端持久化了
+// steps（executor / agentLoop 终端 turn 的 process.steps 水合）或单步 tool_step
+// （agentLoop 独立 turn），据此重建执行进度流，让进度面板在回放后仍可见。
+const replayedSteps = computed<AssistantStep[]>(() => {
+  const fromSteps = props.turn.steps ?? [];
+  return fromSteps.length > 0 ? fromSteps : persistedStep.value ? [persistedStep.value] : [];
+});
+
+// 工具子项的单一证据来源：优先实时 tool_calls（旧 planner 路径），否则用 steps
+//（executor / agentLoop 主路径，流式累积与回放水合同源）。这修复了进度面板此前
+// 只从 tool_calls 取子项、导致主路径（只产 steps）显示不出 Trae 式工具流的问题。
+const toolActions = computed<ToolCall[]>(() => {
+  const calls = props.turn.tool_calls;
+  if (calls && calls.length > 0) {
+    return calls;
+  }
+  return (props.turn.steps ?? [])
+    .filter((s) => s.tool)
+    .map((s) => ({ tool: s.tool, done: s.status !== 'running' }));
+});
+
+// 合并阶段与工具执行证据为一条 Trae 式执行进度流（阶段骨架 + 工具子项）；
+// 无阶段（回放单步 tool_step）时用已持久化的步骤重建工具执行流。
+const progressEntries = computed(() => {
+  const stages = props.turn.progress_stages ?? [];
+  if (stages.length > 0) {
+    return mergeExecutionProgress(stages, toolActions.value, Boolean(props.streaming));
+  }
+  return mergeStepToolEntries(replayedSteps.value);
+});
 
 // 已执行步骤（agent 循环）：优先用实时 SSE 累积的 steps；回放时该 turn 本身是
 // 持久化的 tool_step（response_payload 含 tool/input/result/step_index/summary），

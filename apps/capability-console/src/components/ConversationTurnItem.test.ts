@@ -299,6 +299,59 @@ describe('ConversationTurnItem', () => {
     expect(wrapper.find('[data-test="assistant-step-item-1"]').text()).toContain('kafka.cluster.health.read');
   });
 
+  test('replays full progress stream (stage skeleton + tool sub-items) from persisted evidence', () => {
+    // 方案 B 回放场景：刷新后 progress_stages 从 response_payload.process 水合、
+    // steps 亦然；进度面板须据此重建"阶段骨架 + 工具子项"完整流，而非只剩骨架或
+    // 只靠 tool_calls（主路径根本不产 tool_calls）。
+    const turn: ConversationTurn = {
+      ...baseTurn,
+      id: 'turn-replay-progress',
+      role: 'assistant',
+      content: 'prod 集群健康，无异常',
+      response_type: 'answer',
+      progress_stages: [
+        { stage: 'planning', received_at: '2026-08-03T10:00:00Z' },
+        { stage: 'tool_executing', received_at: '2026-08-03T10:00:01Z' },
+        { stage: 'formatting', received_at: '2026-08-03T10:00:02Z' },
+      ],
+      steps: [
+        { tool: 'cluster.status.read', step_index: 0, status: 'done', summary: 'cluster.status.read：green' },
+        { tool: 'kafka.cluster.health.read', step_index: 1, status: 'done', summary: 'kafka.cluster.health.read：healthy' },
+      ],
+    };
+
+    const wrapper = mount(ConversationTurnItem, { props: { turn, streaming: false } });
+
+    expect(wrapper.find('[data-test="progress-timeline"]').exists()).toBe(true);
+    const labels = wrapper.findAll('.progress-item-label').map((n) => n.text());
+    // 阶段骨架仍在
+    expect(labels).toContain('识别并拆解任务');
+    expect(labels).toContain('查询平台事实');
+    expect(labels).toContain('整合输出');
+    // 工具子项由 steps 重建（此前只从 tool_calls 取，主路径会缺）；工具原文在
+    // detail 里保留（.read 后缀仅从人话化 action 文案剥除）
+    expect(labels).toContain('查询 cluster.status');
+    expect(labels).toContain('查询 kafka.cluster.health');
+    const details = wrapper.findAll('.progress-item-detail').map((n) => n.text());
+    expect(details).toContain('cluster.status.read');
+    expect(details).toContain('kafka.cluster.health.read');
+  });
+
+  test('keeps tool sub-items hidden when only a stage skeleton exists without steps', () => {
+    const turn: ConversationTurn = {
+      ...baseTurn,
+      id: 'turn-skeleton-only',
+      role: 'assistant',
+      content: '正在分析',
+      progress_stages: [{ stage: 'planning', received_at: '2026-08-03T10:00:00Z' }],
+    };
+
+    const wrapper = mount(ConversationTurnItem, { props: { turn, streaming: true } });
+
+    expect(wrapper.find('[data-test="progress-timeline"]').exists()).toBe(true);
+    expect(wrapper.find('.progress-item-label').text()).toBe('正在识别并拆解任务');
+  });
+
   test('renders a persisted tool_step turn as its own steps block, not a text bubble', () => {
     const turn: ConversationTurn = {
       ...baseTurn,

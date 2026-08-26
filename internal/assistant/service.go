@@ -329,8 +329,9 @@ type Response struct {
 // json 字段对齐前端 AssistantStep）。二者都在流式期间累积、随 turn 落库，保证回放
 // "所见即所得"，而不是拿最终答复反推过程。仅前端展示用，不回喂给 LLM。
 type ResponseProcess struct {
-	Thinking string      `json:"thinking,omitempty"`
-	Steps    []StepEvent `json:"steps,omitempty"`
+	Thinking       string                `json:"thinking,omitempty"`
+	Steps          []StepEvent           `json:"steps,omitempty"`
+	ProgressStages []ProgressStageRecord `json:"progress_stages,omitempty"`
 }
 
 // PlanSummary is the operator-facing summary of an action plan derived from a
@@ -627,6 +628,11 @@ func (s *Service) runAgentLoopInStream(ctx context.Context, events chan<- Stream
 		return
 	}
 	var resp Response = agentRunResponse(run)
+	// 把本轮执行的过程证据（全部 advisory 步骤 + 阶段骨架）聚合到终端 turn。agent-loop
+	// 同时把每条工具步存成独立 tool_step turn 做逐步审计，终端 turn 再承载聚合后的执行
+	// 进度流，刷新/回放后进度面板仍能重建完整流（阶段骨架 + 全部工具子项），二者互补。
+	aggregatedSteps := aggregateStepEvents(run)
+	resp = attachProcess(resp, "", aggregatedSteps, progressStagesForRun(aggregatedSteps, true, s.now()))
 	if hasConversation {
 		// Persist the full step-level audit trail: each tool step as a chained
 		// tool_step turn plus the terminal response, so intermediate results are
@@ -740,7 +746,7 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 	//（前端已支持该 shape：待审批卡片 + 确认 token），而不是把"计划已提交待确认"
 	// 混进普通 answer。不写 LLM 缓存（计划是一次性的）。
 	if result.Handoff != nil {
-		response := attachProcess(confirmationResponseFromOutcome(result.Handoff), processThinking.String(), processSteps)
+		response := attachProcess(confirmationResponseFromOutcome(result.Handoff), processThinking.String(), processSteps, progressStagesForRun(processSteps, false, s.now()))
 		if hasConversation {
 			assistantTurnID, perr := s.persistTurns(ctx, convID, message, response)
 			if perr != nil {
@@ -768,9 +774,6 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 		Message: result.Answer,
 		Answer:  map[string]any{"message": result.Answer},
 	}
-	// 挂上过程证据（思考文本 / 已执行步骤），随 turn 的 response_payload 落库，
-	// 刷新/回放后仍能看到生成时的思考与工具调用（与流式界面所见一致）。
-	response = attachProcess(response, processThinking.String(), processSteps)
 	// 二阶段格式化：仅当实际执行了工具时再整形。无工具调用（知识型直接回答）
 	// 的答案已是面向用户的完整文本，跳过二次整形可避免改写与泄露内部术语。
 	// 工具路径同样不再走 LLM formatter：agent 终轮已流式写出面向用户的最终答复
@@ -778,6 +781,7 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 	// tool_trace/incident_card block。省去 formatter 一次 ~17s 的 LLM 二次生成
 	//（诊断类富卡片如 evidence_timeline 是整形器的增值产物，简单的工具查询不再
 	// 为其付出重复生成成本）。result.Answer 保留作 Message。
+	formatRan := false
 	if s.formatter != nil && len(result.ToolCalls) > 0 {
 		factSet := make([]ToolFact, 0, len(result.ToolCalls))
 		for _, tc := range result.ToolCalls {
@@ -787,9 +791,13 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 		if formatted, ferr := NewCodeFallbackFormatter().Format(ctx, req); ferr == nil {
 			if len(formatted.Blocks) > 0 {
 				response.Blocks = formatted.Blocks
+				formatRan = true
 			}
 		}
 	}
+	// 挂上过程证据（思考文本 / 已执行步骤 / 阶段骨架），随 turn 的 response_payload
+	// 落库，刷新/回放后仍能看到生成时的思考、工具调用与进度阶段（与流式界面所见一致）。
+	response = attachProcess(response, processThinking.String(), processSteps, progressStagesForRun(processSteps, formatRan, s.now()))
 	// 持久化 turn（流式路径必须在发送 response 前完成）
 	if hasConversation {
 		assistantTurnID, perr := s.persistTurns(ctx, convID, message, response)
@@ -803,15 +811,50 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 	send(StreamEvent{Response: &response, Done: true})
 }
 
-// attachProcess 把流式期间累计的过程证据（思考文本 / 已执行步骤）挂到 Response 上，
-// 供 persistTurns 写进 turn 的 response_payload。两者皆空时原样返回，保持旧 turn 的
-// response_payload 结构不变（纯知识回答无过程内容，不产生多余的 process 字段）。
-func attachProcess(response Response, thinking string, steps []StepEvent) Response {
-	if thinking == "" && len(steps) == 0 {
+// attachProcess 把流式期间累计的过程证据（思考文本 / 已执行步骤 / 进度阶段骨架）挂到
+// Response 上，供 persistTurns 写进 turn 的 response_payload。全部为空时原样返回，
+// 保持旧 turn 的 response_payload 结构不变（纯知识回答无过程内容，不产生 process 字段）。
+func attachProcess(response Response, thinking string, steps []StepEvent, stages []ProgressStageRecord) Response {
+	if thinking == "" && len(steps) == 0 && len(stages) == 0 {
 		return response
 	}
-	response.Process = &ResponseProcess{Thinking: thinking, Steps: steps}
+	response.Process = &ResponseProcess{Thinking: thinking, Steps: steps, ProgressStages: stages}
 	return response
+}
+
+// progressStagesForRun builds the persisted stage skeleton from execution evidence
+// available at attach time: planning always (the plan ran), a tool_executing bucket
+// whenever steps executed, and formatting when the second-stage formatter produced
+// blocks. Order mirrors the live timeline; the frontend rehydrates it to rebuild the
+// phase skeleton after refresh (tool sub-items come from the persisted steps).
+func progressStagesForRun(steps []StepEvent, formatRan bool, now time.Time) []ProgressStageRecord {
+	stages := []ProgressStageRecord{{Stage: ProgressPlanning, ReceivedAt: now}}
+	if len(steps) > 0 {
+		stages = append(stages, ProgressStageRecord{Stage: ProgressToolExecuting, ReceivedAt: now})
+	}
+	if formatRan {
+		stages = append(stages, ProgressStageRecord{Stage: ProgressFormatting, ReceivedAt: now})
+	}
+	return stages
+}
+
+// aggregateStepEvents maps an agent-loop result to the persisted StepEvent list the
+// frontend step timeline / progress stream rehydrates from. It mirrors stepEventFromOutcome
+// (advisory steps only, denied/failed surfaced as status + error) so the aggregated terminal
+// process matches what live SSE delivered to the frontend.
+func aggregateStepEvents(run *AgentRun) []StepEvent {
+	out := make([]StepEvent, 0, len(run.Steps))
+	for _, s := range run.Steps {
+		if s.Kind != StepAdvisory {
+			continue
+		}
+		status := "done"
+		if s.Err != "" {
+			status = "error"
+		}
+		out = append(out, StepEvent{Tool: s.Tool, StepIndex: s.StepIndex, Status: status, Summary: s.Summary, Input: s.Input, Output: s.Output, Error: s.Err})
+	}
+	return out
 }
 
 // handleStateless preserves the pre-multiturn behavior: no history, no

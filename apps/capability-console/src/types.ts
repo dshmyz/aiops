@@ -449,6 +449,11 @@ export interface ConversationTurn {
 export interface TurnProcess {
   thinking?: string;
   steps?: AssistantStep[];
+  /**
+   * 阶段骨架（planning → tool_executing → formatting），由后端流式期间累积并随
+   * process 落库。刷新回放后据此重建进度面板的相位围栏；工具子项由 steps 重建。
+   */
+  progress_stages?: ProgressStage[];
 }
 
 export interface ConversationSummary {

@@ -138,6 +138,10 @@ describe('useConversations refreshTurns 保留瞬时过程内容', () => {
                 { tool: 'kafka.consumer_lag.read', step_index: 0, status: 'done', summary: 'lag 12ms' },
                 { tool: 'kafka.topic.read', step_index: 1, status: 'done', summary: 'topic ok' },
               ],
+              progress_stages: [
+                { stage: 'planning', received_at: '2026-08-03T10:00:00Z' },
+                { stage: 'tool_executing', received_at: '2026-08-03T10:00:01Z' },
+              ],
             },
           },
         }),
@@ -157,6 +161,10 @@ describe('useConversations refreshTurns 保留瞬时过程内容', () => {
       status: 'done',
     });
     expect(assistantTurn.steps?.[1].summary).toContain('topic ok');
+    // progress_stages 同样从持久化 process 水合，供回放重建进度面板相位骨架
+    expect(assistantTurn.progress_stages).toHaveLength(2);
+    expect(assistantTurn.progress_stages?.[0]).toMatchObject({ stage: 'planning' });
+    expect(assistantTurn.progress_stages?.[1]).toMatchObject({ stage: 'tool_executing' });
     // response_payload 原样保留，水合只补瞬态字段、不动持久化数据
     expect(assistantTurn.response_payload).toMatchObject({ type: 'answer' });
   });

@@ -9,7 +9,7 @@
  * 阶段）。ToolCall 没有时间戳，因此不依赖事件到达时间排序，避免错位。
  */
 
-import type { ProgressStage, ToolCall } from './types';
+import type { AssistantStep, ProgressStage, ToolCall } from './types';
 
 export type ProgressEntryKind = 'phase' | 'tool';
 
@@ -107,6 +107,29 @@ export function mergeExecutionProgress(
   }
 
   return entries;
+}
+
+/**
+ * 把回放的历史步骤转换为工具执行流条目。
+ *
+ * 用于页面刷新/回放后 `progress_stages` 已不在 turn 上、但后端已持久化
+ * `steps`（executor 的 process.steps 水合，或 agentLoop 的独立 tool_step turn）
+ * 的场景：让执行进度面板在刷新后仍能重建，展示 Agent 实际执行/查询了哪些工具。
+ *
+ * 每条 advisory 工具步生成一个"查询 xxx"工具条目；detail 优先取结果摘要
+ * （failed 时取错误），使条目信息量与步骤详情一致。历史步一律视为完成。
+ */
+export function mergeStepToolEntries(steps: AssistantStep[]): ProgressEntry[] {
+  return steps
+    .filter((s) => s.tool)
+    .map((s) => ({
+      kind: 'tool' as const,
+      stage: 'tool_executing' as const,
+      done: s.status !== 'running',
+      label: humanizeTool(s.tool),
+      detail: s.status === 'failed' && s.error ? s.error : (s.summary || s.tool),
+      time: '',
+    }));
 }
 
 /** 供折叠态使用的阶段图标名（仅取已知阶段） */

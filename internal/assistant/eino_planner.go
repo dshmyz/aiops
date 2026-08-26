@@ -165,6 +165,16 @@ type ProgressEvent struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// ProgressStageRecord is the persisted form of a pipeline stage transition. The
+// runtime ProgressEvent is one-shot over the SSE wire; this record is retained
+// in response_payload.process.progress_stages so the frontend can rehydrate the
+// stage skeleton after refresh/replay. ReceivedAt anchors the timeline.
+type ProgressStageRecord struct {
+	Stage      string    `json:"stage"`
+	Detail     string    `json:"detail,omitempty"`
+	ReceivedAt time.Time `json:"received_at,omitempty"`
+}
+
 // Pipeline stages reported via ProgressEvent. Stages are emitted in order
 // (planning → tool_executing → formatting) by executeFromIntent and
 // HandleMessageStream. The terminal Done event is the existing StreamEvent
