@@ -265,7 +265,14 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
                 aria-label="归档会话"
                 @click.stop="emit('archive', row.conversation.id)"
               >
-                归档
+                <!-- 盒子+下箭头：Gmail/macOS Mail 归档范式；纯图标语义不明，配短文字兜底 -->
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="4" rx="1"/>
+                  <path d="M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"/>
+                  <path d="M12 11v5"/>
+                  <path d="M9.75 13.75 12 16l2.25-2.25"/>
+                </svg>
+                <span>归档</span>
               </button>
               <button
                 v-if="archivedView === 'archived'"
@@ -275,7 +282,14 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
                 aria-label="恢复会话"
                 @click.stop="emit('restore', row.conversation.id)"
               >
-                恢复
+                <!-- 盒子+上箭头：与归档方向成对，表示"从盒子里取回" -->
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="4" rx="1"/>
+                  <path d="M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"/>
+                  <path d="M12 16v-5"/>
+                  <path d="M9.75 13.25 12 11l2.25 2.25"/>
+                </svg>
+                <span>恢复</span>
               </button>
               <button
                 data-test="conversation-rename"
@@ -284,8 +298,9 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
                 aria-label="重命名会话"
                 @click.stop="startRename(row.conversation)"
               >
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                  <path fill="currentColor" d="M11.5 1.6a2 2 0 012.9 2.9l-8.3 8.3-3.7.8.8-3.7 8.3-8.3z"/>
+                <!-- Feather edit-2：铅笔 -->
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
                 </svg>
               </button>
               <button
@@ -295,8 +310,12 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
                 aria-label="删除会话"
                 @click.stop="emit('delete', row.conversation.id)"
               >
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                  <path fill="currentColor" d="M6.5 1.5h3a1 1 0 011 1V3h3a.75.75 0 010 1.5h-.6l-.5 8.6A1.8 1.8 0 0110.6 15H5.4a1.8 1.8 0 01-1.8-1.9L3.1 4.5H2.5a.75.75 0 010-1.5h3v-.5a1 1 0 011-1zm.5 1.5v.5h2V3H7zm-2.4 1.5l.5 8.5c0 .2.1.3.3.3h5.2c.2 0 .3-.1.3-.3l.5-8.5H4.6zM6.5 6a.55.55 0 01.55.5l.2 4.5a.55.55 0 01-1.1.05L6 6.55A.55.55 0 016.5 6zm3 0a.55.55 0 01.55.55l-.15 4.5a.55.55 0 01-1.1-.05l.2-4.5A.55.55 0 019.5 6z"/>
+                <!-- Feather trash-2：垃圾桶 -->
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 6h18"/>
+                  <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                  <path d="M10 11v6"/>
+                  <path d="M14 11v6"/>
                 </svg>
               </button>
             </span>
@@ -545,32 +564,39 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
   outline: none;
 }
 
+/* 行内操作按钮：归档/恢复为"图标+文字"，重命名/删除为纯图标，
+   统一 24px 高度、14px Feather 线性图标，视觉规格一致 */
 .conversation-action-button {
   flex-shrink: 0;
-  padding: 3px 10px;
+  height: 24px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   background: transparent;
   border: none;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   color: var(--color-text-tertiary);
-  font-size: var(--font-xs, 12px);
-  font-weight: 500;
+  font-size: 11px;
+  line-height: 1;
   cursor: pointer;
   transition: all 0.15s var(--ease-out);
+}
+
+.conversation-action-button span {
+  /* 图标旁的短文字随按钮颜色走，默认弱于标题 */
+  font-weight: 500;
+}
+
+.conversation-action-button.icon-only {
+  width: 24px;
+  padding: 0;
+  justify-content: center;
 }
 
 .conversation-action-button:hover {
   color: var(--color-warning);
   background: var(--color-warning-soft);
-}
-
-/* 图标按钮（重命名/删除）：与文字按钮同风格，随整组显隐 */
-.conversation-action-button.icon-only {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .conversation-action-button.icon-only.danger:hover {
