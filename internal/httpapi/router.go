@@ -84,6 +84,8 @@ type ConversationService interface {
 	GetConversation(context.Context, string, string) (store.Conversation, error)
 	ListTurns(context.Context, string, int, string) (store.TurnPage, error)
 	ArchiveConversation(context.Context, string, string) error
+	DeleteConversation(context.Context, string, string) error
+	RenameConversation(context.Context, string, string, string) error
 }
 
 // FeedbackService is the persistence boundary for user feedback on assistant
@@ -1602,9 +1604,11 @@ const (
 // serveConversations dispatches /v1/assistant/conversations* routes. The path
 // hierarchy is:
 //
-//	GET    /v1/assistant/conversations            -> list conversations
-//	GET    /v1/assistant/conversations/{id}      -> get conversation + turns
-//	POST   /v1/assistant/conversations/{id}/archive -> archive conversation
+//	GET    /v1/assistant/conversations               -> list conversations
+//	GET    /v1/assistant/conversations/{id}          -> get conversation + turns
+//	POST   /v1/assistant/conversations/{id}/archive  -> archive conversation
+//	DELETE /v1/assistant/conversations/{id}          -> permanently delete conversation + turns
+//	PATCH  /v1/assistant/conversations/{id}/title    -> rename conversation
 func (r *Router) serveConversations(writer http.ResponseWriter, request *http.Request) {
 	if r.auth == nil || r.conversations == nil {
 		writeError(writer, http.StatusInternalServerError, "router is not configured")
@@ -1621,6 +1625,8 @@ func (r *Router) serveConversations(writer http.ResponseWriter, request *http.Re
 		r.serveListConversations(writer, request, user)
 	case path != "" && !strings.Contains(path, "/") && request.Method == http.MethodGet:
 		r.serveGetConversation(writer, request, user, path)
+	case path != "" && !strings.Contains(path, "/") && request.Method == http.MethodDelete:
+		r.serveDeleteConversation(writer, request, user, path)
 	case strings.HasSuffix(path, "/archive") && request.Method == http.MethodPost:
 		conversationID := strings.TrimSuffix(path, "/archive")
 		if conversationID == "" || strings.Contains(conversationID, "/") {
@@ -1628,6 +1634,13 @@ func (r *Router) serveConversations(writer http.ResponseWriter, request *http.Re
 			return
 		}
 		r.serveArchiveConversation(writer, request, user, conversationID)
+	case strings.HasSuffix(path, "/title") && request.Method == http.MethodPatch:
+		conversationID := strings.TrimSuffix(path, "/title")
+		if conversationID == "" || strings.Contains(conversationID, "/") {
+			writeError(writer, http.StatusNotFound, "conversation not found")
+			return
+		}
+		r.serveRenameConversation(writer, request, user, conversationID)
 	default:
 		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -1723,6 +1736,62 @@ func (r *Router) serveArchiveConversation(writer http.ResponseWriter, request *h
 		return
 	}
 	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (r *Router) serveDeleteConversation(writer http.ResponseWriter, request *http.Request, user identity.CurrentUser, conversationID string) {
+	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	defer cancel()
+	err := r.conversations.DeleteConversation(ctx, conversationID, user.Subject)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(writer, http.StatusNotFound, "conversation not found")
+			return
+		}
+		writeError(writer, http.StatusBadGateway, err.Error())
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
+// renameConversationRequestBody bounds the accepted PATCH body. Title length
+// is capped here as a second line of defense behind the service trim.
+type renameConversationRequestBody struct {
+	Title string `json:"title"`
+}
+
+const renameConversationTitleMaxRunes = 120
+
+func (r *Router) serveRenameConversation(writer http.ResponseWriter, request *http.Request, user identity.CurrentUser, conversationID string) {
+	var body renameConversationRequestBody
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
+	if err := decoder.Decode(&body); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	title := strings.TrimSpace(body.Title)
+	if title == "" {
+		writeError(writer, http.StatusBadRequest, "title must not be empty")
+		return
+	}
+	runes := []rune(title)
+	if len(runes) > renameConversationTitleMaxRunes {
+		writeError(writer, http.StatusBadRequest, fmt.Sprintf("title must be at most %d characters", renameConversationTitleMaxRunes))
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	defer cancel()
+	if err := r.conversations.RenameConversation(ctx, conversationID, user.Subject, title); err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(writer, http.StatusNotFound, "conversation not found")
+		case errors.Is(err, store.ErrInvalidTitle):
+			writeError(writer, http.StatusBadRequest, "title must not be empty")
+		default:
+			writeError(writer, http.StatusBadGateway, err.Error())
+		}
+		return
+	}
+	writeCappedJSON(writer, map[string]any{"status": "ok"})
 }
 
 // scheduledTaskRequestBody 是 POST/PATCH /v1/scheduled-tasks 的请求体。

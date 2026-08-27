@@ -3788,6 +3788,85 @@ nav button:focus-visible {
   font-weight: 600;
 }
 
+/* ---- 会话删除确认弹窗（App.vue 模板末尾的 alertdialog）---- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.modal-card {
+  width: min(400px, calc(100vw - 48px));
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  padding: var(--space-5);
+}
+
+.modal-card h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-lg);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.modal-message {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.ghost-button {
+  padding: 7px 16px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s var(--ease-out);
+}
+
+.ghost-button:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.danger-button {
+  padding: 7px 18px;
+  background: var(--color-danger);
+  border: none;
+  border-radius: var(--radius-pill);
+  color: #fff;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s var(--ease-out), opacity 0.15s var(--ease-out);
+}
+
+.danger-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.danger-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .assistant-detail pre {
   background: var(--color-bg);
   border: 1px solid var(--color-border);
@@ -3882,6 +3961,49 @@ nav button:focus-visible {
   border-radius: var(--radius-md);
   overflow-x: auto;
 }
+
+/* 语言角标：贴 pre 右上角（避开复制按钮，按钮在 hover 才出现所以不冲突） */
+.code-lang-badge {
+  position: absolute;
+  top: 8px;
+  right: 38px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ---- highlight.js 配色（自绘跟随主题深浅色，不引第三方 css 主题）---- */
+/* 深色：基于 One Dark 的柔和配色 */
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section { color: #c678dd; }
+.hljs-string, .hljs-attr { color: #98c379; }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: #d19a66; }
+.hljs-title, .hljs-title.function_, .hljs-name { color: #61afef; }
+.hljs-comment, .hljs-quote { color: #7f848e; font-style: italic; }
+.hljs-built_in, .hljs-type, .hljs-class .hljs-title { color: #e5c07b; }
+.hljs-variable, .hljs-template-variable, .hljs-regexp { color: #e06c75; }
+.hljs-meta, .hljs-doctag { color: #56b6c2; }
+.hljs-deletion { color: #e06c75; }
+.hljs-addition { color: #98c379; }
+
+/* 浅色：GitHub Light 风格 */
+.light-theme .hljs-keyword, .light-theme .hljs-selector-tag,
+.light-theme .hljs-literal, .light-theme .hljs-section { color: #cf222e; }
+.light-theme .hljs-string, .light-theme .hljs-attr { color: #0a3069; }
+.light-theme .hljs-number, .light-theme .hljs-symbol,
+.light-theme .hljs-bullet { color: #0550ae; }
+.light-theme .hljs-title, .light-theme .hljs-title.function_,
+.light-theme .hljs-name { color: #8250df; }
+.light-theme .hljs-comment, .light-theme .hljs-quote { color: #57606a; font-style: italic; }
+.light-theme .hljs-built_in, .light-theme .hljs-type,
+.light-theme .hljs-class .hljs-title { color: #953800; }
+.light-theme .hljs-variable, .light-theme .hljs-template-variable,
+.light-theme .hljs-regexp { color: #116329; }
+.light-theme .hljs-meta, .light-theme .hljs-doctag { color: #0969da; }
+.light-theme .code-lang-badge { color: var(--color-text-tertiary); }
 
 .markdown-copy-btn {
   position: absolute;

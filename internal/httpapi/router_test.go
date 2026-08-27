@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -1047,6 +1048,136 @@ func TestArchiveConversationReturns404ForForeignConversation(t *testing.T) {
 	}
 	if fetched.ArchivedAt != nil {
 		t.Fatalf("archived_at = %v, intruder must not be able to archive", fetched.ArchivedAt)
+	}
+}
+
+func signedDeleteRequest(t *testing.T, path, subject string, roles []string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	req.Header.Set("Authorization", "Bearer "+signedJWT(t, map[string]any{
+		"sub":         subject,
+		"roles":       roles,
+		"permissions": []string{"*"},
+	}))
+	req.Header.Set("X-Request-ID", "request-1")
+	return req
+}
+
+func signedPatchRequest(t *testing.T, path string, body any, subject string, roles []string) *http.Request {
+	t.Helper()
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal patch body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPatch, path, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+signedJWT(t, map[string]any{
+		"sub":         subject,
+		"roles":       roles,
+		"permissions": []string{"*"},
+	}))
+	req.Header.Set("X-Request-ID", "request-1")
+	return req
+}
+
+func TestDeleteConversationRemovesConversationAndTurns(t *testing.T) {
+	t.Parallel()
+	router, conversations := newConversationRouter(t, nil)
+	now := time.Date(2026, time.July, 27, 10, 0, 0, 0, time.UTC)
+	conv := seedConversation(t, conversations, "viewer-1", "to delete", "hello", now)
+	seedTurn(t, conversations, conv.ID, store.ConversationRoleUser, "hello", "", now)
+	seedTurn(t, conversations, conv.ID, store.ConversationRoleAssistant, "hi there", "answer", now.Add(time.Second))
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, signedDeleteRequest(t, "/v1/assistant/conversations/"+conv.ID, "viewer-1", []string{"viewer"}))
+
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", res.Code, res.Body.String())
+	}
+	if _, err := conversations.GetConversation(context.Background(), conv.ID, "viewer-1"); err != store.ErrNotFound {
+		t.Fatalf("get deleted conversation = %v, want ErrNotFound", err)
+	}
+	// turns 也一并删除（ListTurns 不再返回任何行）
+	turnPage, err := conversations.ListTurns(context.Background(), conv.ID, 10, "")
+	if err != nil {
+		t.Fatalf("ListTurns: %v", err)
+	}
+	if len(turnPage.Turns) != 0 {
+		t.Fatalf("turns after delete = %d, want 0", len(turnPage.Turns))
+	}
+}
+
+func TestDeleteConversationReturns404ForForeignConversation(t *testing.T) {
+	t.Parallel()
+	router, conversations := newConversationRouter(t, nil)
+	now := time.Date(2026, time.July, 27, 10, 0, 0, 0, time.UTC)
+	conv := seedConversation(t, conversations, "owner-1", "private", "secret", now)
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, signedDeleteRequest(t, "/v1/assistant/conversations/"+conv.ID, "intruder-1", []string{"viewer"}))
+
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 to avoid leaking existence", res.Code)
+	}
+	if _, err := conversations.GetConversation(context.Background(), conv.ID, "owner-1"); err != nil {
+		t.Fatalf("owner conversation must survive intruder delete: %v", err)
+	}
+}
+
+func TestRenameConversationUpdatesTitle(t *testing.T) {
+	t.Parallel()
+	router, conversations := newConversationRouter(t, nil)
+	now := time.Date(2026, time.July, 27, 10, 0, 0, 0, time.UTC)
+	conv := seedConversation(t, conversations, "viewer-1", "旧标题", "hello", now)
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, signedPatchRequest(t, "/v1/assistant/conversations/"+conv.ID+"/title",
+		map[string]string{"title": "  新标题  "}, "viewer-1", []string{"viewer"}))
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", res.Code, res.Body.String())
+	}
+	got, err := conversations.GetConversation(context.Background(), conv.ID, "viewer-1")
+	if err != nil {
+		t.Fatalf("GetConversation: %v", err)
+	}
+	if got.Title != "新标题" {
+		t.Fatalf("title = %q, want 新标题 (服务端应 trim)", got.Title)
+	}
+}
+
+func TestRenameConversationRejectsEmptyTitle(t *testing.T) {
+	t.Parallel()
+	router, _ := newConversationRouter(t, nil)
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, signedPatchRequest(t, "/v1/assistant/conversations/any-id/title",
+		map[string]string{"title": "   "}, "viewer-1", []string{"viewer"}))
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", res.Code)
+	}
+}
+
+func TestRenameConversationReturns404ForForeignConversation(t *testing.T) {
+	t.Parallel()
+	router, conversations := newConversationRouter(t, nil)
+	now := time.Date(2026, time.July, 27, 10, 0, 0, 0, time.UTC)
+	conv := seedConversation(t, conversations, "owner-1", "private", "secret", now)
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, signedPatchRequest(t, "/v1/assistant/conversations/"+conv.ID+"/title",
+		map[string]string{"title": "hijacked"}, "intruder-1", []string{"viewer"}))
+
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", res.Code)
+	}
+	fetched, err := conversations.GetConversation(context.Background(), conv.ID, "owner-1")
+	if err != nil {
+		t.Fatalf("GetConversation: %v", err)
+	}
+	if fetched.Title != "private" {
+		t.Fatalf("title = %q, intruder rename must not apply", fetched.Title)
 	}
 }
 

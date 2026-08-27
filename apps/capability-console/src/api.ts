@@ -321,6 +321,22 @@ export async function archiveConversation(conversationID: string): Promise<void>
   });
 }
 
+/** 永久删除会话及其全部消息，不可恢复。后端强制 subject 隔离。 */
+export async function deleteConversation(conversationID: string): Promise<void> {
+  await request<void>(`/v1/assistant/conversations/${encodeURIComponent(conversationID)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** 重命名会话标题（服务端会 trim 并截断到 120 字符）。 */
+export async function renameConversation(conversationID: string, title: string): Promise<void> {
+  await request<{ status: string }>(`/v1/assistant/conversations/${encodeURIComponent(conversationID)}/title`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+}
+
 export async function publishCapability(name: string): Promise<ManagedCapability> {
   try {
     const body = await request<Partial<ManagedCapability> | null>(`/v1/capabilities/${encodeURIComponent(name)}/publish`, {

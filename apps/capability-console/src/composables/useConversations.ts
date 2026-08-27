@@ -2,8 +2,10 @@ import { computed, ref } from 'vue';
 import type { ComputedRef, Ref } from 'vue';
 import {
   archiveConversation,
+  deleteConversation,
   getConversation,
   listConversations,
+  renameConversation,
 } from '../api';
 import type {
   ConversationRole,
@@ -130,6 +132,8 @@ export interface UseConversations {
   loadMore: () => Promise<void>;
   startNew: () => void;
   archive: (conversationID: string, onError?: (message: string) => void) => Promise<void>;
+  remove: (conversationID: string, onError?: (message: string) => void) => Promise<void>;
+  rename: (conversationID: string, title: string, onError?: (message: string) => void) => Promise<boolean>;
 }
 
 export function useConversations(): UseConversations {
@@ -254,6 +258,40 @@ export function useConversations(): UseConversations {
     }
   }
 
+  /** 永久删除会话（不可恢复）。已打开的会话删除后回到新建状态。 */
+  async function remove(conversationID: string, onError?: (message: string) => void) {
+    try {
+      await deleteConversation(conversationID);
+      conversations.value = conversations.value.filter((conv) => conv.id !== conversationID);
+      if (activeConversationID.value === conversationID) {
+        startNew();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '删除会话失败';
+      onError?.(message);
+    }
+  }
+
+  /** 重命名会话标题。返回 true 表示成功（本地同步更新），false 表示失败。 */
+  async function rename(conversationID: string, title: string, onError?: (message: string) => void): Promise<boolean> {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      onError?.('标题不能为空');
+      return false;
+    }
+    try {
+      await renameConversation(conversationID, trimmed);
+      conversations.value = conversations.value.map((conv) =>
+        conv.id === conversationID ? { ...conv, title: trimmed } : conv,
+      );
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '重命名失败';
+      onError?.(message);
+      return false;
+    }
+  }
+
   return {
     conversations,
     filteredConversations,
@@ -272,5 +310,7 @@ export function useConversations(): UseConversations {
     loadMore,
     startNew,
     archive,
+    remove,
+    rename,
   };
 }

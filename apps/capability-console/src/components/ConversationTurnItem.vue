@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { ConversationTurn, Block, DiagnosticPackage, AssistantStep, PlanSummary, RecommendationStatus, ToolCall } from '../types';
 import { formatRelativeTime, formatAbsoluteTime, formatResponseType } from '../conversationFormat';
 import AssistantSteps from './AssistantSteps.vue';
@@ -73,6 +73,37 @@ function toggleThinking() {
 // 工具调用折叠状态：默认展开（实时显示调用进度）
 const toolCallsExpanded = ref(true);
 const hasToolCalls = computed(() => Boolean(props.turn.tool_calls && props.turn.tool_calls.length > 0));
+
+/* ---- 长回复折叠：非流式渲染完成后，若气泡高度超过阈值则默认折叠 ---- */
+const LONG_REPLY_COLLAPSE_HEIGHT = 600; // px；约相当于 30+ 行正文
+const bodyRef = ref<HTMLElement | null>(null);
+const bodyOverflowing = ref(false);
+const longReplyExpanded = ref(false);
+
+// 只对"已完成"（非流式）的 assistant 正文测量折叠；流式期间保持完整展开，
+// 否则会出现刚生成完就被截断的体验。turn 内容变化（重试/重新生成）后重新测量。
+watch(
+  () => [props.streaming, props.turn.content] as const,
+  ([streaming]) => {
+    if (streaming) {
+      // 流式中：清掉旧测量，强制完整展示
+      bodyOverflowing.value = false;
+      return;
+    }
+    void nextTick(() => {
+      const el = bodyRef.value;
+      if (!el) {
+        bodyOverflowing.value = false;
+        return;
+      }
+      bodyOverflowing.value = el.scrollHeight > LONG_REPLY_COLLAPSE_HEIGHT;
+      if (!bodyOverflowing.value) {
+        longReplyExpanded.value = false;
+      }
+    });
+  },
+  { immediate: true },
+);
 
 // 进度阶段时间线：当有阶段（流式）或有回放步骤（刷新后持久化的执行证据）时显示
 const hasProgress = computed(() =>
@@ -246,7 +277,26 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
           </span>
         </template>
         <template v-else>
-          <MarkdownContent :content="turn.content" :raw="!isAssistant" />
+          <!-- 长回复折叠容器：仅非流式且超高时收起，流式中始终完整展示 -->
+          <div
+            ref="bodyRef"
+            class="turn-body-collapse"
+            :class="{ collapsed: isAssistant && bodyOverflowing && !longReplyExpanded && !streaming }"
+          >
+            <MarkdownContent :content="turn.content" :raw="!isAssistant" />
+          </div>
+          <button
+            v-if="isAssistant && bodyOverflowing && !streaming"
+            type="button"
+            data-test="long-reply-toggle"
+            class="long-reply-toggle"
+            @click="longReplyExpanded = !longReplyExpanded"
+          >
+            {{ longReplyExpanded ? '收起' : '展开全文' }}
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" :class="{ flip: longReplyExpanded }">
+              <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+            </svg>
+          </button>
           <span v-if="showStreamingCursor" class="streaming-cursor" aria-hidden="true">▌</span>
         </template>
       </div>
@@ -451,6 +501,54 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
     </div>
   </article>
 </template>
+
+<style scoped>
+/* ---- 长回复折叠：收起时限高 + 底部渐隐，提示还有更多内容 ---- */
+.turn-body-collapse.collapsed {
+  max-height: 600px;
+  overflow: hidden;
+  position: relative;
+}
+
+.turn-body-collapse.collapsed::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 72px;
+  background: linear-gradient(transparent, var(--turn-bubble-bg, transparent) 85%);
+  pointer-events: none;
+}
+
+.long-reply-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--space-2);
+  padding: 2px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-pill);
+  color: var(--color-accent);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s var(--ease-out);
+}
+
+.long-reply-toggle:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.long-reply-toggle svg {
+  transition: transform 0.15s var(--ease-out);
+}
+
+.long-reply-toggle svg.flip {
+  transform: rotate(180deg);
+}
+</style>
 
 <style scoped>
 .recommendation-status {

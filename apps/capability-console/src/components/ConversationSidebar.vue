@@ -15,6 +15,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'select', conversationID: string): void;
   (event: 'archive', conversationID: string): void;
+  (event: 'restore', conversationID: string): void;
+  (event: 'delete', conversationID: string): void;
+  (event: 'rename', conversationID: string, title: string): void;
   (event: 'new'): void;
   (event: 'update:searchQuery', value: string): void;
   (event: 'update:archivedView', value: ArchivedView): void;
@@ -88,6 +91,45 @@ function handleTabKeydown(event: KeyboardEvent) {
 }
 
 const archivedView = computed(() => props.archivedView);
+
+/* 行内重命名输入框自动聚焦的轻量指令 */
+const vFocus = { mounted: (el: HTMLElement) => el.focus() };
+
+/* ---- 行内重命名：点铅笔进入编辑态，Enter/失焦提交、Esc 取消 ---- */
+const renamingID = ref<string | null>(null);
+const renamingDraft = ref('');
+
+function startRename(conversation: ConversationSummary) {
+  renamingID.value = conversation.id;
+  renamingDraft.value = conversation.title;
+}
+
+function cancelRename() {
+  renamingID.value = null;
+  renamingDraft.value = '';
+}
+
+function commitRename(conversationID: string) {
+  const draft = renamingDraft.value.trim();
+  if (renamingID.value !== conversationID || !draft) {
+    cancelRename();
+    return;
+  }
+  emit('rename', conversationID, draft);
+  cancelRename();
+}
+
+function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    event.stopPropagation();
+    commitRename(conversationID);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    cancelRename();
+  }
+}
 </script>
 
 <template>
@@ -199,15 +241,65 @@ const archivedView = computed(() => props.archivedView);
           @keydown="handleItemKeydown($event, row.conversation.id, row.index)"
         >
           <div class="conversation-item-header">
-            <strong class="conversation-title">{{ row.conversation.title }}</strong>
-            <button
-              v-if="archivedView === 'active'"
-              data-test="conversation-archive"
-              class="conversation-archive-button"
-              @click.stop="emit('archive', row.conversation.id)"
-            >
-              归档
-            </button>
+            <!-- 重命名编辑态 -->
+            <input
+              v-if="renamingID === row.conversation.id"
+              data-test="conversation-rename-input"
+              v-model="renamingDraft"
+              class="conversation-rename-input"
+              type="text"
+              maxlength="120"
+              :aria-label="'重命名会话'"
+              @click.stop
+              @keydown="handleRenameKeydown($event, row.conversation.id)"
+              @blur="commitRename(row.conversation.id)"
+              v-focus
+            />
+            <strong v-else class="conversation-title">{{ row.conversation.title }}</strong>
+            <span v-if="renamingID !== row.conversation.id" class="conversation-item-actions">
+              <button
+                v-if="archivedView === 'active'"
+                data-test="conversation-archive"
+                class="conversation-action-button"
+                title="归档"
+                aria-label="归档会话"
+                @click.stop="emit('archive', row.conversation.id)"
+              >
+                归档
+              </button>
+              <button
+                v-if="archivedView === 'archived'"
+                data-test="conversation-restore"
+                class="conversation-action-button"
+                title="恢复到活跃列表"
+                aria-label="恢复会话"
+                @click.stop="emit('restore', row.conversation.id)"
+              >
+                恢复
+              </button>
+              <button
+                data-test="conversation-rename"
+                class="conversation-action-button icon-only"
+                title="重命名"
+                aria-label="重命名会话"
+                @click.stop="startRename(row.conversation)"
+              >
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                  <path fill="currentColor" d="M11.5 1.6a2 2 0 012.9 2.9l-8.3 8.3-3.7.8.8-3.7 8.3-8.3z"/>
+                </svg>
+              </button>
+              <button
+                data-test="conversation-delete"
+                class="conversation-action-button icon-only danger"
+                title="永久删除"
+                aria-label="删除会话"
+                @click.stop="emit('delete', row.conversation.id)"
+              >
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                  <path fill="currentColor" d="M6.5 1.5h3a1 1 0 011 1V3h3a.75.75 0 010 1.5h-.6l-.5 8.6A1.8 1.8 0 0110.6 15H5.4a1.8 1.8 0 01-1.8-1.9L3.1 4.5H2.5a.75.75 0 010-1.5h3v-.5a1 1 0 011-1zm.5 1.5v.5h2V3H7zm-2.4 1.5l.5 8.5c0 .2.1.3.3.3h5.2c.2 0 .3-.1.3-.3l.5-8.5H4.6zM6.5 6a.55.55 0 01.55.5l.2 4.5a.55.55 0 01-1.1.05L6 6.55A.55.55 0 016.5 6zm3 0a.55.55 0 01.55.55l-.15 4.5a.55.55 0 01-1.1-.05l.2-4.5A.55.55 0 019.5 6z"/>
+                </svg>
+              </button>
+            </span>
           </div>
           <p class="conversation-preview">{{ row.conversation.last_message_preview }}</p>
           <time class="conversation-time" :title="formatAbsoluteTime(row.conversation.last_active_at)">{{ formatRelativeTime(row.conversation.last_active_at) }}</time>
@@ -423,7 +515,28 @@ const archivedView = computed(() => props.archivedView);
 }
 
 /* 归档按钮：苹果风，无硬边框 */
-.conversation-archive-button {
+.conversation-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* 行内重命名输入框：与标题同字号，浅底融入卡片 */
+.conversation-rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 8px;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-bg-inset, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.conversation-action-button {
   flex-shrink: 0;
   padding: 3px 10px;
   background: transparent;
@@ -436,9 +549,32 @@ const archivedView = computed(() => props.archivedView);
   transition: all 0.15s var(--ease-out);
 }
 
-.conversation-archive-button:hover {
+.conversation-action-button:hover {
   color: var(--color-warning);
   background: var(--color-warning-soft);
+}
+
+/* 图标按钮（重命名/删除）：hover 才显现，避免列表视觉噪音 */
+.conversation-action-button.icon-only {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conversation-item:not(:hover) .conversation-action-button.icon-only {
+  opacity: 0;
+}
+
+.conversation-item:focus-within .conversation-action-button.icon-only {
+  opacity: 1; /* 键盘导航时保持可见 */
+}
+
+.conversation-action-button.icon-only.danger:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-soft, rgba(255, 59, 48, 0.12));
 }
 
 .conversation-preview {

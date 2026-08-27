@@ -1771,3 +1771,34 @@ func (s *Service) ArchiveConversation(ctx context.Context, id, subject string) e
 	}
 	return s.conversations.ArchiveConversation(ctx, id, subject, s.now())
 }
+
+// DeleteConversation permanently removes a conversation and all its turns
+// (including archived ones). Returns store.ErrNotFound when the conversation
+// is missing or belongs to another subject. This is destructive and cannot
+// be undone; the HTTP layer is the only sanctioned caller and must gate it
+// behind an explicit user intent (confirm dialog / method=DELETE).
+func (s *Service) DeleteConversation(ctx context.Context, id, subject string) error {
+	if s.conversations == nil {
+		return errors.New("conversation store is not configured")
+	}
+	return s.conversations.DeleteConversation(ctx, id, subject)
+}
+
+// RenameConversation updates a conversation's display title after trimming.
+// Returns store.ErrInvalidTitle for empty titles and store.ErrNotFound for
+// missing or foreign conversations.
+func (s *Service) RenameConversation(ctx context.Context, id, subject, title string) error {
+	if s.conversations == nil {
+		return errors.New("conversation store is not configured")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return store.ErrInvalidTitle
+	}
+	const maxTitleLength = 120
+	if len([]rune(title)) > maxTitleLength {
+		runes := []rune(title)
+		title = string(runes[:maxTitleLength])
+	}
+	return s.conversations.RenameConversation(ctx, id, subject, title)
+}

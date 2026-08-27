@@ -10,6 +10,7 @@ import { useMCPServers } from './composables/useMCPServers';
 import { useCapabilities } from './composables/useCapabilities';
 import { getCurrentUser } from './api';
 import type { CurrentUser } from './api';
+import type { ConversationSummary } from './types';
 import PendingPlanDetail from './components/PendingPlanDetail.vue';
 import AssistantInlineConfirm from './components/AssistantInlineConfirm.vue';
 import AssistantTranscript from './components/AssistantTranscript.vue';
@@ -153,6 +154,8 @@ const {
   refreshTurns: refreshConversationTurns,
   loadMore: loadMoreConversationTurns,
   archive: archiveConversationEntry,
+  remove: removeConversationEntry,
+  rename: renameConversationEntry,
 } = conversationsComposable;
 
 // 4. assistant composable（依赖 conversations + plans + audit）
@@ -285,6 +288,55 @@ async function handleArchiveConversation(conversationID: string) {
   await archiveConversationEntry(conversationID, (message) => {
     assistantEntryError.value = message;
   });
+}
+
+/* ---- 会话删除：确认弹窗 + 永久删除；恢复直接调用 archive 接口反转 ---- */
+const pendingDelete = ref<ConversationSummary | null>(null);
+const deleteConfirming = ref(false);
+
+function requestDeleteConversation(conversation: ConversationSummary) {
+  pendingDelete.value = conversation;
+}
+
+function cancelDeleteConversation() {
+  if (deleteConfirming.value) return;
+  pendingDelete.value = null;
+}
+
+async function confirmDeleteConversation() {
+  const target = pendingDelete.value;
+  if (!target || deleteConfirming.value) return;
+  deleteConfirming.value = true;
+  try {
+    await removeConversationEntry(target.id, (message) => {
+      assistantEntryError.value = message;
+    });
+    pendingDelete.value = null;
+  } finally {
+    deleteConfirming.value = false;
+  }
+}
+
+async function handleRestoreConversation(conversationID: string) {
+  await archiveConversationEntry(conversationID, (message) => {
+    // archive 接口对已归档会话做反转（后端 WHERE archived_at IS NOT NULL），
+    // 失败时统一走错误横幅
+    assistantEntryError.value = message;
+  });
+}
+
+async function handleRenameConversation(conversationID: string, title: string) {
+  await renameConversationEntry(conversationID, title, (message) => {
+    assistantEntryError.value = message;
+  });
+}
+
+/** sidebar 只发 ID；从列表里查出完整对象再进入确认弹窗 */
+function requestDeleteConversationFor(conversationID: string) {
+  const target = conversationsComposable.conversations.value.find((conv) => conv.id === conversationID);
+  if (target) {
+    requestDeleteConversation(target);
+  }
 }
 
 const copyNotice = ref('');
@@ -866,6 +918,9 @@ onUnmounted(() => {
             @update:archivedView="setArchivedView"
             @select="selectConversation"
             @archive="handleArchiveConversation"
+            @restore="handleRestoreConversation"
+            @delete="requestDeleteConversationFor($event)"
+            @rename="handleRenameConversation"
             @new="startNewConversation"
           />
 
@@ -1126,6 +1181,30 @@ onUnmounted(() => {
 
       <DocsView v-if="activeView === 'docs'" />
     </section>
+
+    <!-- 会话删除确认弹窗：删除不可恢复，必须显式确认 -->
+    <div
+      v-if="pendingDelete"
+      class="modal-backdrop"
+      data-test="conversation-delete-dialog"
+      @click.self="cancelDeleteConversation"
+      @keydown.escape="cancelDeleteConversation"
+    >
+      <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-conv-title">
+        <h3 id="delete-conv-title">删除会话？</h3>
+        <p class="modal-message">
+          将永久删除「<strong>{{ pendingDelete.title }}</strong>」及其全部消息记录，此操作不可恢复。
+        </p>
+        <div class="modal-actions">
+          <button data-test="conversation-delete-cancel" class="ghost-button" :disabled="deleteConfirming" @click="cancelDeleteConversation">
+            取消
+          </button>
+          <button data-test="conversation-delete-confirm" class="danger-button" :disabled="deleteConfirming" @click="confirmDeleteConversation">
+            {{ deleteConfirming ? '删除中...' : '永久删除' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
   </main>
 </template>

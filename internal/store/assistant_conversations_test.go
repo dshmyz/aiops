@@ -215,6 +215,70 @@ func TestMemoryConversationStoreArchiveRejectsForeignSubject(t *testing.T) {
 	}
 }
 
+func TestMemoryConversationStoreDeleteRemovesConversationAndTurns(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newTestAssistantStore()
+	now := time.Date(2026, time.July, 27, 10, 0, 0, 0, time.UTC)
+
+	conv, err := store.CreateConversation(ctx, "alice", "要删除的会话", "msg", now)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if _, err := store.AppendTurn(ctx, Turn{ConversationID: conv.ID, Role: ConversationRoleUser, Content: "你好"}); err != nil {
+		t.Fatalf("append turn: %v", err)
+	}
+
+	// bob 不能删 alice 的会话
+	if err := store.DeleteConversation(ctx, conv.ID, "bob"); err != ErrNotFound {
+		t.Fatalf("delete alice conversation as bob = %v, want ErrNotFound", err)
+	}
+	if err := store.DeleteConversation(ctx, conv.ID, "alice"); err != nil {
+		t.Fatalf("delete conversation: %v", err)
+	}
+
+	// 会话与 turns 都已消失
+	if _, err := store.GetConversation(ctx, conv.ID, "alice"); err != ErrNotFound {
+		t.Fatalf("get deleted conversation = %v, want ErrNotFound", err)
+	}
+	page, err := store.ListConversations(ctx, ConversationFilter{Subject: "alice"})
+	if err != nil {
+		t.Fatalf("list conversations: %v", err)
+	}
+	if len(page.Conversations) != 0 {
+		t.Fatalf("conversations after delete = %d, want 0", len(page.Conversations))
+	}
+}
+
+func TestMemoryConversationStoreRenameUpdatesTitle(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newTestAssistantStore()
+	now := time.Date(2026, time.July, 27, 10, 0, 0, 0, time.UTC)
+
+	conv, err := store.CreateConversation(ctx, "alice", "原标题", "msg", now)
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	if err := store.RenameConversation(ctx, conv.ID, "alice", ""); err != ErrInvalidTitle {
+		t.Fatalf("rename to empty = %v, want ErrInvalidTitle", err)
+	}
+	if err := store.RenameConversation(ctx, conv.ID, "bob", "劫持标题"); err != ErrNotFound {
+		t.Fatalf("rename as foreign subject = %v, want ErrNotFound", err)
+	}
+	if err := store.RenameConversation(ctx, conv.ID, "alice", "新标题"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	got, err := store.GetConversation(ctx, conv.ID, "alice")
+	if err != nil {
+		t.Fatalf("get conversation: %v", err)
+	}
+	if got.Title != "新标题" {
+		t.Fatalf("title = %q, want 新标题", got.Title)
+	}
+}
+
 func TestMemoryConversationStoreListConversationsAppliesLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -24,6 +24,10 @@ const (
 // rolling summarization compactor.
 const ResponseTypeRollingSummary = "rolling_summary"
 
+// ErrInvalidTitle is returned by RenameConversation when the requested title
+// is empty (after trimming).
+var ErrInvalidTitle = errors.New("title must not be empty")
+
 // Conversation captures a multi-turn assistant dialogue scoped to a subject.
 // Conversations are isolated by Subject and soft-deleted via ArchivedAt.
 type Conversation struct {
@@ -87,6 +91,16 @@ type AssistantConversationStore interface {
 	GetConversation(ctx context.Context, id, subject string) (Conversation, error)
 	ListTurns(ctx context.Context, conversationID string, limit int, beforeTurnID string) (TurnPage, error)
 	ArchiveConversation(ctx context.Context, id, subject string, now time.Time) error
+
+	// DeleteConversation permanently removes a conversation and all its turns.
+	// Subject isolation applies: missing or foreign conversations surface as
+	// ErrNotFound. Already-archived conversations are deletable too.
+	DeleteConversation(ctx context.Context, id, subject string) error
+
+	// RenameConversation updates a conversation's display title. Subject
+	// isolation applies as above. The title is trimmed by the caller; empty
+	// titles are rejected with ErrInvalidTitle.
+	RenameConversation(ctx context.Context, id, subject, title string) error
 
 	// GetSummary returns the current rolling summary turn for the conversation.
 	// Returns ErrNotFound when no summary exists yet. The summary turn's
@@ -244,6 +258,33 @@ func (s *MemoryAssistantConversationStore) ArchiveConversation(_ context.Context
 		return ErrNotFound
 	}
 	conv.ArchivedAt = pointerTo(now)
+	s.conversations[id] = conv
+	return nil
+}
+
+func (s *MemoryAssistantConversationStore) DeleteConversation(_ context.Context, id, subject string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conv, ok := s.conversations[id]
+	if !ok || conv.Subject != subject {
+		return ErrNotFound
+	}
+	delete(s.conversations, id)
+	delete(s.turns, id)
+	return nil
+}
+
+func (s *MemoryAssistantConversationStore) RenameConversation(_ context.Context, id, subject, title string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conv, ok := s.conversations[id]
+	if !ok || conv.Subject != subject {
+		return ErrNotFound
+	}
+	if title == "" {
+		return ErrInvalidTitle
+	}
+	conv.Title = title
 	s.conversations[id] = conv
 	return nil
 }
@@ -455,6 +496,52 @@ func (s *SQLAssistantConversationStore) ArchiveConversation(ctx context.Context,
 	}
 	if affected == 0 {
 		// Could be missing conversation or foreign subject; both surface as NotFound.
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *SQLAssistantConversationStore) DeleteConversation(ctx context.Context, id, subject string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Subject check first so a foreign id surfaces as NotFound, not as a
+	// cascade of silent zero-row deletes.
+	result, err := tx.ExecContext(ctx, `DELETE FROM copilot_assistant_conversations WHERE id = ? AND subject = ?`, id, subject)
+	if err != nil {
+		return fmt.Errorf("delete conversation: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM copilot_assistant_turns WHERE conversation_id = ?`, id); err != nil {
+		return fmt.Errorf("delete conversation turns: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *SQLAssistantConversationStore) RenameConversation(ctx context.Context, id, subject, title string) error {
+	if title == "" {
+		return ErrInvalidTitle
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE copilot_assistant_conversations SET title = ? WHERE id = ? AND subject = ?`, title, id, subject)
+	if err != nil {
+		return fmt.Errorf("rename conversation: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if affected == 0 {
 		return ErrNotFound
 	}
 	return nil
