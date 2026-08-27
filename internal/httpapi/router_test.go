@@ -1181,6 +1181,63 @@ func TestRenameConversationReturns404ForForeignConversation(t *testing.T) {
 	}
 }
 
+// TestAssistantMessagesRejectsBadAttachment 钉住附件校验在 HTTP 层的 400 契约：
+// 非法类型/超限尺寸在进入 service 前就被拒绝，错误文案中文直出。
+func TestAssistantMessagesRejectsBadAttachment(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		payload string
+		wantIn  string
+	}{
+		{
+			name:    "disallowed extension",
+			payload: `{"message":"看","attachments":[{"name":"dump.bin","content":"abc"}]}`,
+			wantIn:  ".bin",
+		},
+		{
+			name:    "empty attachment name",
+			payload: `{"message":"看","attachments":[{"name":"","content":"abc"}]}`,
+			wantIn:  "附件名",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			router, _ := testRouter(t, &readRunner{})
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, signedRequest(t, "/v1/assistant/messages", tc.payload, "viewer-1", []string{"viewer"}))
+			if res.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
+			}
+			if !strings.Contains(res.Body.String(), tc.wantIn) {
+				t.Fatalf("body = %s, want contains %q", res.Body.String(), tc.wantIn)
+			}
+		})
+	}
+}
+
+// TestAssistantMessagesAcceptsAttachment 钉住合法附件走通端到端：确定性 planner
+// 回答读路径，响应仍为 answer——校验失败不应阻塞正常带附件提问。
+func TestAssistantMessagesAcceptsAttachment(t *testing.T) {
+	t.Parallel()
+	router, _ := testRouter(t, &readRunner{result: map[string]any{"status": "green"}})
+	req := signedRequest(t, "/v1/assistant/messages",
+		`{"message":"查看 kafka 状态","attachments":[{"name":"app.log","content":"INFO ok"}]}`,
+		"viewer-1", []string{"viewer"})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"type":"answer"`) {
+		t.Fatalf("body = %s, want answer", res.Body.String())
+	}
+}
+
 func TestAssistantMessagesEndpointReturnsConversationID(t *testing.T) {
 	t.Parallel()
 	conversations := store.NewMemoryAssistantConversationStore()
@@ -3111,11 +3168,11 @@ func (writePlanner) Plan(context.Context, identity.CurrentUser, string, []assist
 	}, nil
 }
 
-func (s errorAssistant) HandleMessage(context.Context, identity.CurrentUser, string, string, assistant.PageContext) (assistant.Response, error) {
+func (s errorAssistant) HandleMessage(context.Context, identity.CurrentUser, string, string, assistant.PageContext, []assistant.Attachment) (assistant.Response, error) {
 	return assistant.Response{}, s.err
 }
 
-func (s errorAssistant) HandleMessageStream(context.Context, identity.CurrentUser, string, string, assistant.PageContext) (<-chan assistant.StreamEvent, error) {
+func (s errorAssistant) HandleMessageStream(context.Context, identity.CurrentUser, string, string, assistant.PageContext, []assistant.Attachment) (<-chan assistant.StreamEvent, error) {
 	return nil, s.err
 }
 

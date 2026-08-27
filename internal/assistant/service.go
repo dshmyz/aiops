@@ -381,22 +381,25 @@ type ToolInvocation struct {
 	RawResponse map[string]any `json:"raw_response,omitempty"`
 }
 
-func (s *Service) HandleMessage(ctx context.Context, user identity.CurrentUser, message, conversationID string, pageContext PageContext) (Response, error) {
+func (s *Service) HandleMessage(ctx context.Context, user identity.CurrentUser, message, conversationID string, pageContext PageContext, attachments []Attachment) (Response, error) {
 	ctx, span := tracer().Start(ctx, "assistant.HandleMessage")
 	defer span.End()
 	// 一次性路径不使用流式 emitter。清空 progress/toolCall 回调，避免之前
 	// 流式请求遗留的 emitter 指向已关闭 channel，导致 send on closed channel panic。
 	s.progressEmitter = nil
 	s.toolCallEmitter = nil
+	// LLM 输入与落库统一用"正文+附件块"全文；标题/列表预览仍只用正文
+	//（resolveConversation 内部取标题），附件不会刷屏会话列表。
+	fullMessage := ComposeMessageWithAttachments(message, attachments)
 	// Inject the user message into the context so the diagnostic runner (which
 	// may be an orchestrator) can detect multi-domain requests and split them
 	// into concurrent sub-diagnostics. A plain diagnostics.Service ignores it.
-	ctx = orchestrator.WithMessage(ctx, message)
+	ctx = orchestrator.WithMessage(ctx, fullMessage)
 	if s.conversations == nil {
-		return s.handleStateless(ctx, user, message, pageContext)
+		return s.handleStateless(ctx, user, fullMessage, pageContext)
 	}
 
-	conv, err := s.resolveConversation(ctx, user, message, conversationID)
+	conv, err := s.resolveConversation(ctx, user, fullMessage, conversationID)
 	if err != nil {
 		return Response{}, err
 	}
@@ -404,14 +407,14 @@ func (s *Service) HandleMessage(ctx context.Context, user identity.CurrentUser, 
 	if err != nil {
 		return Response{}, err
 	}
-	response, err := s.handleStatelessWithHistory(ctx, user, message, history, pageContext)
+	response, err := s.handleStatelessWithHistory(ctx, user, fullMessage, history, pageContext)
 	if err != nil {
 		// 把失败的工具调用落进时间线（用户消息 + 错误 turn），刷新/换会话后
 		// 仍能看到"调用了什么、为何失败"，而不是只有一条无历史的会话。
-		s.persistFailedTurn(ctx, conv.ID, message, err)
+		s.persistFailedTurn(ctx, conv.ID, fullMessage, err)
 		return Response{}, err
 	}
-	assistantTurnID, err := s.persistTurns(ctx, conv.ID, message, response)
+	assistantTurnID, err := s.persistTurns(ctx, conv.ID, fullMessage, response)
 	if err != nil {
 		return Response{}, err
 	}
@@ -431,12 +434,14 @@ func (s *Service) HandleMessage(ctx context.Context, user identity.CurrentUser, 
 // carrying the final Response. Conversation history is loaded and persisted
 // the same way as HandleMessage, but persistence happens once at the end
 // rather than per-chunk.
-func (s *Service) HandleMessageStream(ctx context.Context, user identity.CurrentUser, message, conversationID string, pageContext PageContext) (<-chan StreamEvent, error) {
+func (s *Service) HandleMessageStream(ctx context.Context, user identity.CurrentUser, message, conversationID string, pageContext PageContext, attachments []Attachment) (<-chan StreamEvent, error) {
 	ctx, span := tracer().Start(ctx, "assistant.HandleMessageStream")
 	defer span.End()
+	// 与 HandleMessage 相同：LLM 输入与落库统一用"正文+附件块"全文。
+	fullMessage := ComposeMessageWithAttachments(message, attachments)
 	// Inject the user message so the orchestrator (when wired as the diagnostic
 	// runner) can split multi-domain requests. Mirrors HandleMessage.
-	ctx = orchestrator.WithMessage(ctx, message)
+	ctx = orchestrator.WithMessage(ctx, fullMessage)
 
 	// Resolve conversation (or run stateless when no store is configured),
 	// mirroring HandleMessage. History is loaded once up front so the planner
@@ -448,7 +453,7 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 	)
 	if s.conversations != nil {
 		var err error
-		conv, err = s.resolveConversation(ctx, user, message, conversationID)
+		conv, err = s.resolveConversation(ctx, user, fullMessage, conversationID)
 		if err != nil {
 			return nil, err
 		}
@@ -488,14 +493,14 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 		}()
 		// 新路径：AgentExecutor（LLM function calling）
 		if s.agentExecutor != nil {
-			s.runAgentExecutorInStream(ctx, events, user, message, history, conv.ID, hasConversation)
+			s.runAgentExecutorInStream(ctx, events, user, fullMessage, history, conv.ID, hasConversation)
 			return
 		}
 		if s.agentEnabled() {
-			s.runAgentLoopInStream(ctx, events, user, message, history, pageContext, conv.ID, hasConversation)
+			s.runAgentLoopInStream(ctx, events, user, fullMessage, history, pageContext, conv.ID, hasConversation)
 			return
 		}
-		planEvents := s.startPlannerStream(ctx, user, message, history, pageContext)
+		planEvents := s.startPlannerStream(ctx, user, fullMessage, history, pageContext)
 		var (
 			resolvedIntent Intent
 			planErr        error
@@ -522,7 +527,7 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 		// same logic as HandleMessage via executeFromIntent.
 		// 整形器摘要叙述以 delta 流式转发（消除诊断/读路径整形期间的空窗等待），
 		// 最终 response 事件权威覆盖前端文本。
-		resp, err := s.executeFromIntent(ctx, user, message, resolvedIntent, planErr, func(delta string) {
+		resp, err := s.executeFromIntent(ctx, user, fullMessage, resolvedIntent, planErr, func(delta string) {
 			events <- StreamEvent{Delta: delta}
 		})
 		if err != nil {
@@ -532,7 +537,7 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 		// Persist turns once at the end when a conversation store is
 		// configured, matching HandleMessage's persistence semantics.
 		if hasConversation {
-			assistantTurnID, perr := s.persistTurns(ctx, conv.ID, message, resp)
+			assistantTurnID, perr := s.persistTurns(ctx, conv.ID, fullMessage, resp)
 			if perr != nil {
 				events <- StreamEvent{Err: perr, Done: true}
 				return

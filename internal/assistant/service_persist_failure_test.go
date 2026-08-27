@@ -96,7 +96,7 @@ func TestHandleMessagePersistsFailedTurn(t *testing.T) {
 	// 直接构造（不走 NewService：它会自动挂默认 diagnostics，无法触发失败路径）
 	s := &Service{planner: DeterministicPlanner{}, conversations: convs, clock: testClock()}
 
-	_, err := s.HandleMessage(context.Background(), adminUser(), "检查 demo volume 状态", "", PageContext{})
+	_, err := s.HandleMessage(context.Background(), adminUser(), "检查 demo volume 状态", "", PageContext{}, nil)
 	if err == nil {
 		t.Fatal("HandleMessage error = nil, want failure")
 	}

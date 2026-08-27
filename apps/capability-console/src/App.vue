@@ -42,6 +42,9 @@ import ScheduledTaskBadge from './components/ScheduledTaskBadge.vue';
 import NavIcon from './components/NavIcon.vue';
 import SfSymbol from './components/SfSymbol.vue';
 import SlashCommandPanel from './components/SlashCommandPanel.vue';
+import MessageAttachmentBar from './components/MessageAttachmentBar.vue';
+import { MAX_ATTACHMENT_BYTES, readAttachmentFile } from './utils/attachments';
+import type { MessageAttachment } from './utils/attachments';
 import type { SlashCommand } from './components/SlashCommandPanel.vue';
 import type {
   AssistantTrace,
@@ -186,6 +189,9 @@ const {
   assistantInlinePlanLoading,
   assistantInlineError,
   lastFailedAssistantMessage,
+  pendingAttachments: assistantPendingAttachments,
+  addPendingAttachments: addAssistantAttachments,
+  removePendingAttachment: removeAssistantAttachment,
   assistantInlineConfirmationToken,
   latestDetailText: assistantLatestDetailText,
   send: sendAssistantEntryMessage,
@@ -578,7 +584,9 @@ function handleAssistantKeydown(event: KeyboardEvent) {
 
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
-    if (!assistantEntryLoading.value && assistantInput.value.trim() !== '') {
+    // 有附件时允许"仅附件发送"（不强制输入文字），与 ChatGPT 行为对齐
+    const canSend = assistantInput.value.trim() !== '' || assistantPendingAttachments.value.length > 0;
+    if (!assistantEntryLoading.value && canSend) {
       void sendAssistantEntryMessage();
     }
   }
@@ -612,6 +620,84 @@ watch(assistantInput, () => void nextTick(autoGrowTextarea));
 async function handleAssistantSend() {
   await sendAssistantEntryMessage();
   focusTextareaEnd();
+}
+
+/* ---- 附件：拖拽/粘贴文本文件，随消息发送 ---- */
+const attachmentDragging = ref(false);
+// 拖拽进入嵌套元素时会反复触发 dragenter/dragleave，用计数器抵消
+let dragDepth = 0;
+const ATTACHMENT_ACCEPT_EXTS = /\.(log|txt|text|json|ya?ml|xml|csv|conf|ini|properties|out)$/i;
+
+async function handleAttachmentFiles(files: FileList | File[]) {
+  const errs: string[] = [];
+  const accepted: MessageAttachment[] = [];
+  for (const file of Array.from(files)) {
+    // 类型与大小先验，给出可读报错（与后端白名单一致）
+    const dot = file.name.lastIndexOf('.');
+    const ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : '';
+    const extOk = !ext || ATTACHMENT_ACCEPT_EXTS.test(`.${ext}`);
+    if (!extOk) {
+      errs.push(`暂不支持的文件类型 .${ext}（${file.name}）`);
+      continue;
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      errs.push(`「${file.name}」超过大小上限（最大 ${Math.round(MAX_ATTACHMENT_BYTES / 1024)} KB）`);
+      continue;
+    }
+    try {
+      accepted.push(await readAttachmentFile(file));
+    } catch (err) {
+      errs.push(err instanceof Error ? err.message : `无法读取「${file.name}」`);
+    }
+  }
+  if (accepted.length > 0) {
+    addAssistantAttachments(accepted);
+  }
+  if (errs.length > 0 || accepted.length === 0) {
+    assistantEntryError.value = errs.join('；') || '没有可添加的附件';
+  } else if (assistantEntryError.value.startsWith('暂不支持') || assistantEntryError.value.includes('超过大小') || assistantEntryError.value.includes('附件')) {
+    // 清掉上一轮附件相关报错
+    assistantEntryError.value = '';
+  }
+}
+
+function handleComposerDrop(event: DragEvent) {
+  event.preventDefault();
+  dragDepth = 0;
+  attachmentDragging.value = false;
+  if (event.dataTransfer?.files?.length) {
+    void handleAttachmentFiles(event.dataTransfer.files);
+  }
+}
+
+function handleComposerDragEnter(event: DragEvent) {
+  event.preventDefault();
+  dragDepth += 1;
+  attachmentDragging.value = true;
+}
+
+function handleComposerDragLeave(event: DragEvent) {
+  event.preventDefault();
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) {
+    attachmentDragging.value = false;
+  }
+}
+
+function handleComposerDragOver(event: DragEvent) {
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
+}
+
+// 粘贴文件（截图/复制出的日志文件）：剪贴板里带 File 时按附件处理
+function handleComposerPaste(event: ClipboardEvent) {
+  const files = Array.from(event.clipboardData?.files ?? []);
+  if (files.length > 0) {
+    event.preventDefault();
+    void handleAttachmentFiles(files);
+  }
 }
 
 // 编辑最后一条用户消息：回填输入框并截断该轮之后的对话
@@ -1025,7 +1111,16 @@ onUnmounted(() => {
             </div>
             <label class="assistant-input-label">
               <span>自然语言请求</span>
-              <div class="assistant-input-wrap">
+              <div
+                class="assistant-input-wrap"
+                :class="{ 'attachment-dragging': attachmentDragging }"
+                data-test="assistant-composer"
+                @dragenter="handleComposerDragEnter"
+                @dragleave="handleComposerDragLeave"
+                @dragover="handleComposerDragOver"
+                @drop="handleComposerDrop"
+                data-dropzone="true"
+              >
                 <SlashCommandPanel
                   :commands="slashCommands"
                   :visible="slashVisible"
@@ -1040,11 +1135,19 @@ onUnmounted(() => {
                   v-model="assistantInput"
                   class="assistant-input"
                   rows="1"
-                  placeholder="输入中间件问题，如「检查集群健康」。输入 / 快速选择已发布能力"
+                  placeholder="输入中间件问题，如「检查集群健康」。可拖入日志文件分析，输入 / 快速选择已发布能力"
                   @keydown="handleAssistantKeydown"
                   @blur="handleTextareaBlur"
+                  @paste="handleComposerPaste"
                 />
+                <div v-if="attachmentDragging" class="attachment-drop-hint" aria-hidden="true">
+                  松开以添加文件
+                </div>
               </div>
+              <MessageAttachmentBar
+                :attachments="assistantPendingAttachments"
+                @remove="removeAssistantAttachment"
+              />
             </label>
             <div class="assistant-input-toolbar">
               <div
@@ -1089,7 +1192,7 @@ onUnmounted(() => {
                   v-if="!assistantEntryLoading"
                   data-test="assistant-send"
                   class="primary-inline"
-                  :disabled="assistantInput.trim() === ''"
+                  :disabled="assistantInput.trim() === '' && assistantPendingAttachments.length === 0"
                   @click="handleAssistantSend"
                 >
                   发送

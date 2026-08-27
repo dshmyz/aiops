@@ -3,6 +3,7 @@ import type { Ref } from 'vue';
 import { getPendingPlan, sendAssistantMessage } from '../api';
 import { streamAssistantMessage } from './useAssistantStream';
 import type { PageContext } from './useAssistantStream';
+import type { MessageAttachment } from '../utils/attachments';
 import type {
   AssistantConsoleResponse,
   Block,
@@ -56,6 +57,10 @@ export interface UseAssistant {
   assistantInlinePlanLoading: Ref<boolean>;
   assistantInlineError: Ref<string>;
   lastFailedAssistantMessage: Ref<string>;
+  /** 待发送附件（日志/文本文件），随下一条消息一起发送 */
+  pendingAttachments: Ref<MessageAttachment[]>;
+  addPendingAttachments: (next: MessageAttachment[]) => void;
+  removePendingAttachment: (index: number) => void;
   assistantInlineConfirmationToken: Ref<string | undefined>;
   latestDetailText: Ref<string>;
   send: () => Promise<void>;
@@ -199,6 +204,17 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
   const assistantInlinePlanLoading = ref(false);
   const assistantInlineError = ref('');
   const lastFailedAssistantMessage = ref('');
+  // 待发送附件（日志/文本文件）。随下一条消息一起发送，发送后清空。
+  const pendingAttachments = ref<MessageAttachment[]>([]);
+  function addPendingAttachments(next: MessageAttachment[]) {
+    pendingAttachments.value = [...pendingAttachments.value, ...next];
+  }
+  function removePendingAttachment(index: number) {
+    pendingAttachments.value = pendingAttachments.value.filter((_, i) => i !== index);
+  }
+  function clearPendingAttachments() {
+    pendingAttachments.value = [];
+  }
 
   const assistantInlineConfirmationToken = computed(() => {
     const plan = assistantInlinePlan.value;
@@ -212,6 +228,10 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     if (assistantEntryLoading.value) {
       return;
     }
+    // 快照附件并立即清空：发送语义是"随这条消息走"。失败重试只重发文本
+    //（retry 不带附件），避免大日志重复传输或与用户预期不符。
+    const attachments = pendingAttachments.value;
+    pendingAttachments.value = [];
     // 组装 pageContext：仅当跳转设置了 assistantPageContext 时才启用 page_context。
     const pageContext: PageContext | undefined = assistantPageContext.value
       ? {
@@ -369,7 +389,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     try {
       if (streamingEnabled) {
         await streamAssistantMessage(
-          { message, conversationID, pageContext },
+          { message, conversationID, pageContext, attachments: attachments.length ? attachments : undefined },
           controller.signal,
           {
             onDelta: (chunk) => {
@@ -430,7 +450,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
           },
         );
       } else {
-        const response = await sendAssistantMessage(message, conversationID, controller.signal, pageContext);
+        const response = await sendAssistantMessage(message, conversationID, controller.signal, pageContext, attachments.length ? attachments : undefined);
         applyResponse(response);
       }
     } catch (err) {
@@ -619,6 +639,9 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     assistantInlinePlanLoading,
     assistantInlineError,
     lastFailedAssistantMessage,
+    pendingAttachments,
+    addPendingAttachments,
+    removePendingAttachment,
     assistantInlineConfirmationToken,
     latestDetailText,
     send,

@@ -45,6 +45,11 @@ const (
 	// round-trip an external reasoning model (e.g. mimo), so the one-shot
 	// assistant path gets a longer budget.
 	assistantRequestTimeout = 60 * time.Second
+	// assistantBodyLimit bounds the assistant request body: the JSON envelope
+	// plus up to maxAttachmentsPerMessage log/text attachments. 5 × 400KB
+	// raw + JSON escaping overhead ≈ 2.6MB worst case; validated precisely
+	// by assistant.ValidateAttachments, this bound is just the DoS gate.
+	assistantBodyLimit = 3 * 1024 * 1024
 )
 
 type ReadService interface {
@@ -52,8 +57,8 @@ type ReadService interface {
 }
 
 type AssistantService interface {
-	HandleMessage(context.Context, identity.CurrentUser, string, string, assistant.PageContext) (assistant.Response, error)
-	HandleMessageStream(context.Context, identity.CurrentUser, string, string, assistant.PageContext) (<-chan assistant.StreamEvent, error)
+	HandleMessage(context.Context, identity.CurrentUser, string, string, assistant.PageContext, []assistant.Attachment) (assistant.Response, error)
+	HandleMessageStream(context.Context, identity.CurrentUser, string, string, assistant.PageContext, []assistant.Attachment) (<-chan assistant.StreamEvent, error)
 }
 
 type PlanConfirmationService interface {
@@ -1408,11 +1413,12 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	var body struct {
-		Message        string                `json:"message"`
-		ConversationID string                `json:"conversation_id"`
-		PageContext    assistant.PageContext `json:"page_context,omitempty"`
+		Message        string                  `json:"message"`
+		ConversationID string                  `json:"conversation_id"`
+		PageContext    assistant.PageContext   `json:"page_context,omitempty"`
+		Attachments    []assistant.Attachment  `json:"attachments,omitempty"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, assistantBodyLimit))
 	if err := decoder.Decode(&body); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON input")
 		return
@@ -1421,10 +1427,14 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 		writeError(writer, http.StatusBadRequest, "message is required")
 		return
 	}
+	if err := assistant.ValidateAttachments(body.Attachments); err != nil {
+		writeError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
 	pc := body.PageContext
 	ctx, cancel := context.WithTimeout(request.Context(), assistantRequestTimeout)
 	defer cancel()
-	response, err := r.assistant.HandleMessage(ctx, user, body.Message, body.ConversationID, pc)
+	response, err := r.assistant.HandleMessage(ctx, user, body.Message, body.ConversationID, pc, body.Attachments)
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, assistant.ErrPolicyDenied) || errors.Is(err, assistant.ErrForeignConversation) {
@@ -1493,17 +1503,22 @@ func (r *Router) serveAssistantStream(writer http.ResponseWriter, request *http.
 		return
 	}
 	var body struct {
-		Message        string                `json:"message"`
-		ConversationID string                `json:"conversation_id"`
-		PageContext    assistant.PageContext `json:"page_context,omitempty"`
+		Message        string                 `json:"message"`
+		ConversationID string                 `json:"conversation_id"`
+		PageContext    assistant.PageContext  `json:"page_context,omitempty"`
+		Attachments    []assistant.Attachment `json:"attachments,omitempty"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, assistantBodyLimit))
 	if err := decoder.Decode(&body); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON input")
 		return
 	}
 	if strings.TrimSpace(body.Message) == "" {
 		writeError(writer, http.StatusBadRequest, "message is required")
+		return
+	}
+	if err := assistant.ValidateAttachments(body.Attachments); err != nil {
+		writeError(writer, http.StatusBadRequest, err.Error())
 		return
 	}
 	pc := body.PageContext
@@ -1527,7 +1542,7 @@ func (r *Router) serveAssistantStream(writer http.ResponseWriter, request *http.
 	ctx, cancel := context.WithTimeout(request.Context(), 60*time.Second)
 	defer cancel()
 
-	ch, err := r.assistant.HandleMessageStream(ctx, user, body.Message, body.ConversationID, pc)
+	ch, err := r.assistant.HandleMessageStream(ctx, user, body.Message, body.ConversationID, pc, body.Attachments)
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, assistant.ErrPolicyDenied) || errors.Is(err, assistant.ErrForeignConversation) {

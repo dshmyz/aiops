@@ -267,6 +267,7 @@ export async function sendAssistantMessage(
   conversationID?: string,
   signal?: AbortSignal,
   pageContext?: { domain?: string; resource_type?: string; resource_name?: string },
+  attachments?: { name: string; content: string }[],
 ): Promise<AssistantConsoleResponse> {
   const payload: Record<string, unknown> = { message };
   if (conversationID) {
@@ -274,6 +275,9 @@ export async function sendAssistantMessage(
   }
   if (pageContext && (pageContext.domain || pageContext.resource_type || pageContext.resource_name)) {
     payload.page_context = pageContext;
+  }
+  if (attachments && attachments.length > 0) {
+    payload.attachments = attachments;
   }
   return request<AssistantConsoleResponse>('/v1/assistant/messages', {
     method: 'POST',

@@ -85,6 +85,8 @@ export interface StreamParams {
   message: string;
   conversationID?: string;
   pageContext?: PageContext;
+  /** 随消息发送的文本附件（日志/配置文件全文） */
+  attachments?: { name: string; content: string }[];
 }
 
 /**
@@ -108,6 +110,10 @@ export async function streamAssistantMessage(
   // PageContext 是结构化页面上下文，非空时发送 page_context。
   if (params.pageContext && (params.pageContext.domain || params.pageContext.resource_type || params.pageContext.resource_name)) {
     payload.page_context = params.pageContext;
+  }
+  // 附件随消息整体传输（后端统一校验 + 截断注入 prompt）。
+  if (params.attachments && params.attachments.length > 0) {
+    payload.attachments = params.attachments;
   }
 
   const response = await fetch('/v1/assistant/stream', {

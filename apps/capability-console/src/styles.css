@@ -3579,6 +3579,27 @@ nav button:focus-visible {
   position: relative;
 }
 
+/* 附件拖拽态：输入区高亮提示可松手 */
+.assistant-input-wrap.attachment-dragging {
+  outline: 2px dashed var(--color-accent, #10a37f);
+  outline-offset: -2px;
+  border-radius: var(--radius-xl);
+}
+
+.attachment-drop-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-accent, #10a37f) 12%, transparent);
+  border-radius: var(--radius-xl);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-accent, #10a37f);
+  pointer-events: none;
+}
+
 /* 苹果风工具栏：毛玻璃 + 大圆角 */
 .assistant-input-toolbar {
   display: flex;

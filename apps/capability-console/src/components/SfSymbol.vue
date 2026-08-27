@@ -6,7 +6,7 @@
  */
 withDefaults(defineProps<{
   /** 图标名称，对应内置 SF Symbol 风格图形 */
-  name: 'bubble-left' | 'sparkles' | 'waveform' | 'exclamationmark-triangle' | 'checkmark-circle' | 'arrow-up-circle' | 'person' | 'sun' | 'moon' | 'play' | 'stop' | 'thumbs-up' | 'thumbs-down'
+  name: 'bubble-left' | 'sparkles' | 'waveform' | 'exclamationmark-triangle' | 'checkmark-circle' | 'arrow-up-circle' | 'person' | 'sun' | 'moon' | 'play' | 'stop' | 'thumbs-up' | 'thumbs-down' | 'doc-text'
   /** 尺寸 px */
   size?: number
 }>(), {
@@ -103,6 +103,14 @@ withDefaults(defineProps<{
     <template v-else-if="name === 'thumbs-down'">
       <path d="M17 14V2" />
       <path d="M9 18.12 10 14H4.67a2 2 0 0 1-1.92-2.5l1.5-6A2 2 0 0 1 6.2 4H17m0 10-2.9 5.9a2.1 2.1 0 0 1-2.2-1l-0.6-1.2" />
+    </template>
+
+    <!-- 文档（附件文件） -->
+    <template v-else-if="name === 'doc-text'">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+      <line x1="9" y1="13" x2="15" y2="13" />
+      <line x1="9" y1="17" x2="13" y2="17" />
     </template>
   </svg>
 </template>
