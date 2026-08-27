@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,6 +40,7 @@ type AgentExecutor struct {
 	rateLimiter   *RateLimiter                           // LLM 调用限流（可为 nil）
 	writeGate     agentWriteGate                         // 写工具门：policy/E2 准入门/pending plan 三态（可为 nil）
 	sequenceFor   func(context.Context, string) []string // 声明证据顺序解析器（可为 nil）
+	paramProducers producerIndex                          // 参数名 → 可产出该参数的工具（缺参引导，可为 nil）
 }
 
 // AgentExecutorConfig 构建 AgentExecutor 所需的依赖。
@@ -80,15 +83,16 @@ func NewAgentExecutor(cfg AgentExecutorConfig) (*AgentExecutor, error) {
 	}
 
 	return &AgentExecutor{
-		chat:          cfg.ChatModel,
-		reasoningChat: cfg.ReasoningModel,
-		tools:         einoTools,
-		toolMap:       toolMap,
-		audit:         cfg.AuditService,
-		modelName:     cfg.ModelName,
-		maxSteps:      cfg.MaxSteps,
-		knowledge:     cfg.KnowledgeStore,
-		skills:        cfg.SkillLookup,
+		chat:           cfg.ChatModel,
+		reasoningChat:  cfg.ReasoningModel,
+		tools:          einoTools,
+		toolMap:        toolMap,
+		audit:          cfg.AuditService,
+		modelName:      cfg.ModelName,
+		maxSteps:       cfg.MaxSteps,
+		knowledge:      cfg.KnowledgeStore,
+		skills:         cfg.SkillLookup,
+		paramProducers: buildProducerIndex(cfg.Capabilities),
 	}, nil
 }
 
@@ -210,6 +214,82 @@ type ToolCallLog struct {
 	Input  string         `json:"input"`
 	Output map[string]any `json:"output,omitempty"`
 	Error  string         `json:"error,omitempty"`
+}
+
+// producerIndex 记录"参数名 → 能产出该参数的工具名列表"，来自能力注册表的
+// Output.Fields 键与其它能力必填入参的同名匹配（构造期建一次，随 executor 存活）。
+// 用于缺参报错时给 LLM 指路"先调谁拿参数"，替代原来那句泛泛的"换种方式检查"。
+type producerIndex map[string][]string
+
+var missingParamRe = regexp.MustCompile(`missing required input "(\w+)"`)
+
+// buildProducerIndex 从已发布能力清单建参数生产者索引。只收录已发布的 Read 工具
+// 作为产出方（读工具是事实源；写工具产出不可靠）。匹配规则保守：字段名完全同名
+// 才算，宁可漏配不错配。
+func buildProducerIndex(caps []capabilities.Capability) producerIndex {
+	outputs := map[string][]string{} // 字段名 → 产出它的已发布读工具
+	for _, c := range caps {
+		if c.Status != capabilities.StatusPublished || c.Operation != tools.Read {
+			continue
+		}
+		for field := range c.Output.Fields {
+			outputs[field] = append(outputs[field], c.Name)
+		}
+	}
+	if len(outputs) == 0 {
+		return nil
+	}
+	index := producerIndex{}
+	for _, c := range caps {
+		for name, f := range c.InputSchema {
+			if !f.Required {
+				continue
+			}
+			if producers, ok := outputs[name]; ok {
+				sort.Strings(producers)
+				index[name] = producers
+			}
+		}
+	}
+	if len(index) == 0 {
+		return nil
+	}
+	return index
+}
+
+// missingParamHint 为缺参类错误生成补参引导：指明哪个工具能产出缺失参数、
+// 该字段的类型/说明/示例/枚举。非缺参错误返回空串。
+func (e *AgentExecutor) missingParamHint(toolName, errMsg string) string {
+	m := missingParamRe.FindStringSubmatch(errMsg)
+	if m == nil {
+		return ""
+	}
+	param := m[1]
+	var b strings.Builder
+	fmt.Fprintf(&b, "缺失必填参数「%s」", param)
+	if schema, ok := tools.DynamicInputSchema(toolName); ok {
+		if f, ok := schema[param]; ok {
+			detail := f.Type
+			if f.Description != "" {
+				detail += "，" + f.Description
+			}
+			if len(f.Examples) > 0 {
+				ex, _ := json.Marshal(f.Examples)
+				detail += fmt.Sprintf("，示例值 %s", ex)
+			}
+			if len(f.Enum) > 0 {
+				en, _ := json.Marshal(f.Enum)
+				detail += fmt.Sprintf("，可选值 %s", en)
+			}
+			fmt.Fprintf(&b, "（%s）", detail)
+		}
+	}
+	if producers := e.paramProducers[param]; len(producers) > 0 {
+		fmt.Fprintf(&b, "。可先调用 %s 获取该参数后再重试", strings.Join(producers, " 或 "))
+	} else {
+		b.WriteString("。请结合对话上下文确认准确值，不要猜测")
+	}
+	return b.String()
 }
 
 // acquireLLM 限流：获取 LLM 调用许可。
@@ -595,8 +675,12 @@ loop:
 				toolLog.Error = execErr.Error()
 				consecutiveErrors++
 				logWithCtx(ctx, "[agent] step %d: %s failed: %v (consecutive_errors=%d)", stepIdx+1, toolName, execErr, consecutiveErrors)
-				// 错误恢复：告诉 LLM 失败了，可以换工具
+				// 错误恢复：告诉 LLM 失败了，可以换工具；缺参错误追加补参引导
+				//（哪个工具能产出该参数 + 字段元数据），让模型一跳补齐而不是瞎猜。
 				errorHint := fmt.Sprintf("⚠️ 工具 %s 调用失败: %v。你可以尝试其他工具，或换一种方式检查。", toolName, execErr)
+				if hint := e.missingParamHint(toolName, execErr.Error()); hint != "" {
+					errorHint += "\n" + hint
+				}
 				errorMsg := schema.ToolMessage(errorHint, tc.ID)
 				errorMsg.ToolName = toolName
 				messages = append(messages, errorMsg)

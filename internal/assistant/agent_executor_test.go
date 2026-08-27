@@ -3,10 +3,14 @@ package assistant
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/gracegaoya/ai-operations-copilot/internal/capabilities"
+	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 func TestAgentExecutor_CompressToolOutput(t *testing.T) {
@@ -162,5 +166,71 @@ func TestRunWithCallbackStepEventCarriesError(t *testing.T) {
 	}
 	if ev.Error != "connection refused" {
 		t.Fatalf("Error = %q, want connection refused surfaced to frontend", ev.Error)
+	}
+}
+
+// TestBuildProducerIndex 钉住参数生产者索引的匹配规则：已发布读工具的
+// Output.Fields 键 ↔ 其它能力必填入参同名才算；未发布/非读/非必填一律不进。
+func TestBuildProducerIndex(t *testing.T) {
+	caps := []capabilities.Capability{
+		{
+			Name: "kafka.topic.list", Status: capabilities.StatusPublished, Operation: tools.Read,
+			Output: capabilities.OutputSpec{Fields: map[string]string{"topic": "$.data[*].name", "broker": "$.data[0].broker"}},
+		},
+		{
+			// 未发布：不作为产出方，但它自身的必填缺失提示仍可引用别的产出方（不影响）
+			Name: "kafka.topic.draft", Status: "draft", Operation: tools.Read,
+			Output: capabilities.OutputSpec{Fields: map[string]string{"topic": "$.name"}},
+		},
+		{
+			// 已发布但写操作：不作为产出方
+			Name: "kafka.topic.update", Status: capabilities.StatusPublished, Operation: tools.Write,
+			Output: capabilities.OutputSpec{Fields: map[string]string{"topic": "$.name"}},
+		},
+		{
+			Name: "kafka.topic.update", Status: capabilities.StatusPublished, Operation: tools.Write,
+			InputSchema: map[string]capabilities.InputField{
+				"topic": {Type: "string", Required: true},
+				"note":  {Type: "string"}, // 非必填不索引
+			},
+		},
+	}
+	idx := buildProducerIndex(caps)
+	if got := idx["topic"]; len(got) != 1 || got[0] != "kafka.topic.list" {
+		t.Fatalf("index[topic] = %v, want [kafka.topic.list] (draft/write producers excluded)", got)
+	}
+	if _, ok := idx["note"]; ok {
+		t.Fatal("optional field must not be indexed")
+	}
+	if len(idx) != 1 {
+		t.Fatalf("index size = %d, want 1 (only topic)", len(idx))
+	}
+	if buildProducerIndex(nil) != nil {
+		t.Fatal("nil caps must yield nil index")
+	}
+}
+
+// TestMissingParamHint 钉住缺参引导文案的三种形态：有产出方→指路工具；
+// 无产出方→要求结合上下文勿猜；非缺参错误→空串。
+func TestMissingParamHint(t *testing.T) {
+	exec := &AgentExecutor{paramProducers: producerIndex{
+		"topic": {"kafka.topic.list"},
+	}}
+	hint := exec.missingParamHint("kafka.topic.update", `execute kafka.topic.update: missing required input "topic"`)
+	if !strings.Contains(hint, "缺失必填参数「topic」") {
+		t.Fatalf("hint = %q, want missing-param framing", hint)
+	}
+	if !strings.Contains(hint, "kafka.topic.list") {
+		t.Fatalf("hint = %q, want producer tool named", hint)
+	}
+
+	noProducer := exec.missingParamHint("x.y.read", `missing required input "unknown_param"`)
+	if !strings.Contains(noProducer, "不要猜测") {
+		t.Fatalf("no-producer hint = %q, want anti-guess guidance", noProducer)
+	}
+
+	plain := exec.missingParamHint("x.y.read", "connection refused")
+	if plain != "" {
+		t.Fatalf("non-missing-param error hint = %q, want empty", plain)
 	}
 }
