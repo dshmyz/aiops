@@ -60,6 +60,13 @@ func (s *SQLSkillStore) GetSkill(ctx context.Context, slug string) (Skill, error
 	return scanSkill(row)
 }
 
+func (s *SQLSkillStore) GetSkillByID(ctx context.Context, id string) (Skill, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, slug, name, category, description, applicable_actions, tool_dependencies, content, output_contract, risk_level, is_builtin, is_enabled, created_at, updated_at
+		 FROM copilot_aiops_skills WHERE id = ?`, id)
+	return scanSkill(row)
+}
+
 func (s *SQLSkillStore) ListSkills(ctx context.Context) ([]Skill, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, slug, name, category, description, applicable_actions, tool_dependencies, content, output_contract, risk_level, is_builtin, is_enabled, created_at, updated_at
@@ -130,7 +137,7 @@ func (s *SQLSkillStore) UpdateSkill(ctx context.Context, skill Skill) (Skill, er
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return Skill{}, fmt.Errorf("skill not found: %s", skill.ID)
+		return Skill{}, ErrNotFound
 	}
 	return skill, nil
 }
@@ -154,7 +161,7 @@ func scanSkill(s scanner) (Skill, error) {
 		&skill.RiskLevel, &skill.IsBuiltin, &skill.IsEnabled, &skill.CreatedAt, &skill.UpdatedAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
-			return Skill{}, fmt.Errorf("skill not found")
+			return Skill{}, ErrNotFound
 		}
 		return Skill{}, fmt.Errorf("scan skill: %w", err)
 	}

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -36,6 +35,8 @@ type SkillStore interface {
 	CreateSkill(ctx context.Context, skill Skill) (Skill, error)
 	// GetSkill 按 slug 查询单个 Skill。
 	GetSkill(ctx context.Context, slug string) (Skill, error)
+	// GetSkillByID 按 ID 查询单个 Skill（HTTP 删除前的内置判定用）。
+	GetSkillByID(ctx context.Context, id string) (Skill, error)
 	// ListSkills 返回所有 Skill（按 slug 排序）。
 	ListSkills(ctx context.Context) ([]Skill, error)
 	// ListSkillsByAction 返回挂载到指定 Action 的已启用 Skill。
@@ -87,7 +88,18 @@ func (m *MemorySkillStore) GetSkill(_ context.Context, slug string) (Skill, erro
 			return skill, nil
 		}
 	}
-	return Skill{}, fmt.Errorf("skill not found: %s", slug)
+	return Skill{}, ErrNotFound
+}
+
+func (m *MemorySkillStore) GetSkillByID(_ context.Context, id string) (Skill, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	skill, ok := m.skills[id]
+	if !ok {
+		return Skill{}, ErrNotFound
+	}
+	return skill, nil
 }
 
 func (m *MemorySkillStore) ListSkills(_ context.Context) ([]Skill, error) {
@@ -127,7 +139,7 @@ func (m *MemorySkillStore) UpdateSkill(_ context.Context, skill Skill) (Skill, e
 	defer m.mu.Unlock()
 
 	if _, ok := m.skills[skill.ID]; !ok {
-		return Skill{}, fmt.Errorf("skill not found: %s", skill.ID)
+		return Skill{}, ErrNotFound
 	}
 	skill.UpdatedAt = time.Now().UTC()
 	m.skills[skill.ID] = skill
@@ -139,7 +151,7 @@ func (m *MemorySkillStore) DeleteSkill(_ context.Context, id string) error {
 	defer m.mu.Unlock()
 
 	if _, ok := m.skills[id]; !ok {
-		return fmt.Errorf("skill not found: %s", id)
+		return ErrNotFound
 	}
 	delete(m.skills, id)
 	return nil

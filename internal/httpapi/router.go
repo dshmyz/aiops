@@ -144,6 +144,9 @@ type Option func(*Router)
 type Router struct {
 	auth               Authenticator
 	multiAuth          *MultiAuthenticator
+	// mux 是 Go 1.22 方法+通配符模式路由（"GET /v1/skills/{id}"），新路由注册在此，
+	// 旧手写前缀分支渐进迁移中；ServeHTTP 先过 mux，未命中再走旧分支。
+	mux                *http.ServeMux
 	reads              ReadService
 	assistant          AssistantService
 	conversations      ConversationService
@@ -201,10 +204,23 @@ func NewRouter(auth Authenticator, reads ReadService, options ...Option) http.Ha
 	if ma, ok := auth.(*MultiAuthenticator); ok {
 		router.multiAuth = ma
 	}
+	router.mux = http.NewServeMux()
+	router.registerMuxRoutes()
 	for _, option := range options {
 		option(router)
 	}
 	return router
+}
+
+// registerMuxRoutes 注册 Go 1.22 ServeMux 模式路由。注意：Option 在注册之后才
+// 应用，但 mux handler 只在请求期读取 router 字段，所以 Option 装配的依赖
+// （如 skills store）仍对已注册的 handler 生效。
+func (r *Router) registerMuxRoutes() {
+	r.mux.HandleFunc("GET /v1/skills", r.serveSkillList)
+	r.mux.HandleFunc("POST /v1/skills", r.serveSkillCreate)
+	r.mux.HandleFunc("GET /v1/skills/{id}", r.serveSkillGet)
+	r.mux.HandleFunc("PUT /v1/skills/{id}", r.serveSkillUpdate)
+	r.mux.HandleFunc("DELETE /v1/skills/{id}", r.serveSkillDelete)
 }
 
 func WithAssistant(service AssistantService) Option {
@@ -480,6 +496,14 @@ func (r *Router) recordAuth(request *http.Request, action, subject string) {
 }
 
 func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	// 模式路由先行（新端点在此注册）；未命中（pattern 为空）落到下方手写前缀分支。
+	// 路径命中但方法不符时 ServeMux 返回带 Allow 头的 405，也视作命中交给它处理。
+	// 模式路由先行（新端点在此注册）；未命中（pattern 为空）落到下方手写前缀分支。
+	// 路径命中但方法不符时 ServeMux 返回带 Allow 头的 405，也视作命中交给它处理。
+	if _, pattern := r.mux.Handler(request); pattern != "" {
+		r.mux.ServeHTTP(writer, request)
+		return
+	}
 	// CAS / auth configuration endpoints (no authentication required).
 	if request.URL.Path == "/v1/auth/config" && request.Method == http.MethodGet {
 		r.serveAuthConfig(writer, request)
@@ -577,10 +601,6 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/admin/runbook-drafts") {
 		r.serveRunbookDrafts(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/skills") {
-		r.serveSkills(writer, request)
 		return
 	}
 	if request.Method == http.MethodGet && request.URL.Path == "/v1/runbooks" {
@@ -896,111 +916,138 @@ const skillWriteMaxBytes = 256 << 10
 // skillResponseBytesCap 响应上限（技能列表含全部 SOP 正文）。
 const skillResponseBytesCap = 1 << 20
 
-// serveSkills 是 /v1/skills 的管理面：List/Get 面向 viewer+，Create/Update/Delete
-// 需要 operator/admin；内置技能（IsBuiltin）不可删除。
-func (r *Router) serveSkills(writer http.ResponseWriter, request *http.Request) {
+// serveSkill 依赖未装配时的统一 503。
+func (r *Router) serveSkillUnavailable(writer http.ResponseWriter) {
+	writeError(writer, http.StatusServiceUnavailable, "skill management not configured")
+}
+
+// serveSkillList 是 GET /v1/skills：列出全部技能（含 SOP 正文）。
+func (r *Router) serveSkillList(writer http.ResponseWriter, request *http.Request) {
 	if r.skills == nil {
-		writeError(writer, http.StatusServiceUnavailable, "skill management not configured")
+		r.serveSkillUnavailable(writer)
+		return
+	}
+	_, request, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	defer cancel()
+	skills, err := r.skills.ListSkills(ctx)
+	if err != nil {
+		writeSkillError(writer, err)
+		return
+	}
+	if skills == nil {
+		skills = []store.Skill{}
+	}
+	writeJSONWithLimit(writer, map[string]any{"skills": skills}, skillResponseBytesCap)
+}
+func (r *Router) serveSkillGet(writer http.ResponseWriter, request *http.Request) {
+	if r.skills == nil {
+		r.serveSkillUnavailable(writer)
+		return
+	}
+	_, request, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	slug := request.PathValue("id")
+	skill, err := r.skills.GetSkill(request.Context(), slug)
+	if err != nil {
+		writeSkillError(writer, err)
+		return
+	}
+	writeJSONWithLimit(writer, skill, skillResponseBytesCap)
+}
+
+// serveSkillCreate 是 POST /v1/skills。
+func (r *Router) serveSkillCreate(writer http.ResponseWriter, request *http.Request) {
+	if r.skills == nil {
+		r.serveSkillUnavailable(writer)
 		return
 	}
 	user, request, ok := r.authenticate(writer, request)
 	if !ok {
 		return
 	}
-	ctx := request.Context()
-	path := request.URL.Path
-	switch {
-	case request.Method == http.MethodGet && path == "/v1/skills":
-		skills, err := r.skills.ListSkills(ctx)
-		if err != nil {
-			writeSkillError(writer, err)
-			return
-		}
-		if skills == nil {
-			skills = []store.Skill{}
-		}
-		writeJSONWithLimit(writer, map[string]any{"skills": skills}, skillResponseBytesCap)
-	case request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/skills/"):
-		skill, err := r.skills.GetSkill(ctx, strings.TrimPrefix(path, "/v1/skills/"))
-		if err != nil {
-			writeSkillError(writer, err)
-			return
-		}
-		writeJSONWithLimit(writer, skill, skillResponseBytesCap)
-	case request.Method == http.MethodPost && path == "/v1/skills":
-		if !userHasAnyRole(user, "operator", "admin") {
-			r.writeForbidden(writer, request, user, "需要 operator 或 admin 权限", path)
-			return
-		}
-		var in store.Skill
-		if !decodeSkillInput(writer, request, &in) {
-			return
-		}
-		in.IsBuiltin = false // 自建技能一律非内置；内置唯一来源是 SeedBuiltinSkills
-		if in.RiskLevel == "" {
-			in.RiskLevel = "low"
-		}
-		created, err := r.skills.CreateSkill(ctx, in)
-		if err != nil {
-			writeSkillError(writer, err)
-			return
-		}
-		writeJSONWithLimit(writer, created, skillResponseBytesCap)
-	case request.Method == http.MethodPut && strings.HasPrefix(path, "/v1/skills/"):
-		if !userHasAnyRole(user, "operator", "admin") {
-			r.writeForbidden(writer, request, user, "需要 operator 或 admin 权限", path)
-			return
-		}
-		id := strings.TrimPrefix(path, "/v1/skills/")
-		var in store.Skill
-		if !decodeSkillInput(writer, request, &in) {
-			return
-		}
-		in.ID = id
-		in.IsBuiltin = false
-		updated, err := r.skills.UpdateSkill(ctx, in)
-		if err != nil {
-			writeSkillError(writer, err)
-			return
-		}
-		writeJSONWithLimit(writer, updated, skillResponseBytesCap)
-	case request.Method == http.MethodDelete && strings.HasPrefix(path, "/v1/skills/"):
-		if !userHasAnyRole(user, "operator", "admin") {
-			r.writeForbidden(writer, request, user, "需要 operator 或 admin 权限", path)
-			return
-		}
-		id := strings.TrimPrefix(path, "/v1/skills/")
-		existing, err := r.skillByID(ctx, id)
-		if err != nil {
-			writeSkillError(writer, err)
-			return
-		}
-		if existing.IsBuiltin {
-			writeError(writer, http.StatusBadRequest, "内置技能不可删除，可改为停用")
-			return
-		}
-		if err := r.skills.DeleteSkill(ctx, id); err != nil {
-			writeSkillError(writer, err)
-			return
-		}
-		writeJSONWithLimit(writer, map[string]any{"deleted": id}, skillResponseBytesCap)
-	default:
-		writeError(writer, http.StatusNotFound, "not found")
+	if !userHasAnyRole(user, "operator", "admin") {
+		r.writeForbidden(writer, request, user, "需要 operator 或 admin 权限", request.URL.Path)
+		return
 	}
+	var in store.Skill
+	if !decodeSkillInput(writer, request, &in) {
+		return
+	}
+	in.IsBuiltin = false // 自建技能一律非内置；内置唯一来源是 SeedBuiltinSkills
+	if in.RiskLevel == "" {
+		in.RiskLevel = "low"
+	}
+	created, err := r.skills.CreateSkill(request.Context(), in)
+	if err != nil {
+		writeSkillError(writer, err)
+		return
+	}
+	writeJSONWithLimit(writer, created, skillResponseBytesCap)
 }
 
-// skillByID 按 ID 定位技能：SkillStore 只提供按 slug 的 GetSkill，这里用 List 兜底。
-func (r *Router) skillByID(ctx context.Context, id string) (store.Skill, error) {
-	skills, err := r.skills.ListSkills(ctx)
+// serveSkillUpdate 是 PUT /v1/skills/{id}（按 store 层 ID 匹配）。
+func (r *Router) serveSkillUpdate(writer http.ResponseWriter, request *http.Request) {
+	if r.skills == nil {
+		r.serveSkillUnavailable(writer)
+		return
+	}
+	user, request, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	if !userHasAnyRole(user, "operator", "admin") {
+		r.writeForbidden(writer, request, user, "需要 operator 或 admin 权限", request.URL.Path)
+		return
+	}
+	var in store.Skill
+	if !decodeSkillInput(writer, request, &in) {
+		return
+	}
+	in.ID = request.PathValue("id")
+	in.IsBuiltin = false
+	updated, err := r.skills.UpdateSkill(request.Context(), in)
 	if err != nil {
-		return store.Skill{}, err
+		writeSkillError(writer, err)
+		return
 	}
-	for _, s := range skills {
-		if s.ID == id {
-			return s, nil
-		}
+	writeJSONWithLimit(writer, updated, skillResponseBytesCap)
+}
+
+// serveSkillDelete 是 DELETE /v1/skills/{id}；内置技能不可删除（改停用）。
+func (r *Router) serveSkillDelete(writer http.ResponseWriter, request *http.Request) {
+	if r.skills == nil {
+		r.serveSkillUnavailable(writer)
+		return
 	}
-	return store.Skill{}, fmt.Errorf("skill not found: %s", id)
+	user, request, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	if !userHasAnyRole(user, "operator", "admin") {
+		r.writeForbidden(writer, request, user, "需要 operator 或 admin 权限", request.URL.Path)
+		return
+	}
+	id := request.PathValue("id")
+	existing, err := r.skills.GetSkillByID(request.Context(), id)
+	if err != nil {
+		writeSkillError(writer, err)
+		return
+	}
+	if existing.IsBuiltin {
+		writeError(writer, http.StatusBadRequest, "内置技能不可删除，可改为停用")
+		return
+	}
+	if err := r.skills.DeleteSkill(request.Context(), id); err != nil {
+		writeSkillError(writer, err)
+		return
+	}
+	writeJSONWithLimit(writer, map[string]any{"deleted": id}, skillResponseBytesCap)
 }
 
 // decodeSkillInput 解析技能写入请求体。
@@ -1013,11 +1060,11 @@ func decodeSkillInput(writer http.ResponseWriter, request *http.Request, dst *st
 	return true
 }
 
-// writeSkillError 把 SkillStore 错误映射到状态码。store 层未定义哨兵错误，
-// 以 "not found" 文本判定 404（Memory/SQL 两实现共用该文案）。
+// writeSkillError 把 SkillStore 错误映射到状态码：哨兵 ErrNotFound → 404，
+// 其余 → 400。
 func writeSkillError(writer http.ResponseWriter, err error) {
-	if strings.Contains(err.Error(), "not found") {
-		writeError(writer, http.StatusNotFound, err.Error())
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(writer, http.StatusNotFound, "skill not found")
 		return
 	}
 	writeError(writer, http.StatusBadRequest, err.Error())

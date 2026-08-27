@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -119,8 +120,30 @@ func TestMemorySkillStoreGetMissingReturnsError(t *testing.T) {
 
 	s := store.NewMemorySkillStore()
 	_, err := s.GetSkill(context.Background(), "nope")
-	if err == nil {
-		t.Fatal("GetSkill missing: expected error, got nil")
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetSkill missing: err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestMemorySkillStoreGetByID 钉住按 ID 查询：命中返回原记录，未命中返回
+// 哨兵 ErrNotFound（HTTP 删除前的内置判定依赖该语义）。
+func TestMemorySkillStoreGetByID(t *testing.T) {
+	t.Parallel()
+
+	s := store.NewMemorySkillStore()
+	created, err := s.CreateSkill(context.Background(), store.Skill{Slug: "by-id", Name: "By ID"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := s.GetSkillByID(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetSkillByID: %v", err)
+	}
+	if got.Slug != "by-id" {
+		t.Fatalf("GetSkillByID = %q, want by-id", got.Slug)
+	}
+	if _, err := s.GetSkillByID(context.Background(), "nope"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetSkillByID missing: err = %v, want ErrNotFound", err)
 	}
 }
 
