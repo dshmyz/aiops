@@ -469,6 +469,7 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
 
 /* 会话项：苹果风圆角卡片，无 border-bottom，用 margin 分隔 */
 .conversation-item {
+  position: relative; /* 操作区绝对定位于行尾，需要它做包含块 */
   padding: var(--space-3);
   border-radius: var(--radius-lg);
   cursor: pointer;
@@ -514,12 +515,20 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
   flex: 1;
 }
 
-/* 归档按钮：苹果风，无硬边框 */
+/* 归档按钮：苹果风，无硬边框。
+   操作区整组悬浮于行尾（absolute），不占标题行布局空间——
+   之前 opacity:0 隐藏会留下隐形占位，把"归档"顶离右边缘、
+   行尾出现一截空白；改为悬浮后空白消失，hover 时浮现。 */
 .conversation-item-actions {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  flex-shrink: 0;
+  background: inherit; /* 覆盖行尾内容，避免与长标题文字重叠时透字 */
+  border-radius: var(--radius-pill);
+  padding: 0 2px;
 }
 
 /* 行内重命名输入框：与标题同字号，浅底融入卡片 */
@@ -554,7 +563,9 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
   background: var(--color-warning-soft);
 }
 
-/* 图标按钮（重命名/删除）：hover 才显现，避免列表视觉噪音 */
+/* 图标按钮（重命名/删除）：hover 才显现，避免列表视觉噪音。
+   注意：整组操作按钮 hover 前若用 display:none 会导致归档按钮位置
+   跳动；opacity 悬浮方案下它们不占布局，所以只影响自身可见性。 */
 .conversation-action-button.icon-only {
   width: 22px;
   height: 22px;
@@ -564,12 +575,17 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
   justify-content: center;
 }
 
-.conversation-item:not(:hover) .conversation-action-button.icon-only {
+.conversation-item:not(:hover) .conversation-item-actions {
+  /* 非悬浮态：文字/图标按钮整体淡出但不释放空间（absolute 下无占位成本），
+     保持"归档"贴右；行内重命名输入框不受此规则影响 */
   opacity: 0;
+  pointer-events: none;
 }
 
-.conversation-item:focus-within .conversation-action-button.icon-only {
-  opacity: 1; /* 键盘导航时保持可见 */
+.conversation-item:focus-within .conversation-item-actions {
+  /* 键盘导航时保持整组可见（置于上条规则之后，同优先级靠后覆盖） */
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .conversation-action-button.icon-only.danger:hover {
