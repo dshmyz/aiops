@@ -212,15 +212,95 @@ func NewRouter(auth Authenticator, reads ReadService, options ...Option) http.Ha
 	return router
 }
 
-// registerMuxRoutes 注册 Go 1.22 ServeMux 模式路由。注意：Option 在注册之后才
-// 应用，但 mux handler 只在请求期读取 router 字段，所以 Option 装配的依赖
-// （如 skills store）仍对已注册的 handler 生效。
+// registerMuxRoutes 注册 Go 1.22 ServeMux 模式路由（现已承载全部端点，
+// ServeHTTP 只剩未命中时的 JSON 404 兜底）。
+//
+// 模式分两类：
+//   - 方法前缀型："GET /x" 精确匹配且限定方法；同一路径多方法分别注册或并列。
+//     method 不符时 ServeMux 回 405（带 Allow 头）。
+//   - 子树型（"/x/" 结尾）：把 method/path 分发交给 handler 内部既有逻辑处理，
+//     handler 均自行解析 request.URL.Path，故无需改动。
+//
+// 最具体模式优先规则天然解决嵌套关系（admin/knowledge/status vs 其父级）。
 func (r *Router) registerMuxRoutes() {
+	// --- skills ---
 	r.mux.HandleFunc("GET /v1/skills", r.serveSkillList)
 	r.mux.HandleFunc("POST /v1/skills", r.serveSkillCreate)
 	r.mux.HandleFunc("GET /v1/skills/{id}", r.serveSkillGet)
 	r.mux.HandleFunc("PUT /v1/skills/{id}", r.serveSkillUpdate)
 	r.mux.HandleFunc("DELETE /v1/skills/{id}", r.serveSkillDelete)
+
+	// --- no-auth 区（CAS/auth/webhook 不经 authenticate，语义不变）---
+	r.mux.HandleFunc("GET /v1/auth/config", r.serveAuthConfig)
+	r.mux.HandleFunc("/v1/auth/cas/", r.serveCASAuth)
+	r.mux.HandleFunc("POST /v1/alerts/webhook", r.serveAlertWebhook)
+	r.mux.HandleFunc("POST /v1/alerts/alertmanager", r.serveAlertmanagerWebhook)
+
+	// --- assistant ---
+	r.mux.HandleFunc("POST /v1/assistant/messages", r.serveAssistant)
+	r.mux.HandleFunc("POST /v1/assistant/stream", r.serveAssistantStream)
+	r.mux.HandleFunc("/v1/assistant/conversations", r.serveConversations)
+	r.mux.HandleFunc("/v1/assistant/conversations/", r.serveConversations)
+	r.mux.HandleFunc("POST /v1/assistant/feedback", r.serveFeedback)
+	r.mux.HandleFunc("GET /v1/assistant/feedback", r.serveFeedback)
+
+	// --- system ---
+	r.mux.HandleFunc("GET /v1/system/health-checks", r.serveHealthChecks)
+	r.mux.HandleFunc("GET /v1/system/agent/metrics", r.serveAgentMetrics)
+	r.mux.HandleFunc("POST /v1/system/agent/trust-level", r.serveAgentTrustLevel)
+	r.mux.HandleFunc("POST /v1/system/agent/disable", func(w http.ResponseWriter, req *http.Request) {
+		r.serveAgentKillSwitch(w, req, true)
+	})
+	r.mux.HandleFunc("POST /v1/system/agent/enable", func(w http.ResponseWriter, req *http.Request) {
+		r.serveAgentKillSwitch(w, req, false)
+	})
+
+	// --- 能力市场与管理（marketplace 前缀更具体，天然不被 capabilities 吞掉）---
+	r.mux.HandleFunc("/v1/marketplace/capabilities", r.serveMarketplace)
+	r.mux.HandleFunc("/v1/marketplace/capabilities/", r.serveMarketplace)
+	r.mux.HandleFunc("/v1/capabilities", r.serveCapabilities)
+	r.mux.HandleFunc("/v1/capabilities/", r.serveCapabilities)
+
+	// --- 运维域 ---
+	r.mux.HandleFunc("/v1/scheduled-tasks", r.serveScheduledTasks)
+	r.mux.HandleFunc("/v1/scheduled-tasks/", r.serveScheduledTasks)
+	r.mux.HandleFunc("/v1/inspection-reports", r.serveInspectionReports)
+	r.mux.HandleFunc("/v1/inspection-reports/", r.serveInspectionReports)
+	r.mux.HandleFunc("GET /v1/runbooks", r.serveRunbooks)
+
+	// --- admin 区 ---
+	r.mux.HandleFunc("/v1/admin/prompts", r.serveAdminPrompts)
+	r.mux.HandleFunc("/v1/admin/prompts/", r.serveAdminPrompts)
+	r.mux.HandleFunc("GET /v1/admin/tools", r.serveAdminTools)
+	r.mux.HandleFunc("/v1/admin/alert-actions", r.serveAdminAlertActions)
+	r.mux.HandleFunc("/v1/admin/alert-actions/", r.serveAdminAlertActions)
+	r.mux.HandleFunc("/v1/admin/runbook-drafts", r.serveRunbookDrafts)
+	r.mux.HandleFunc("/v1/admin/runbook-drafts/", r.serveRunbookDrafts)
+	r.mux.HandleFunc("/v1/admin/knowledge/status", r.serveKnowledgeStatus)
+	r.mux.HandleFunc("/v1/admin/knowledge", r.serveAdminKnowledge)
+	r.mux.HandleFunc("/v1/admin/knowledge/", r.serveAdminKnowledge)
+
+	// --- 文档 / MCP ---
+	r.mux.HandleFunc("/v1/docs/", r.serveDocs)
+	r.mux.HandleFunc("/v1/mcp/", r.serveMCP)
+
+	// --- action-plans（ID 为 UUID hex 且旧逻辑本就拒绝含 / 的 ID，{id} 通配安全）---
+	r.mux.HandleFunc("GET /v1/action-plans", r.serveListActionPlans)
+	r.mux.HandleFunc("GET /v1/action-plans/{id}", r.serveGetActionPlan)
+	r.mux.HandleFunc("POST /v1/action-plans/{id}/confirm", r.serveConfirmActionPlan)
+	r.mux.HandleFunc("POST /v1/action-plans/{id}/reject", r.serveRejectActionPlan)
+
+	// --- 只读查询面 ---
+	r.mux.HandleFunc("GET /v1/executions", r.serveListExecutions)
+	r.mux.HandleFunc("GET /v1/audit-events", r.serveListAuditEvents)
+	r.mux.HandleFunc("GET /v1/audit-events/search", r.serveSearchAuditEvents)
+	r.mux.HandleFunc("GET /v1/identity/me", r.serveIdentityMe)
+	r.mux.HandleFunc("GET /v1/overview", r.serveOverview)
+	r.mux.HandleFunc("POST /v1/tools/{name}/read", r.serveReadTool)
+
+	// 不注册 "/" 兜底：ServeMux 只要有全捕获模式就会把"路径命中但方法不符"
+	// 的 405（带 Allow 头）退化成兜底命中。放弃 JSON 形状的未知路径 404
+	//（无调用方依赖），换取方法级 405 这一更准确的语义。
 }
 
 func WithAssistant(service AssistantService) Option {
@@ -496,166 +576,9 @@ func (r *Router) recordAuth(request *http.Request, action, subject string) {
 }
 
 func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	// 模式路由先行（新端点在此注册）；未命中（pattern 为空）落到下方手写前缀分支。
-	// 路径命中但方法不符时 ServeMux 返回带 Allow 头的 405，也视作命中交给它处理。
-	// 模式路由先行（新端点在此注册）；未命中（pattern 为空）落到下方手写前缀分支。
-	// 路径命中但方法不符时 ServeMux 返回带 Allow 头的 405，也视作命中交给它处理。
-	if _, pattern := r.mux.Handler(request); pattern != "" {
-		r.mux.ServeHTTP(writer, request)
-		return
-	}
-	// CAS / auth configuration endpoints (no authentication required).
-	if request.URL.Path == "/v1/auth/config" && request.Method == http.MethodGet {
-		r.serveAuthConfig(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/auth/cas/") {
-		r.serveCASAuth(writer, request)
-		return
-	}
-	// 告警 webhook：外部系统推送，不走用户 JWT，由 HMAC 签名门控。
-	// 必须在鉴权分支之前分发（参照 /v1/auth/config 的 no-auth 区）。
-	if request.Method == http.MethodPost && request.URL.Path == "/v1/alerts/webhook" {
-		r.serveAlertWebhook(writer, request)
-		return
-	}
-	if request.Method == http.MethodPost && request.URL.Path == "/v1/alerts/alertmanager" {
-		r.serveAlertmanagerWebhook(writer, request)
-		return
-	}
-	if request.Method == http.MethodPost && request.URL.Path == "/v1/assistant/messages" {
-		r.serveAssistant(writer, request)
-		return
-	}
-	if request.Method == http.MethodPost && request.URL.Path == "/v1/assistant/stream" {
-		r.serveAssistantStream(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/assistant/conversations") {
-		r.serveConversations(writer, request)
-		return
-	}
-	if request.Method == http.MethodPost && request.URL.Path == "/v1/assistant/feedback" {
-		r.serveFeedback(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/assistant/feedback" {
-		r.serveFeedback(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/system/health-checks" {
-		r.serveHealthChecks(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/system/agent/metrics" {
-		r.serveAgentMetrics(writer, request)
-		return
-	}
-	if request.Method == http.MethodPost && request.URL.Path == "/v1/system/agent/trust-level" {
-		r.serveAgentTrustLevel(writer, request)
-		return
-	}
-	if request.Method == http.MethodPost && request.URL.Path == "/v1/system/agent/disable" {
-		r.serveAgentKillSwitch(writer, request, true)
-		return
-	}
-	if request.Method == http.MethodPost && request.URL.Path == "/v1/system/agent/enable" {
-		r.serveAgentKillSwitch(writer, request, false)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/marketplace/capabilities") {
-		r.serveMarketplace(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/capabilities") {
-		r.serveCapabilities(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/scheduled-tasks") {
-		r.serveScheduledTasks(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/inspection-reports") {
-		r.serveInspectionReports(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/admin/prompts") {
-		r.serveAdminPrompts(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/admin/tools" {
-		r.serveAdminTools(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/admin/alert-actions") {
-		r.serveAdminAlertActions(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/admin/knowledge") {
-		if request.URL.Path == "/v1/admin/knowledge/status" {
-			r.serveKnowledgeStatus(writer, request)
-			return
-		}
-		r.serveAdminKnowledge(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/admin/runbook-drafts") {
-		r.serveRunbookDrafts(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/runbooks" {
-		r.serveRunbooks(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/docs/") {
-		r.serveDocs(writer, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/v1/mcp/") {
-		r.serveMCP(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/action-plans" {
-		r.serveListActionPlans(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/executions" {
-		r.serveListExecutions(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/audit-events" {
-		r.serveListAuditEvents(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/audit-events/search" {
-		r.serveSearchAuditEvents(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/identity/me" {
-		r.serveIdentityMe(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/v1/action-plans/") {
-		r.serveGetActionPlan(writer, request)
-		return
-	}
-	if request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/action-plans/") && strings.HasSuffix(request.URL.Path, "/confirm") {
-		r.serveConfirmActionPlan(writer, request)
-		return
-	}
-	if request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/action-plans/") && strings.HasSuffix(request.URL.Path, "/reject") {
-		r.serveRejectActionPlan(writer, request)
-		return
-	}
-	if request.Method == http.MethodGet && request.URL.Path == "/v1/overview" {
-		r.serveOverview(writer, request)
-		return
-	}
-	if request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/tools/") && strings.HasSuffix(request.URL.Path, "/read") {
-		r.serveReadTool(writer, request)
-		return
-	}
-	writeError(writer, http.StatusNotFound, "not found")
+	// 全部端点已注册进 mux（见 registerMuxRoutes）：认证等横切逻辑在各
+	// handler 内部完成，分发顺序不再耦合安全语义。
+	r.mux.ServeHTTP(writer, request)
 }
 
 func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Request) {

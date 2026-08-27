@@ -138,8 +138,13 @@ func TestAlertWebhookGetMethodNotAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/alerts/webhook", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (route only matches POST)", rec.Code)
+	// ServeMux 方法前缀模式下，路径命中但方法不符返回带 Allow 头的 405
+	//（语义比旧的统一 404 更准确）。
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405 (route only matches POST)", rec.Code)
+	}
+	if allow := rec.Header().Get("Allow"); allow != http.MethodPost {
+		t.Fatalf("Allow = %q, want POST", allow)
 	}
 }
 
