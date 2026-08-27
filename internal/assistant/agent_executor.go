@@ -261,10 +261,13 @@ func (e *AgentExecutor) RunWithRoleCallbackStream(ctx context.Context, role Agen
 
 // AgentStepEvent 是 agent 执行过程中的一个步骤事件（工具调用完成）。
 type AgentStepEvent struct {
-	Step    int    `json:"step"`
-	Tool    string `json:"tool"`
-	Status  string `json:"status"` // "done" | "error"
-	Summary string `json:"summary"`
+	Step    int            `json:"step"`
+	Tool    string         `json:"tool"`
+	Status  string         `json:"status"` // "done" | "error"
+	Summary string         `json:"summary"`
+	Input   map[string]any `json:"input,omitempty"`  // 工具入参（LLM 传来的 JSON 已解析）
+	Output  map[string]any `json:"output,omitempty"` // 工具原始返回（能力调用含 data/summary/severity）
+	Error   string         `json:"error,omitempty"`  // 失败原因；summary 空时前端兜底展示
 }
 
 // RunWithCallback 执行 agent loop，每完成一个工具调用就回调 onStep。
@@ -620,26 +623,31 @@ loop:
 			}
 			allToolCalls = append(allToolCalls, toolLog)
 
-			// 流式回调：通知前端工具调用完成
+			// 流式回调：通知前端工具调用完成。带上 input/output/error：前端
+			// AssistantSteps 有输入/输出展开面板，缺了这三个字段面板永远空白，
+			// 用户只能看到一行工具名，无法判断"到底干没干、干了什么"。
 			if onStep != nil {
-				status := "done"
-				summary := ""
+				var inputMap map[string]any
+				_ = json.Unmarshal([]byte(toolLog.Input), &inputMap) // 解析失败保持 nil
+				event := AgentStepEvent{
+					Step:   stepIdx,
+					Tool:   toolName,
+					Status: "done",
+					Input:  inputMap,
+					Output: toolLog.Output,
+				}
 				if execErr != nil {
-					status = "error"
-					summary = execErr.Error()
+					event.Status = "error"
+					event.Error = execErr.Error()
+					event.Output = nil
 				} else if toolLog.Output != nil {
 					if s, ok := toolLog.Output["summary"].(string); ok {
-						summary = s
+						event.Summary = s
 					} else if s, ok := toolLog.Output["status"].(string); ok {
-						summary = s
+						event.Summary = s
 					}
 				}
-				onStep(AgentStepEvent{
-					Step:    stepIdx,
-					Tool:    toolName,
-					Status:  status,
-					Summary: summary,
-				})
+				onStep(event)
 			}
 
 			// 把工具结果追加到消息历史

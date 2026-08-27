@@ -742,7 +742,7 @@ func (s *Service) runAgentExecutorInStream(ctx context.Context, events chan<- St
 		send(StreamEvent{Thinking: t})
 	}
 	onStep := func(step AgentStepEvent) {
-		se := StepEvent{Tool: step.Tool, StepIndex: step.Step, Status: step.Status, Summary: step.Summary}
+		se := StepEvent{Tool: step.Tool, StepIndex: step.Step, Status: step.Status, Summary: step.Summary, Input: step.Input, Output: step.Output, Error: step.Error}
 		processSteps = append(processSteps, se)
 		send(StreamEvent{Step: &se})
 	}
