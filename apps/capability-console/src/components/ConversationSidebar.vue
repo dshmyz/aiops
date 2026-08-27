@@ -469,7 +469,6 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
 
 /* 会话项：苹果风圆角卡片，无 border-bottom，用 margin 分隔 */
 .conversation-item {
-  position: relative; /* 操作区绝对定位于行尾，需要它做包含块 */
   padding: var(--space-3);
   border-radius: var(--radius-lg);
   cursor: pointer;
@@ -515,20 +514,21 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
   flex: 1;
 }
 
-/* 归档按钮：苹果风，无硬边框。
-   操作区整组悬浮于行尾（absolute），不占标题行布局空间——
-   之前 opacity:0 隐藏会留下隐形占位，把"归档"顶离右边缘、
-   行尾出现一截空白；改为悬浮后空白消失，hover 时浮现。 */
+/* 行尾操作组（归档/恢复 + 重命名 + 删除）：
+   非悬浮态 display:none —— 完全退出布局，标题独占整行；
+   悬浮/键盘聚焦时进入文档流显示在标题右侧。
+   不用 absolute 浮层：active 卡片底色是半透明蓝，
+   浮层遮不住长标题文字，会出现"按钮压在字上"的重叠。 */
 .conversation-item-actions {
-  position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
-  display: inline-flex;
+  display: none;
   align-items: center;
   gap: 2px;
-  background: inherit; /* 覆盖行尾内容，避免与长标题文字重叠时透字 */
-  border-radius: var(--radius-pill);
-  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.conversation-item:hover .conversation-item-actions,
+.conversation-item:focus-within .conversation-item-actions {
+  display: inline-flex; /* 进入文档流，把标题行右侧顶出空间 */
 }
 
 /* 行内重命名输入框：与标题同字号，浅底融入卡片 */
@@ -563,9 +563,7 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
   background: var(--color-warning-soft);
 }
 
-/* 图标按钮（重命名/删除）：hover 才显现，避免列表视觉噪音。
-   注意：整组操作按钮 hover 前若用 display:none 会导致归档按钮位置
-   跳动；opacity 悬浮方案下它们不占布局，所以只影响自身可见性。 */
+/* 图标按钮（重命名/删除）：与文字按钮同风格，随整组显隐 */
 .conversation-action-button.icon-only {
   width: 22px;
   height: 22px;
@@ -573,19 +571,6 @@ function handleRenameKeydown(event: KeyboardEvent, conversationID: string) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.conversation-item:not(:hover) .conversation-item-actions {
-  /* 非悬浮态：文字/图标按钮整体淡出但不释放空间（absolute 下无占位成本），
-     保持"归档"贴右；行内重命名输入框不受此规则影响 */
-  opacity: 0;
-  pointer-events: none;
-}
-
-.conversation-item:focus-within .conversation-item-actions {
-  /* 键盘导航时保持整组可见（置于上条规则之后，同优先级靠后覆盖） */
-  opacity: 1;
-  pointer-events: auto;
 }
 
 .conversation-action-button.icon-only.danger:hover {
