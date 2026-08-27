@@ -12,7 +12,7 @@
  * Icons are simplified from Lucide (ISC/Ishikawa Masashi, MIT-style license).
  * Each path uses stroke="currentColor" so it tints with the parent color.
  */
-type IconName = 'assistant' | 'management' | 'dashboard' | 'plans' | 'audit' | 'executions' | 'incident' | 'scheduled-tasks' | 'inspection-reports' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs';
+type IconName = 'assistant' | 'management' | 'dashboard' | 'plans' | 'audit' | 'executions' | 'incident' | 'scheduled-tasks' | 'inspection-reports' | 'marketplace' | 'prompts' | 'knowledge' | 'skills' | 'feedback' | 'mcp-servers' | 'docs';
 
 defineProps<{ name: IconName }>();
 </script>
@@ -143,6 +143,25 @@ defineProps<{ name: IconName }>();
     <template v-else-if="name === 'knowledge'">
       <path
         d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+    <!-- skills: 书本+书签（运维手册） -->
+    <template v-else-if="name === 'skills'">
+      <path
+        d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2zM14 2v8l3-2 3 2V2"
         fill="none"
         stroke="currentColor"
         stroke-width="2"

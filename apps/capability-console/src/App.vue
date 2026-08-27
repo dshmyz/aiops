@@ -28,6 +28,7 @@ const AdminPromptsView = defineAsyncComponent(() => import('./views/AdminPrompts
 const AlertActionsView = defineAsyncComponent(() => import('./views/AlertActionsView.vue'));
 const AdminKnowledgeView = defineAsyncComponent(() => import('./views/AdminKnowledgeView.vue'));
 const FeedbackView = defineAsyncComponent(() => import('./views/FeedbackView.vue'));
+const SkillsView = defineAsyncComponent(() => import('./views/SkillsView.vue'));
 const DocsView = defineAsyncComponent(() => import('./views/DocsView.vue'));
 const DashboardView = defineAsyncComponent(() => import('./views/DashboardView.vue'));
 import AssistantSuggestions from './components/AssistantSuggestions.vue';
@@ -52,7 +53,7 @@ import type {
   ExecutionResult,
 } from './types';
 
-type ActiveView = 'assistant' | 'management' | 'dashboard' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'feedback' | 'mcp-servers' | 'docs' | 'alert-actions';
+type ActiveView = 'assistant' | 'management' | 'dashboard' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'skills' | 'feedback' | 'mcp-servers' | 'docs' | 'alert-actions';
 
 const activeView = ref<ActiveView>('assistant');
 
@@ -70,7 +71,7 @@ async function loadCurrentUser() {
 }
 
 // 视图顺序与快捷键映射（Cmd/Ctrl+1..9），顺序与侧栏视觉分组一致
-const viewOrder: ActiveView[] = ['assistant', 'management', 'dashboard', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'alert-actions', 'knowledge', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace', 'docs'];
+const viewOrder: ActiveView[] = ['assistant', 'management', 'dashboard', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'alert-actions', 'knowledge', 'skills', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace', 'docs'];
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   // Cmd/Ctrl + 数字 切换视图
@@ -632,9 +633,12 @@ async function handleAttachmentFiles(files: FileList | File[]) {
   const errs: string[] = [];
   const accepted: MessageAttachment[] = [];
   for (const file of Array.from(files)) {
-    // 类型与大小先验，给出可读报错（与后端白名单一致）
+    // 类型与大小先验，给出可读报错（与后端白名单一致）。扩展名规则与后端
+    // filepath.Ext 对齐：`foo.` 视为非法（"." 不在白名单），`kubelet` 无点为合法。
     const dot = file.name.lastIndexOf('.');
-    const ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : '';
+    const ext = dot >= 0 && dot < file.name.length - 1
+      ? file.name.slice(dot + 1).toLowerCase()
+      : (dot >= 0 ? '.' : '');
     const extOk = !ext || ATTACHMENT_ACCEPT_EXTS.test(`.${ext}`);
     if (!extOk) {
       errs.push(`暂不支持的文件类型 .${ext}（${file.name}）`);
@@ -651,9 +655,13 @@ async function handleAttachmentFiles(files: FileList | File[]) {
     }
   }
   if (accepted.length > 0) {
-    addAssistantAttachments(accepted);
+    const rejectReason = addAssistantAttachments(accepted);
+    if (rejectReason) {
+      errs.push(rejectReason);
+    }
   }
-  if (errs.length > 0 || accepted.length === 0) {
+  const rejectedAll = accepted.length === 0 && errs.length === 0;
+  if (errs.length > 0 || rejectedAll) {
     assistantEntryError.value = errs.join('；') || '没有可添加的附件';
   } else if (assistantEntryError.value.startsWith('暂不支持') || assistantEntryError.value.includes('超过大小') || assistantEntryError.value.includes('附件')) {
     // 清掉上一轮附件相关报错
@@ -933,6 +941,17 @@ onUnmounted(() => {
           <span v-if="!sidebarCollapsed">知识库</span>
         </button>
         <button
+          data-test="nav-skills"
+          data-view="skills"
+          class="nav-item"
+          :class="{ active: activeView === 'skills' }"
+          title="技能 / 运维手册管理"
+          @click="activeView = 'skills'"
+        >
+          <NavIcon name="skills" />
+          <span v-if="!sidebarCollapsed">技能</span>
+        </button>
+        <button
           data-test="nav-feedback"
           data-view="feedback"
           class="nav-item"
@@ -1084,7 +1103,7 @@ onUnmounted(() => {
             <svg class="assistant-error-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
               <path fill="currentColor" d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 3a1 1 0 110 2 1 1 0 010-2zm0 3a1 1 0 011 1v4a1 1 0 11-2 0V8a1 1 0 011-1z"/>
             </svg>
-            <span class="assistant-error-text">AI 响应失败，详见对话</span>
+            <span class="assistant-error-text">{{ assistantEntryError }}</span>
               <button
                 v-if="lastFailedAssistantMessage"
                 data-test="assistant-retry"
@@ -1271,6 +1290,7 @@ onUnmounted(() => {
       />
 
       <AdminPromptsView v-if="activeView === 'prompts'" />
+      <SkillsView v-if="activeView === 'skills'" />
       <AlertActionsView v-if="activeView === 'alert-actions'" />
 
       <AdminKnowledgeView v-if="activeView === 'knowledge'" />

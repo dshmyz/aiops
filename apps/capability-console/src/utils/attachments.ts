@@ -31,19 +31,25 @@ export function validateAttachmentFile(file: File): AttachmentValidationResult {
     return { ok: false, error: `「${file.name}」超过大小上限（最大 ${Math.round(MAX_ATTACHMENT_BYTES / 1024)} KB，实际 ${Math.round(file.size / 1024)} KB）` };
   }
   const dot = file.name.lastIndexOf('.');
-  const ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : '';
+  // 与后端 filepath.Ext 对齐：`foo.` 的后端扩展名是 "."（拒），`kubelet` 无点是 ""
+  //（放行）。之前前端把 `foo.` 当空后缀放行，前端接收、后端 400，判法不一致。
+  const ext = dot >= 0 && dot < file.name.length - 1
+    ? file.name.slice(dot + 1).toLowerCase()
+    : (dot >= 0 ? '.' : '');
   if (ext && !ALLOWED_EXTS.has(ext)) {
     return { ok: false, error: `暂不支持的文件类型 .${ext}（${file.name}）：请转存为 .txt 或直接粘贴文本` };
   }
   return { ok: true };
 }
 
-/** 整表校验（数量 + 总量），追加前调用。 */
+/** 整表校验（数量 + 总量），追加前调用。总量以 UTF-8 字节计，与后端 len(Content) 一致
+ *（不能用 content.length —— 那是 UTF-16 码元数，中文日志会低估近 3 倍而绕过后端限额）。 */
 export function validateAttachmentList(existing: MessageAttachment[], next: MessageAttachment): AttachmentValidationResult {
   if (existing.length + 1 > MAX_ATTACHMENTS) {
     return { ok: false, error: `附件数量超过上限（最多 ${MAX_ATTACHMENTS} 个）` };
   }
-  const total = existing.reduce((sum, a) => sum + a.content.length, 0) + next.content.length;
+  const toBytes = (s: string) => new TextEncoder().encode(s).length;
+  const total = existing.reduce((sum, a) => sum + toBytes(a.content), 0) + toBytes(next.content);
   if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
     return { ok: false, error: '附件总大小超过上限（最大 1 MB）' };
   }

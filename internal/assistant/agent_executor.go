@@ -369,20 +369,19 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 			fb.WriteString("\n请遵循以上用户反馈的偏好和纠错意见。")
 			systemPrompt += fb.String()
 		}
-		// SOP/Skill：只列出可用 skill 名，不注入全文。
-		// 修复：全量注入 26 个 skill 的内容（每个截 500 字 ≈ 13000 字）会把
-		// system prompt 塞爆、淹没用户指令，是 agent "变笨"的主因之一。
-		if e.skills != nil {
-			if skillSummaries, err := e.skills.ListSkillsByAction(ctx, ""); err == nil && len(skillSummaries) > 0 {
-				var sb strings.Builder
-				sb.WriteString("\n\n可参考的运维手册（SOP）：")
-				slugs := make([]string, 0, len(skillSummaries))
-				for _, s := range skillSummaries {
-					slugs = append(slugs, s.Slug)
+	}
+
+	// SOP/Skill：按用户消息检索最相关的技能，只注入命中 top-N 的正文 + 输出约束。
+	// 独立于知识库开关：技能有独立的 SkillLookup 依赖，不应随知识库是否启用而失效。
+	// 修复：全量注入 26 个 skill 的内容（每个截 500 字 ≈ 13000 字）会把
+	// system prompt 塞爆、淹没用户指令，是 agent "变笨"的主因之一；此前只列
+	// slug 名又让模型读不到任何手册正文。这里取其折中——相关才注入正文。
+	if e.skills != nil {
+		if skillSummaries, err := e.skills.ListSkillsByAction(ctx, ""); err == nil && len(skillSummaries) > 0 {
+			if rel := RelevantSkills(skillSummaries, message, 3); len(rel) > 0 {
+				if block := FormatSkillPrompt(rel); block != "" {
+					systemPrompt += block
 				}
-				sb.WriteString(strings.Join(slugs, "、"))
-				sb.WriteString("。如请求匹配某手册场景，遵循其要点执行；否则不要罗列手册内容。")
-				systemPrompt += sb.String()
 			}
 		}
 	}

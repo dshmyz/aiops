@@ -486,6 +486,7 @@ func main() {
 	options = append(options, httpapi.WithRunbookDrafts(httpapi.NewRunbookDraftService(runbookStore)))
 	// 可调度的低风险 runbook 列表（E2 Phase 3：定时任务表单 run_kind=runbook 下拉）。
 	options = append(options, httpapi.WithRunbooks(runbookStore))
+	options = append(options, httpapi.WithSkills(skillStore))
 	options = append(options, httpapi.WithMCPService(httpapi.NewMCPServerService(mcpServerStore, mcpManager)))
 	// 告警→动作编排规则（DB 存储 + 内存缓存 + CRUD API）。
 	alertActionStore := store.NewSQLAlertActionRuleStore(db)

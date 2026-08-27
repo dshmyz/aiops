@@ -50,6 +50,12 @@ const (
 	// raw + JSON escaping overhead ≈ 2.6MB worst case; validated precisely
 	// by assistant.ValidateAttachments, this bound is just the DoS gate.
 	assistantBodyLimit = 3 * 1024 * 1024
+	// assistantMaxMessageBytes caps the free-text message field on its own, so a
+	// single oversized pasted message can't flood the LLM context (the 3MB body
+	// gate alone leaves it unbounded up to ~3MB). Attachments are capped and
+	// truncated independently; this keeps the message in the same order of
+	// magnitude as the per-attachment prompt budget.
+	assistantMaxMessageBytes = 64 << 10
 )
 
 type ReadService interface {
@@ -152,6 +158,7 @@ type Router struct {
 	alertActions       *alert.AlertActionRegistry
 	feedback           FeedbackService
 	feedbackCallback   func(ctx context.Context, conversationID, turnID, correction string, rating int) // 可选：反馈后回调（用于知识学习）
+	skills             store.SkillStore
 	runbookDrafts      RunbookDraftService
 	runbooks           store.RunbookStore
 	knowledge          KnowledgeService
@@ -244,6 +251,14 @@ func WithRunbookDrafts(service RunbookDraftService) Option {
 func WithRunbooks(store store.RunbookStore) Option {
 	return func(router *Router) {
 		router.runbooks = store
+	}
+}
+
+// WithSkills wires the AIOps Skill（运维 SOP 能力包）管理面：/v1/skills 的 CRUD +
+// 启用/停用。未配置时 /v1/skills* 返回 503。
+func WithSkills(s store.SkillStore) Option {
+	return func(router *Router) {
+		router.skills = s
 	}
 }
 
@@ -564,6 +579,10 @@ func (r *Router) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		r.serveRunbookDrafts(writer, request)
 		return
 	}
+	if strings.HasPrefix(request.URL.Path, "/v1/skills") {
+		r.serveSkills(writer, request)
+		return
+	}
 	if request.Method == http.MethodGet && request.URL.Path == "/v1/runbooks" {
 		r.serveRunbooks(writer, request)
 		return
@@ -869,6 +888,139 @@ func writeCapabilityError(writer http.ResponseWriter, err error) {
 	default:
 		writeError(writer, http.StatusBadRequest, err.Error())
 	}
+}
+
+// skillWriteMaxBytes 技能写入请求体上限：SOP 正文通常几 KB，留足余量。
+const skillWriteMaxBytes = 256 << 10
+
+// skillResponseBytesCap 响应上限（技能列表含全部 SOP 正文）。
+const skillResponseBytesCap = 1 << 20
+
+// serveSkills 是 /v1/skills 的管理面：List/Get 面向 viewer+，Create/Update/Delete
+// 需要 operator/admin；内置技能（IsBuiltin）不可删除。
+func (r *Router) serveSkills(writer http.ResponseWriter, request *http.Request) {
+	if r.skills == nil {
+		writeError(writer, http.StatusServiceUnavailable, "skill management not configured")
+		return
+	}
+	user, request, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	ctx := request.Context()
+	path := request.URL.Path
+	switch {
+	case request.Method == http.MethodGet && path == "/v1/skills":
+		skills, err := r.skills.ListSkills(ctx)
+		if err != nil {
+			writeSkillError(writer, err)
+			return
+		}
+		if skills == nil {
+			skills = []store.Skill{}
+		}
+		writeJSONWithLimit(writer, map[string]any{"skills": skills}, skillResponseBytesCap)
+	case request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/skills/"):
+		skill, err := r.skills.GetSkill(ctx, strings.TrimPrefix(path, "/v1/skills/"))
+		if err != nil {
+			writeSkillError(writer, err)
+			return
+		}
+		writeJSONWithLimit(writer, skill, skillResponseBytesCap)
+	case request.Method == http.MethodPost && path == "/v1/skills":
+		if !userHasAnyRole(user, "operator", "admin") {
+			r.writeForbidden(writer, request, user, "需要 operator 或 admin 权限", path)
+			return
+		}
+		var in store.Skill
+		if !decodeSkillInput(writer, request, &in) {
+			return
+		}
+		in.IsBuiltin = false // 自建技能一律非内置；内置唯一来源是 SeedBuiltinSkills
+		if in.RiskLevel == "" {
+			in.RiskLevel = "low"
+		}
+		created, err := r.skills.CreateSkill(ctx, in)
+		if err != nil {
+			writeSkillError(writer, err)
+			return
+		}
+		writeJSONWithLimit(writer, created, skillResponseBytesCap)
+	case request.Method == http.MethodPut && strings.HasPrefix(path, "/v1/skills/"):
+		if !userHasAnyRole(user, "operator", "admin") {
+			r.writeForbidden(writer, request, user, "需要 operator 或 admin 权限", path)
+			return
+		}
+		id := strings.TrimPrefix(path, "/v1/skills/")
+		var in store.Skill
+		if !decodeSkillInput(writer, request, &in) {
+			return
+		}
+		in.ID = id
+		in.IsBuiltin = false
+		updated, err := r.skills.UpdateSkill(ctx, in)
+		if err != nil {
+			writeSkillError(writer, err)
+			return
+		}
+		writeJSONWithLimit(writer, updated, skillResponseBytesCap)
+	case request.Method == http.MethodDelete && strings.HasPrefix(path, "/v1/skills/"):
+		if !userHasAnyRole(user, "operator", "admin") {
+			r.writeForbidden(writer, request, user, "需要 operator 或 admin 权限", path)
+			return
+		}
+		id := strings.TrimPrefix(path, "/v1/skills/")
+		existing, err := r.skillByID(ctx, id)
+		if err != nil {
+			writeSkillError(writer, err)
+			return
+		}
+		if existing.IsBuiltin {
+			writeError(writer, http.StatusBadRequest, "内置技能不可删除，可改为停用")
+			return
+		}
+		if err := r.skills.DeleteSkill(ctx, id); err != nil {
+			writeSkillError(writer, err)
+			return
+		}
+		writeJSONWithLimit(writer, map[string]any{"deleted": id}, skillResponseBytesCap)
+	default:
+		writeError(writer, http.StatusNotFound, "not found")
+	}
+}
+
+// skillByID 按 ID 定位技能：SkillStore 只提供按 slug 的 GetSkill，这里用 List 兜底。
+func (r *Router) skillByID(ctx context.Context, id string) (store.Skill, error) {
+	skills, err := r.skills.ListSkills(ctx)
+	if err != nil {
+		return store.Skill{}, err
+	}
+	for _, s := range skills {
+		if s.ID == id {
+			return s, nil
+		}
+	}
+	return store.Skill{}, fmt.Errorf("skill not found: %s", id)
+}
+
+// decodeSkillInput 解析技能写入请求体。
+func decodeSkillInput(writer http.ResponseWriter, request *http.Request, dst *store.Skill) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, skillWriteMaxBytes))
+	if err := decoder.Decode(dst); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON input")
+		return false
+	}
+	return true
+}
+
+// writeSkillError 把 SkillStore 错误映射到状态码。store 层未定义哨兵错误，
+// 以 "not found" 文本判定 404（Memory/SQL 两实现共用该文案）。
+func writeSkillError(writer http.ResponseWriter, err error) {
+	if strings.Contains(err.Error(), "not found") {
+		writeError(writer, http.StatusNotFound, err.Error())
+		return
+	}
+	writeError(writer, http.StatusBadRequest, err.Error())
 }
 
 type actionPlanResponse struct {
@@ -1427,6 +1579,10 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 		writeError(writer, http.StatusBadRequest, "message is required")
 		return
 	}
+	if len(body.Message) > assistantMaxMessageBytes {
+		writeError(writer, http.StatusBadRequest, fmt.Sprintf("消息内容过长（最大 %d KB），请精简后重试或改为粘贴为附件", assistantMaxMessageBytes>>10))
+		return
+	}
 	if err := assistant.ValidateAttachments(body.Attachments); err != nil {
 		writeError(writer, http.StatusBadRequest, err.Error())
 		return
@@ -1515,6 +1671,10 @@ func (r *Router) serveAssistantStream(writer http.ResponseWriter, request *http.
 	}
 	if strings.TrimSpace(body.Message) == "" {
 		writeError(writer, http.StatusBadRequest, "message is required")
+		return
+	}
+	if len(body.Message) > assistantMaxMessageBytes {
+		writeError(writer, http.StatusBadRequest, fmt.Sprintf("消息内容过长（最大 %d KB），请精简后重试或改为粘贴为附件", assistantMaxMessageBytes>>10))
 		return
 	}
 	if err := assistant.ValidateAttachments(body.Attachments); err != nil {

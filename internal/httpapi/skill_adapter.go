@@ -31,9 +31,12 @@ func (a *skillStoreAdapter) ListSkillsByAction(ctx context.Context, actionCode s
 	out := make([]assistant.SkillSummary, 0, len(skills))
 	for _, sk := range skills {
 		out = append(out, assistant.SkillSummary{
-			Slug:      sk.Slug,
-			Content:   sk.Content,
-			IsBuiltin: sk.IsBuiltin,
+			Slug:           sk.Slug,
+			Name:           sk.Name,
+			Description:    sk.Description,
+			Content:        sk.Content,
+			OutputContract: sk.OutputContract,
+			IsBuiltin:      sk.IsBuiltin,
 		})
 	}
 	return out, nil

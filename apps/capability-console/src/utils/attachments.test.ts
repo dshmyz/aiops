@@ -29,6 +29,13 @@ describe('validateAttachmentFile', () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain('.bin');
   });
+
+  it('拒绝尾点文件名（与后端 filepath.Ext 一致）', () => {
+    // `foo.` 后端扩展名为 "."（不在白名单），前端须同样拒绝，避免"前端放行→后端 400"
+    const res = validateAttachmentFile(makeFile('foo.', 10));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('.');
+  });
 });
 
 describe('validateAttachmentList', () => {

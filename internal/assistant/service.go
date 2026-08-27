@@ -394,7 +394,10 @@ func (s *Service) HandleMessage(ctx context.Context, user identity.CurrentUser, 
 	// Inject the user message into the context so the diagnostic runner (which
 	// may be an orchestrator) can detect multi-domain requests and split them
 	// into concurrent sub-diagnostics. A plain diagnostics.Service ignores it.
-	ctx = orchestrator.WithMessage(ctx, fullMessage)
+	// 用正文（message）而非 fullMessage：域检测只应依据用户实际输入判定意图，
+	// 附件文件内容是不分层的非结构化文本，日志里顺带提到别的中间件名会把单域
+	// 请求误切成并发多域诊断（附件全文仍以 fullMessage 发给 LLM，不受影响）。
+	ctx = orchestrator.WithMessage(ctx, message)
 	if s.conversations == nil {
 		return s.handleStateless(ctx, user, fullMessage, pageContext)
 	}
@@ -441,7 +444,8 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 	fullMessage := ComposeMessageWithAttachments(message, attachments)
 	// Inject the user message so the orchestrator (when wired as the diagnostic
 	// runner) can split multi-domain requests. Mirrors HandleMessage.
-	ctx = orchestrator.WithMessage(ctx, fullMessage)
+	// 域判定只看正文（message），附件文件内容不参与（见 HandleMessage 注释）。
+	ctx = orchestrator.WithMessage(ctx, message)
 
 	// Resolve conversation (or run stateless when no store is configured),
 	// mirroring HandleMessage. History is loaded once up front so the planner

@@ -978,3 +978,42 @@ export async function listAdminTools(): Promise<AdminTool[]> {
   const data = await request<AdminToolsResponse>('/v1/admin/tools', {});
   return data.tools ?? [];
 }
+
+// ---- 技能（运维 SOP 能力包）管理 ----
+
+export interface SkillRecord {
+  id: string;
+  slug: string;
+  name: string;
+  category?: string;
+  description?: string;
+  applicable_actions?: string[];
+  tool_dependencies?: string[];
+  content: string;
+  output_contract?: string;
+  risk_level: string;
+  is_builtin: boolean;
+  is_enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export async function listSkills(): Promise<SkillRecord[]> {
+  const data = await request<{ skills?: SkillRecord[] }>('/v1/skills', {});
+  return data.skills ?? [];
+}
+
+export async function createSkill(input: Partial<SkillRecord>): Promise<SkillRecord> {
+  return request<SkillRecord>('/v1/skills', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function updateSkill(id: string, input: Partial<SkillRecord>): Promise<SkillRecord> {
+  return request<SkillRecord>(`/v1/skills/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteSkill(id: string): Promise<void> {
+  await request<{ deleted?: string }>(`/v1/skills/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}

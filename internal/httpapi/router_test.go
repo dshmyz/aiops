@@ -1238,6 +1238,23 @@ func TestAssistantMessagesAcceptsAttachment(t *testing.T) {
 	}
 }
 
+// TestAssistantMessagesRejectsOversizedMessage 钉住 message 字段自身的长度上限：
+// 单发超大正文在进入 service 前以友好文案被拒，而不是让 ~MB 级消息灌进 LLM 上下文。
+func TestAssistantMessagesRejectsOversizedMessage(t *testing.T) {
+	t.Parallel()
+	router, _ := testRouter(t, &readRunner{})
+	// 超过 assistantMaxMessageBytes(64KB) 一点点
+	payload := `{"message":"` + strings.Repeat("x", 64<<10+1) + `"}`
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, signedRequest(t, "/v1/assistant/messages", payload, "viewer-1", []string{"viewer"}))
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s, want 400", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "消息内容过长") {
+		t.Fatalf("body = %s, want friendly oversized-message error", res.Body.String())
+	}
+}
+
 func TestAssistantMessagesEndpointReturnsConversationID(t *testing.T) {
 	t.Parallel()
 	conversations := store.NewMemoryAssistantConversationStore()

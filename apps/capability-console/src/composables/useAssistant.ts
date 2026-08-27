@@ -3,6 +3,7 @@ import type { Ref } from 'vue';
 import { getPendingPlan, sendAssistantMessage } from '../api';
 import { streamAssistantMessage } from './useAssistantStream';
 import type { PageContext } from './useAssistantStream';
+import { validateAttachmentList } from '../utils/attachments';
 import type { MessageAttachment } from '../utils/attachments';
 import type {
   AssistantConsoleResponse,
@@ -59,7 +60,7 @@ export interface UseAssistant {
   lastFailedAssistantMessage: Ref<string>;
   /** 待发送附件（日志/文本文件），随下一条消息一起发送 */
   pendingAttachments: Ref<MessageAttachment[]>;
-  addPendingAttachments: (next: MessageAttachment[]) => void;
+  addPendingAttachments: (next: MessageAttachment[]) => string;
   removePendingAttachment: (index: number) => void;
   assistantInlineConfirmationToken: Ref<string | undefined>;
   latestDetailText: Ref<string>;
@@ -206,8 +207,20 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
   const lastFailedAssistantMessage = ref('');
   // 待发送附件（日志/文本文件）。随下一条消息一起发送，发送后清空。
   const pendingAttachments = ref<MessageAttachment[]>([]);
-  function addPendingAttachments(next: MessageAttachment[]) {
-    pendingAttachments.value = [...pendingAttachments.value, ...next];
+  /**
+   * 追加附件并做整表校验（数量/总量上限）。
+   * 通过的逐个加入，超限的拒之门外；返回首个拒绝原因供调用方展示（空串表示全部通过）。
+   * 拖拽与粘贴的唯一汇合点，保证两种入口都不会突破上限。
+   */
+  function addPendingAttachments(next: MessageAttachment[]): string {
+    for (const att of next) {
+      const verdict = validateAttachmentList(pendingAttachments.value, att);
+      if (!verdict.ok) {
+        return verdict.error ?? '';
+      }
+      pendingAttachments.value = [...pendingAttachments.value, att];
+    }
+    return '';
   }
   function removePendingAttachment(index: number) {
     pendingAttachments.value = pendingAttachments.value.filter((_, i) => i !== index);
@@ -228,10 +241,11 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     if (assistantEntryLoading.value) {
       return;
     }
-    // 快照附件并立即清空：发送语义是"随这条消息走"。失败重试只重发文本
-    //（retry 不带附件），避免大日志重复传输或与用户预期不符。
+    // 快照附件并立即清空：发送语义是"随这条消息走"。若附件的消息发送失败/中止，
+    // 末尾的 finally 会把本次附件放回待发送区，让 retry 复用而非永久丢失。
     const attachments = pendingAttachments.value;
     pendingAttachments.value = [];
+    let sendFailed = false;
     // 组装 pageContext：仅当跳转设置了 assistantPageContext 时才启用 page_context。
     const pageContext: PageContext | undefined = assistantPageContext.value
       ? {
@@ -445,6 +459,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
               applyResponse(response);
             },
             onError: (msg) => {
+              sendFailed = true;
               handleStreamError(msg);
             },
           },
@@ -454,6 +469,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
         applyResponse(response);
       }
     } catch (err) {
+      sendFailed = true;
       const aborted = err instanceof DOMException && err.name === 'AbortError';
       if (aborted) {
         assistantLatestStatus.value = '已停止';
@@ -471,6 +487,11 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     } finally {
       activeAbortController.value = null;
       assistantEntryLoading.value = false;
+      // 发送失败/中止（含流式 onError）时，把本次提交的附件放回待发送区，
+      // 让 retry 复用而非永久丢弃；成功后维持已清空。
+      if (sendFailed && attachments.length > 0) {
+        pendingAttachments.value = [...attachments, ...pendingAttachments.value];
+      }
     }
   }
 
@@ -484,13 +505,22 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
   }
 
   async function send() {
-    const rawMessage = assistantInput.value.trim();
-    if (!rawMessage || assistantEntryLoading.value) {
+    if (assistantEntryLoading.value) {
       return;
     }
-    // 记录输入历史（终端式 ↑ 回溯）；连续去重，最新在末尾
-    if (inputHistory.value[inputHistory.value.length - 1] !== rawMessage) {
-      inputHistory.value.push(rawMessage);
+    const typed = assistantInput.value.trim();
+    // 空文字但有附件：用附件名合成默认指令，让"仅附件发送"真正可用（此前 send 在
+    // 空消息时静默早退，UI 却已允许发送，纯属空转）。合成串也满足后端
+    // "message 非空"契约，会话标题即取自它。
+    const rawMessage = typed || (pendingAttachments.value.length > 0
+      ? `请分析附加日志：${pendingAttachments.value.map((a) => a.name).join('、')}`
+      : '');
+    if (!rawMessage) {
+      return;
+    }
+    // 记录输入历史（终端式 ↑ 回溯）：仅真实输入入历史，合成的默认指令不入库
+    if (typed && inputHistory.value[inputHistory.value.length - 1] !== typed) {
+      inputHistory.value.push(typed);
       if (inputHistory.value.length > 50) {
         inputHistory.value.shift();
       }
