@@ -120,6 +120,16 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("create eino openai chat model: %w", err)
 	}
+	// 部分兼容上游（OpenRouter 上的 GLM/DeepSeek）在 json_object 模式下间歇性
+	// 返回空 body——HTTP 成功、withChatRetry 不触发、planner 死于"input json is
+	// empty"。用同一配置的无 json 副本兜底重发一次（planning prompt 本就要求
+	// 严格 JSON，自由文本模式能稳定产出）。fallbackChat 同时被 planner 与
+	// compactor 共享。
+	plainChat, perr := chatFromConfig(ctx, plannerCfg, env, false, defaultChatTimeout)
+	if perr != nil {
+		plainChat = nil // 兜底副本建不出来时退回单模型，不阻断构建
+	}
+	fallbackChat := withJSONFallback(chat, plainChat, nil)
 	// LLMFormatter 用独立的无 json_object chat：其 prompt 是分隔符格式的自由文本
 	//（[[SUMMARY_START]]...[[SUMMARY_END]]），流式路径把 SUMMARY 区间逐 token 转发。
 	// 若复用 planner 的 json_object chat，模型只回严格 JSON，没有 [[SUMMARY_START]]
@@ -130,8 +140,8 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 		formatterChat = chat
 	}
 	formatter := NewChainedFormatter(NewLLMFormatter(formatterChat), NewCodeFallbackFormatter())
-	planner := NewEinoPlannerWithIntent(chat, intentChat)
-	return planner, NewLLMCompactor(chat), formatter, "eino-openai", nil
+	planner := NewEinoPlannerWithIntent(fallbackChat, intentChat)
+	return planner, NewLLMCompactor(fallbackChat), formatter, "eino-openai", nil
 }
 
 // intentChatFromRegistry 解析意图识别专用模型（RoleIntent）。未显式配置或与
