@@ -5504,3 +5504,107 @@ button.stat-card.has-danger::before { background: var(--color-danger); }
 .mini-button.danger:hover:not(:disabled) {
   background: var(--color-danger-soft);
 }
+
+/* 候选行内嵌的试调结果列：✓ 接口可用 / ⚠ 有问题。 */
+.probe-cell {
+  text-align: right;
+  min-width: 110px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.probe-cell strong {
+  font-size: var(--font-xs);
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+}
+
+.probe-cell[data-probe-ok="true"] strong {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.probe-cell[data-probe-ok="false"] strong {
+  background: var(--color-danger-soft, var(--color-bg-hover));
+  color: var(--color-danger, var(--color-text-secondary));
+}
+
+.probe-cell small {
+  font-size: var(--font-xs);
+  color: var(--color-text-tertiary);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 候选列表紧凑模式：一行一条，接口多时可扫读。
+   路径单行截断（title 悬浮看全）；徽标收紧；次要信息移到悬浮提示。 */
+.candidate-row--compact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  min-height: 0;
+}
+
+.candidate-main--compact {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.candidate-main--compact .candidate-path {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+}
+
+.candidate-main--compact .candidate-override,
+.candidate-main--compact .candidate-reason {
+  font-size: var(--font-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  flex: 0 0 auto;
+}
+
+.verdict-cell--compact {
+  flex: 0 0 auto;
+  min-width: 0;
+  flex-direction: row;
+  align-items: center;
+}
+
+.verdict-cell--compact strong {
+  white-space: nowrap;
+}
+
+.probe-cell--compact {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.probe-cell--compact strong {
+  white-space: nowrap;
+}
+
+.probe-cell--compact small {
+  max-width: 260px;
+}
+
+.candidate-adjust--compact > summary {
+  white-space: nowrap;
+  font-size: var(--font-xs);
+}
