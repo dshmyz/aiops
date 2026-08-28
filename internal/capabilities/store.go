@@ -34,4 +34,8 @@ type CapabilityStore interface {
 	// MovePublishedToDraft 下架：将 published/<name> 移到 discovered/<name>。
 	// 如果发布版不存在返回 ErrCapabilityNotFound；如果 discovered 已存在同名返回冲突。
 	MovePublishedToDraft(ctx context.Context, name string) (ManagedCapability, error)
+
+	// DeleteDraft 删除草稿（discovered）能力，用于清理误导入/作废的候选。
+	// 已发布能力不能删，需先下架。
+	DeleteDraft(ctx context.Context, name string) error
 }

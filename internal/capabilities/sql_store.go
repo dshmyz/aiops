@@ -160,6 +160,24 @@ func (s *SQLCapabilityStore) MovePublishedToDraft(ctx context.Context, name stri
 	return s.getBySource(ctx, name, SourceDiscovered)
 }
 
+// DeleteDraft 删除草稿行。已发布能力不在此 source，天然不可删。
+func (s *SQLCapabilityStore) DeleteDraft(ctx context.Context, name string) error {
+	if err := s.Configured(); err != nil {
+		return err
+	}
+	if err := validateManagedCapabilityName(name); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM capabilities WHERE name = ? AND source = ?`, name, SourceDiscovered)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+		return ErrCapabilityNotFound
+	}
+	return nil
+}
+
 func (s *SQLCapabilityStore) Has(ctx context.Context, source string, name string) (bool, error) {
 	if err := s.Configured(); err != nil {
 		return false, err

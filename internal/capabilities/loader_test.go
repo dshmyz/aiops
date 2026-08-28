@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/capabilities"
+	"github.com/gracegaoya/ai-operations-copilot/internal/policy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
@@ -74,10 +75,16 @@ func TestLoadPublishedRejectsInvalidCapability(t *testing.T) {
 	}
 }
 
-func TestRegisterPublishedRejectsReadWithMutatingBackendMethod(t *testing.T) {
-	t.Parallel()
+// TestRegisterPublishedRejectsUnsupportedReadMethod 用 read 已不支持的方法（HEAD）
+// 验证非法能力在注册前被拦下。POST/PUT 已放开为合法 read 方法。
+func TestRegisterPublishedRejectsUnsupportedReadMethod(t *testing.T) {
+	tools.ResetDynamicToolsForTest()
+	policy.ResetDynamicRolePermissionsForTest()
+	t.Cleanup(tools.ResetDynamicToolsForTest)
+	t.Cleanup(policy.ResetDynamicRolePermissionsForTest)
+
 	root := t.TempDir()
-	invalid := strings.Replace(validReadYAML("published"), "method: GET", "method: POST", 1)
+	invalid := strings.Replace(validReadYAML("published"), "method: GET", "method: HEAD", 1)
 	mustWrite(t, filepath.Join(root, "published", "invalid.yaml"), invalid)
 
 	_, err := capabilities.RegisterPublished(root)

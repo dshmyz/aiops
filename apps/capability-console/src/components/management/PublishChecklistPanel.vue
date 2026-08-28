@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import type { UseCapabilities } from '../../composables/useCapabilities';
 
-const props = defineProps<{ capabilities: UseCapabilities }>();
+defineProps<{ capabilities: UseCapabilities }>();
+
+// 一键修复：check 项自带 fix 动作（写入合理默认值），修完自动校验会刷新检查表。
+function applyFix(fix: (() => void) | undefined) {
+  fix?.();
+}
 </script>
 
 <template>
@@ -17,6 +22,12 @@ const props = defineProps<{ capabilities: UseCapabilities }>();
           <strong>{{ check.ok ? '通过' : '阻塞' }}</strong>
           <span>{{ check.label }}</span>
           <small>{{ check.detail }}</small>
+          <button
+            v-if="!check.ok && check.fix"
+            class="check-fix"
+            :data-test="`check-fix-${check.label}`"
+            @click="applyFix(check.fix)"
+          >{{ check.fixLabel ?? '修复' }}</button>
         </div>
       </div>
       <button data-test="publish-current" class="primary-inline" :disabled="!capabilities.publishReady.value" @click="capabilities.publishCurrent">
@@ -25,3 +36,19 @@ const props = defineProps<{ capabilities: UseCapabilities }>();
     </div>
   </section>
 </template>
+
+<style scoped>
+.check-fix {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--el-color-primary, #409eff);
+  color: var(--el-color-primary, #409eff);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.check-fix:hover {
+  background: var(--el-color-primary-light-9, #ecf5ff);
+}
+</style>

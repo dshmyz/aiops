@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import type { Ref } from 'vue';
-import { commitOpenAPIURLImport, previewOpenAPIURL } from '../api';
+import { commitOpenAPIURLImport, previewOpenAPIURL, probeInferCapability, publishCapability } from '../api';
 import { createImportBatch, filterImportBatchItems, setImportItemIgnored } from '../importBatch';
 import {
   buildCommitSelections,
@@ -13,9 +13,11 @@ import {
 import type { ImportBatch } from '../importBatch';
 import type { ImportCandidateFilters } from '../importWizard';
 import type {
+  Capability,
   ImportCandidateOverride,
   ImportPreview,
   ManagedCapability,
+  ProbeInferResult,
 } from '../types';
 import { capabilityKey, upsert } from '../capabilityFormat';
 import type { ManagementPhase } from './useCapabilities';
@@ -159,7 +161,7 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
     }
   }
 
-  async function commitSwaggerImport() {
+  async function commitSwaggerImport(options?: { autoPublishClean?: boolean }) {
     if (!importPreview.value || !canCommitImportPreview.value) {
       return;
     }
@@ -177,12 +179,43 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
       for (const item of result.capabilities) {
         upsert(capabilities, item);
       }
+      // 快速通道：批量试调干净的低风险读能力跳过人工评审，直接发布。
+      const cleanNames = new Set(cleanProbedCandidates.value.map((candidate) => candidate.capability.name));
+      const autoPublished: string[] = [];
+      const autoPublishFailed: { name: string; reason: string }[] = [];
+      if (options?.autoPublishClean && cleanNames.size > 0) {
+        for (const item of result.capabilities) {
+          if (cleanNames.has(item.name) && item.risk === 'low' && item.operation === 'read') {
+            try {
+              const published = await publishCapability(item.name);
+              upsert(capabilities, published);
+              autoPublished.push(published.name);
+            } catch (err) {
+              autoPublishFailed.push({ name: item.name, reason: err instanceof Error ? err.message : '发布失败' });
+            }
+          }
+        }
+      }
       if (result.capabilities.length > 0) {
-        onSelect(result.capabilities[0]);
+        const firstRemaining = result.capabilities.find((item) => !autoPublished.includes(item.name));
+        if (firstRemaining) {
+          onSelect(firstRemaining);
+        }
       }
       importWizardStep.value = 'commit';
       managementPhase.value = 'review';
-      importMessage.value = result.capabilities.length === 0 ? '没有生成草稿' : `已生成 ${result.capabilities.length} 个待评审草稿`;
+      const parts: string[] = [];
+      if (autoPublished.length > 0) {
+        parts.push(`已试调验证并直接发布 ${autoPublished.length} 个`);
+      }
+      if (autoPublishFailed.length > 0) {
+        parts.push(`${autoPublishFailed.length} 个自动发布失败（${autoPublishFailed[0].reason}）`);
+      }
+      const remaining = result.capabilities.length - autoPublished.length;
+      if (remaining > 0) {
+        parts.push(`${remaining} 个待评审草稿`);
+      }
+      importMessage.value = parts.length === 0 ? '没有生成草稿' : parts.join('，');
     } catch (err) {
       error.value = err instanceof Error ? err.message : '生成 Capability 草稿失败';
     } finally {
@@ -196,6 +229,110 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
       [id]: { ...candidateOverrides.value[id], ...patch },
     };
   }
+
+  // ===== 批量试调快速通道 =====
+  // 选中候选后先逐个试调真实后端：无警告的低风险读能力标记"可直接发布"，
+  // 有问题的标记原因，让用户只对麻烦的少数候选做人工评审。
+
+  /** 候选 ID → 试调结果。 */
+  const candidateProbeResults = ref<Record<string, ProbeInferResult & { ok: boolean }>>({});
+  const candidateProbing = ref(false);
+  /** 已完成试调的候选数量，用于进度显示。 */
+  const candidateProbedCount = computed(() => Object.keys(candidateProbeResults.value).length);
+
+  /**
+   * 判断候选试调结果是否"干净"：试调成功、有推断出的映射、且没有"阻断性"问题。
+   * LLM 回退警告（如"LLM 推断失败，回退规则"）不算失败——规则推断成功即可用。
+   * 只有后端连不通/HTTP 错误这类阻断问题才标记 ⚠。
+   */
+  function isCleanProbe(result: ProbeInferResult & { ok: boolean }): boolean {
+    return result.ok;
+  }
+
+  /** 试调用的示例参数：优先用 Swagger 声明的 examples，其余字段一律用通用
+   *  占位值（字段名不参与猜测）。目的只是让请求结构合法、能打到后端，
+   *  探测是否有数据由后端响应决定。 */
+  function buildProbeInput(capability: Capability): Record<string, unknown> {
+    const input: Record<string, unknown> = {};
+    for (const [name, field] of Object.entries(capability.input_schema)) {
+      input[name] = field.examples && field.examples.length > 0 ? field.examples[0] : 'demo';
+    }
+    return input;
+  }
+
+  /** 对当前勾选的候选并发试调（上限 5 并发，避免打爆后端）。 */
+  async function probeSelectedCandidates() {
+    const preview = importPreview.value;
+    if (!preview) {
+      return;
+    }
+    const selected = selectedCandidates(preview, candidateSelections.value);
+    // 只试调读能力：写能力走审批链路，试调会真的写后端。POST 查询接口同样可试调。
+    const probeable = selected.filter(
+      (candidate) => candidate.capability.operation === 'read',
+    );
+    if (probeable.length === 0) {
+      importMessage.value = '所选候选里没有可试调的读取接口（写入能力走审批链路，不做试调）';
+      return;
+    }
+    error.value = '';
+    candidateProbing.value = true;
+    candidateProbeResults.value = {};
+    const baseURL = preview.source.backend_base_url || importBackendBaseURL.value;
+    let done = 0;
+    const workers = Array.from({ length: Math.min(5, probeable.length) }, async () => {
+      while (probeable.length > 0) {
+        const candidate = probeable.shift();
+        if (!candidate) {
+          break;
+        }
+        const capability = { ...candidate.capability, backend: { ...candidate.capability.backend, base_url: baseURL } };
+        let entry: ProbeInferResult & { ok: boolean };
+        try {
+          const result = await probeInferCapability(capability, buildProbeInput(candidate.capability));
+          // ok 的标准：后端真实响应拿到了（probe 存在）且推断出了字段映射。
+          // LLM 回退类警告不阻断——规则推断成功即可用。
+          const hasData = Boolean(result.probe) && Object.keys(result.inferred?.fields ?? {}).length > 0;
+          const blocking = (result.warnings ?? []).some((w) => !w.includes('LLM 推断失败'));
+          entry = { ...result, ok: hasData && !blocking };
+        } catch (err) {
+          entry = { ok: false, warnings: [err instanceof Error ? err.message : '试调请求失败'] };
+        }
+        candidateProbeResults.value = { ...candidateProbeResults.value, [candidate.id]: entry };
+        done += 1;
+        candidateProbedProgress.value = done;
+      }
+    });
+    await Promise.all(workers);
+    candidateProbing.value = false;
+  }
+
+  const candidateProbedProgress = ref(0);
+
+  /** 试调干净的候选（可直接批量发布的低风险读能力）。 */
+  const cleanProbedCandidates = computed(() => {
+    const preview = importPreview.value;
+    if (!preview) {
+      return [];
+    }
+    return selectedCandidates(preview, candidateSelections.value).filter((candidate) => {
+      const probe = candidateProbeResults.value[candidate.id];
+      return probe !== undefined && isCleanProbe(probe)
+        && candidate.capability.operation === 'read' && candidate.capability.risk === 'low';
+    });
+  });
+
+  /** 试调发现问题的候选（需要人工评审）。 */
+  const problemProbedCandidates = computed(() => {
+    const preview = importPreview.value;
+    if (!preview) {
+      return [];
+    }
+    return selectedCandidates(preview, candidateSelections.value).filter((candidate) => {
+      const probe = candidateProbeResults.value[candidate.id];
+      return probe !== undefined && !isCleanProbe(probe);
+    });
+  });
 
   function toggleImportIgnored(name: string, ignored: boolean) {
     if (!importBatch.value) {
@@ -234,11 +371,18 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
     selectedImportCandidates,
     canCommitImportPreview,
     importCommitSummary,
+    candidateProbeResults,
+    candidateProbing,
+    candidateProbedProgress,
+    candidateProbedCount,
+    cleanProbedCandidates,
+    problemProbedCandidates,
     previewSwaggerURL,
     clearImportPreview,
     loadBuiltinExample,
     builtinExampleActive,
     commitSwaggerImport,
+    probeSelectedCandidates,
     updateCandidateOverride,
     toggleImportIgnored,
     openImportedCapability,

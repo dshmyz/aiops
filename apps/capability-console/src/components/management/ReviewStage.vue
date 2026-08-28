@@ -2,6 +2,7 @@
 import { ElTag } from 'element-plus';
 import CapabilityEditorPanel from './CapabilityEditorPanel.vue';
 import CapabilityLedgerPanel from './CapabilityLedgerPanel.vue';
+import ProbePanel from './ProbePanel.vue';
 import PublishChecklistPanel from './PublishChecklistPanel.vue';
 import StatsGrid from './StatsGrid.vue';
 import TestPreviewPanel from './TestPreviewPanel.vue';
@@ -29,6 +30,7 @@ defineProps<{ capabilities: UseCapabilities }>();
       </div>
       <PublishChecklistPanel :capabilities="capabilities" />
       <CapabilityEditorPanel :capabilities="capabilities" />
+      <ProbePanel :capabilities="capabilities" />
       <TestPreviewPanel :capabilities="capabilities" />
     </section>
   </section>

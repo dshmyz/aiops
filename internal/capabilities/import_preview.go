@@ -3,7 +3,6 @@ package capabilities
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"net/http"
 	"sort"
 	"strings"
 
@@ -104,6 +103,7 @@ func ImportOpenAPICandidates(body []byte, existing []ManagedCapability) (ImportP
 			},
 		}
 		candidate.Recommendation, candidate.Reasons, candidate.Warnings = recommendCandidate(operation.Capability, existingNames)
+		candidate.Warnings = append(candidate.Warnings, operation.Warnings...)
 		preview.Candidates = append(preview.Candidates, candidate)
 	}
 	sort.SliceStable(preview.Candidates, func(left, right int) bool {
@@ -153,8 +153,11 @@ func recommendCandidate(capability Capability, existingNames map[string]struct{}
 	if _, exists := existingNames[capability.Name]; exists {
 		return RecommendationNeedsAdjustment, []string{"已有同名能力，需要确认命名"}, []string{"已有同名能力"}
 	}
-	if capability.Operation != tools.Read || capability.Backend.Method != http.MethodGet {
-		return RecommendationNotRecommended, []string{"第一版暂不接入写入能力"}, nil
+	// POST/PUT 等方法也可以是查询接口（国内内部系统常见 POST /list），不再按
+	// 方法一票否决；是否真的有副作用由用户在调整面板把 operation 改成 write 来表达。
+	if capability.Operation == tools.Write {
+		warnings = append(warnings, "默认按写入能力处理，如只是查询可在「调整」里改成读取")
+		return RecommendationNeedsAdjustment, []string{"写入类能力需补齐治理字段（预检/回滚/审批）"}, warnings
 	}
 	if capability.Domain == "unknown" || capability.ResourceType == "resource" {
 		warnings = append(warnings, "领域或资源类型需要确认")

@@ -98,11 +98,14 @@ type BackendSpec struct {
 // BackendAuthConfig 声明 HTTP 层认证信息，由 HTTP 适配器在发送请求时注入。
 // 与 AuthSpec（RBAC 角色权限）不同，这里控制的是对后端服务的实际认证。
 type BackendAuthConfig struct {
-	// Type 认证类型。目前支持 "bearer"（Authorization: Bearer <token>）。
-	// 空值表示无认证。
+	// Type 认证类型。支持 "bearer"（Authorization: Bearer <token>）与
+	// "api_key"（自定义 header，如 X-API-Key）。空值表示无认证。
 	Type string `yaml:"type,omitempty" json:"type,omitempty"`
 	// Token 认证令牌。支持 ${ENV_VAR} 语法在执行时从环境变量解析。
 	Token string `yaml:"token,omitempty" json:"token,omitempty"`
+	// HeaderName 是 api_key 认证的 header 名（如 X-API-Key），为空时默认
+	// "X-API-Key"。bearer 类型忽略此字段。
+	HeaderName string `yaml:"header_name,omitempty" json:"header_name,omitempty"`
 }
 
 // InputField declares one capability input. Min/Max are inclusive numeric

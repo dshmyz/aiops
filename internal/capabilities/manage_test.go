@@ -259,8 +259,8 @@ func TestManagerTestExecutesReadCapabilityAndReturnsNormalizedResult(t *testing.
 	writeCapability := managedReadCapability("minio.bucket.capacity.set", "needs_review")
 	writeCapability.Operation = tools.Write
 	writeCapability.Backend.Method = http.MethodPost
-	if _, err := manager.Test(context.Background(), writeCapability, map[string]any{"cluster": "m1", "bucket": "archive"}); !errors.Is(err, capabilities.ErrTestRequiresReadGET) {
-		t.Fatalf("write test error = %v, want ErrTestRequiresReadGET", err)
+	if _, err := manager.Test(context.Background(), writeCapability, map[string]any{"cluster": "m1", "bucket": "archive"}); !errors.Is(err, capabilities.ErrTestRequiresRead) {
+		t.Fatalf("write test error = %v, want ErrTestRequiresRead", err)
 	}
 }
 

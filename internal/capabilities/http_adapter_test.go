@@ -225,7 +225,6 @@ func TestHTTPAdapterRejectsInvalidInput(t *testing.T) {
 
 	for name, input := range map[string]map[string]any{
 		"wrong string type": {"cluster": "m1", "bucket": 42},
-		"unknown input":     {"cluster": "m1", "bucket": "archive", "extra": "nope"},
 		"missing required":  {"cluster": "m1"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -233,6 +232,87 @@ func TestHTTPAdapterRejectsInvalidInput(t *testing.T) {
 				t.Fatal("Execute accepted invalid input")
 			}
 		})
+	}
+}
+
+// schema 外的多余字段（LLM 偶尔多猜一个）不再整单拒绝：静默过滤后继续执行。
+func TestHTTPAdapterToleratesUnknownInputFields(t *testing.T) {
+	t.Parallel()
+	var gotPath, gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"usage_pct": 42}})
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	adapter := capabilities.NewHTTPAdapter(nil)
+
+	result, err := adapter.Execute(context.Background(), capability, map[string]any{
+		"cluster": "m1", "bucket": "archive", "guess_extra": "nope",
+	})
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	if gotPath != "/api/minio/clusters/m1/buckets/archive/capacity" || gotQuery != "" {
+		t.Fatalf("backend got path=%q query=%q, want filtered request", gotPath, gotQuery)
+	}
+	if result.Data["usage_pct"] != float64(42) {
+		t.Fatalf("data = %+v, want usage_pct 42", result.Data)
+	}
+}
+
+// 信封感知：显式映射写的是顶层路径（按 mock 生成），真实后端多包一层
+// {code,message,data} 信封时仍能取到值，而不是得到空数据。
+func TestHTTPAdapterEnvelopeAwareFieldRetry(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "message": "ok",
+			"data": map[string]any{"usage_pct": 91},
+		})
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	// mock 时代的映射：顶层路径，不包含信封前缀
+	capability.Output.Fields = map[string]string{"usage_pct": "$.usage_pct"}
+	adapter := capabilities.NewHTTPAdapter(nil)
+
+	result, err := adapter.Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	if result.Data["usage_pct"] != float64(91) {
+		t.Fatalf("data = %+v, want usage_pct 91 via envelope retry", result.Data)
+	}
+}
+
+// 显式映射全部 miss 时回退智能提取，"看起来成功但没有数据"不再发生。
+func TestHTTPAdapterFallsBackToSmartExtractWhenMappingsMiss(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "healthy", "name": "archive",
+			"extra": map[string]any{"nested_value": "found"},
+		})
+	}))
+	defer server.Close()
+	capability := validReadCapability()
+	capability.Backend.BaseURL = server.URL
+	capability.Output.Fields = map[string]string{"usage_pct": "$.usage_pct", "old_field": "$.gone"}
+	adapter := capabilities.NewHTTPAdapter(nil)
+
+	result, err := adapter.Execute(context.Background(), capability, map[string]any{"cluster": "m1", "bucket": "archive"})
+	if err != nil {
+		t.Fatalf("Execute returned %v", err)
+	}
+	if result.Data["status"] != "healthy" || result.Data["name"] != "archive" {
+		t.Fatalf("data = %+v, want smart-extracted fields", result.Data)
+	}
+	if result.Data["extra.nested_value"] != "found" {
+		t.Fatalf("data = %+v, want nested field flattened", result.Data)
 	}
 }
 
@@ -306,9 +386,9 @@ func TestHTTPAdapterExecutesWriteCapabilityWithJSONBody(t *testing.T) {
 	adapter := capabilities.NewHTTPAdapter(nil)
 
 	result, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"quota":       100,
+		"cluster": "m1",
+		"bucket":  "archive",
+		"quota":   100,
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -345,9 +425,9 @@ func TestHTTPAdapterExecutesWriteCapabilityWithEmptyResponseBody(t *testing.T) {
 	adapter := capabilities.NewHTTPAdapter(nil)
 
 	result, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"quota":       200,
+		"cluster": "m1",
+		"bucket":  "archive",
+		"quota":   200,
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -371,9 +451,9 @@ func TestHTTPAdapterWriteCapabilityRejectsBackendError(t *testing.T) {
 	capability.Backend.BaseURL = server.URL
 
 	_, err := capabilities.NewHTTPAdapter(nil).Execute(context.Background(), capability, map[string]any{
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"quota":       -1,
+		"cluster": "m1",
+		"bucket":  "archive",
+		"quota":   -1,
 	})
 	if err == nil || !strings.Contains(err.Error(), "HTTP 422") {
 		t.Fatalf("err = %v, want HTTP 422 backend error", err)
@@ -570,9 +650,9 @@ func TestHTTPAdapterDoesNotRetryPostRequests(t *testing.T) {
 	adapter := capabilities.NewHTTPAdapterWithConfig(nil, cfg)
 
 	_, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"quota":       100,
+		"cluster": "m1",
+		"bucket":  "archive",
+		"quota":   100,
 	})
 	if err == nil || !strings.Contains(err.Error(), "HTTP 503") {
 		t.Fatalf("err = %v, want HTTP 503", err)
@@ -669,9 +749,9 @@ func TestHTTPAdapterAppendsQueryParamsToReadURL(t *testing.T) {
 
 	adapter := capabilities.NewHTTPAdapter(nil)
 	_, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"detail":      "full",
+		"cluster": "m1",
+		"bucket":  "archive",
+		"detail":  "full",
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -696,10 +776,10 @@ func TestHTTPAdapterExcludesQueryParamsFromWriteBody(t *testing.T) {
 
 	adapter := capabilities.NewHTTPAdapter(nil)
 	_, err := adapter.Execute(context.Background(), capability, map[string]any{
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"quota":       100,
-		"detail":      "should-not-be-in-body",
+		"cluster": "m1",
+		"bucket":  "archive",
+		"quota":   100,
+		"detail":  "should-not-be-in-body",
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)

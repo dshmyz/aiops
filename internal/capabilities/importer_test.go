@@ -1,6 +1,10 @@
 package capabilities_test
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,8 +61,8 @@ paths:
 	if preview.Source.Fingerprint == "" || !strings.HasPrefix(preview.Source.Fingerprint, "sha256:") {
 		t.Fatalf("fingerprint = %q, want sha256 prefix", preview.Source.Fingerprint)
 	}
-	if preview.Stats.Total != 2 || preview.Stats.Recommended != 1 || preview.Stats.NotRecommended != 1 || preview.Stats.Read != 1 || preview.Stats.Write != 1 {
-		t.Fatalf("stats = %+v, want one recommended read and one not-recommended write", preview.Stats)
+	if preview.Stats.Total != 2 || preview.Stats.Recommended != 1 || preview.Stats.NeedsAdjustment != 1 || preview.Stats.Read != 1 || preview.Stats.Write != 1 {
+		t.Fatalf("stats = %+v, want one recommended read and one needs-adjustment write", preview.Stats)
 	}
 	first := preview.Candidates[0]
 	if first.ID != "GET /api/minio/{cluster}/buckets/{bucket}/capacity" {
@@ -77,8 +81,10 @@ paths:
 		t.Fatalf("candidate capability = %+v", first.Capability)
 	}
 	second := preview.Candidates[1]
-	if second.Recommendation != capabilities.RecommendationNotRecommended || second.Capability.Operation != tools.Write {
-		t.Fatalf("second candidate = %+v, want not recommended write", second)
+	// 写能力不再一票否决：标为"需要调整"，用户可在调整面板把 operation 改成
+	// read（POST 查询）或补齐治理后接入。
+	if second.Recommendation != capabilities.RecommendationNeedsAdjustment || second.Capability.Operation != tools.Write {
+		t.Fatalf("second candidate = %+v, want needs-adjustment write", second)
 	}
 	if len(second.Reasons) == 0 {
 		t.Fatalf("second reasons empty, want explanation")
@@ -412,8 +418,10 @@ paths:
 	if len(drafts) != 1 {
 		t.Fatalf("draft count = %d, want 1", len(drafts))
 	}
-	if _, ok := drafts[0].InputSchema["replication"]; ok {
-		t.Fatal("query parameter replication should not be imported for POST (write) operations")
+	// POST 写能力也保留 query 参数（in:query），适配器拼到 URL 上而不进 body。
+	replication, ok := drafts[0].InputSchema["replication"]
+	if !ok || replication.In != "query" {
+		t.Fatalf("query parameter replication = %+v, want imported with in:query", replication)
 	}
 }
 
@@ -507,8 +515,10 @@ paths:
 	if draft.Name != "kafka.topic.resource.action" {
 		t.Fatalf("name = %q, want action-style POST name", draft.Name)
 	}
-	if _, ok := draft.InputSchema["verbose"]; ok {
-		t.Fatalf("verbose input present, want not injected (only path params become input): %+v", draft.InputSchema)
+	// POST 也保留 query 参数（in:query）；只有路径变量进 body/URL 模板。
+	verbose, ok := draft.InputSchema["verbose"]
+	if !ok || verbose.In != "query" || verbose.Required {
+		t.Fatalf("verbose input = %+v, want optional in:query", verbose)
 	}
 	topic, ok := draft.InputSchema["topic"]
 	if !ok || topic.Type != "string" || !topic.Required {
@@ -653,4 +663,319 @@ paths:
 	if len(drafts[0].InputSchema) != 1 { // bucket，无 body 字段
 		t.Fatalf("input_schema keys = %d, want 1 (path var only)", len(drafts[0].InputSchema))
 	}
+}
+
+// Swagger 2.0 文档（definitions + in:body 参数 + response.schema）应归一化导入，
+// 而不是静默产出没有 body 参数、没有输出映射的残废草稿。
+func TestImportOpenAPINormalizesSwagger2(t *testing.T) {
+	body := []byte(`swagger: "2.0"
+paths:
+  /api/kafka/topics/{topic}/partitions:
+    post:
+      tags: [kafka]
+      summary: Add partition
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          type: string
+        - name: body
+          in: body
+          schema:
+            type: object
+            required: [count]
+            properties:
+              count:
+                type: integer
+                description: 目标分区数
+      responses:
+        200:
+          description: ok
+          schema:
+            $ref: '#/definitions/PartitionResult'
+definitions:
+  PartitionResult:
+    type: object
+    properties:
+      total:
+        type: integer
+      message:
+        type: string
+`)
+
+	drafts, err := capabilities.ImportOpenAPI(body)
+	if err != nil {
+		t.Fatalf("ImportOpenAPI returned %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("draft count = %d, want 1", len(drafts))
+	}
+	draft := drafts[0]
+	if field, ok := draft.InputSchema["topic"]; !ok || !field.Required {
+		t.Fatalf("topic input = %+v, want required path var", field)
+	}
+	if field, ok := draft.InputSchema["count"]; !ok || field.Type != "integer" {
+		t.Fatalf("count input = %+v, want integer body field", field)
+	}
+	if len(draft.Output.Fields) == 0 {
+		t.Fatalf("output fields empty, want inferred from definitions via response schema")
+	}
+	for _, want := range []string{"total", "message"} {
+		if _, ok := draft.Output.Fields[want]; !ok {
+			t.Fatalf("output fields = %v, want %q mapped", draft.Output.Fields, want)
+		}
+	}
+}
+
+// 响应信封（{code,message,data:{...}}）导入时自动下钻：输出映射落在业务字段
+// 上而不是 code/message 上。
+func TestImportOpenAPIUnwrapsResponseEnvelope(t *testing.T) {
+	body := []byte(`openapi: 3.0.0
+paths:
+  /api/minio/buckets/{bucket}/capacity:
+    get:
+      tags: [minio]
+      summary: Bucket capacity
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        200:
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer}
+                  message: {type: string}
+                  data:
+                    type: object
+                    properties:
+                      usage_pct: {type: number}
+                      bucket_name: {type: string}
+`)
+
+	drafts, err := capabilities.ImportOpenAPI(body)
+	if err != nil {
+		t.Fatalf("ImportOpenAPI returned %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("draft count = %d, want 1", len(drafts))
+	}
+	fields := drafts[0].Output.Fields
+	if _, ok := fields["code"]; ok {
+		t.Fatalf("output fields = %v, want envelope code skipped", fields)
+	}
+	if _, ok := fields["usage_pct"]; !ok {
+		t.Fatalf("output fields = %v, want data.usage_pct mapped via envelope unwrap", fields)
+	}
+	if _, ok := fields["bucket_name"]; !ok {
+		t.Fatalf("output fields = %v, want data.bucket_name mapped via envelope unwrap", fields)
+	}
+}
+
+// $ref 解析失败（外部引用/组件名不匹配）以警告透出到预览候选，而不是静默丢字段。
+func TestImportOpenAPIUnresolvedRefBecomesWarning(t *testing.T) {
+	body := []byte(`openapi: 3.0.0
+paths:
+  /api/kafka/topics/{topic}/config:
+    get:
+      tags: [kafka]
+      summary: Topic config
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        200:
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: 'https://external.example.com/schemas.yaml#/TopicConfig'
+`)
+
+	preview, err := capabilities.ImportOpenAPICandidates(body, nil)
+	if err != nil {
+		t.Fatalf("ImportOpenAPICandidates returned %v", err)
+	}
+	if len(preview.Candidates) != 1 {
+		t.Fatalf("candidate count = %d, want 1", len(preview.Candidates))
+	}
+	found := false
+	for _, warning := range preview.Candidates[0].Warnings {
+		if strings.Contains(warning, "$ref") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %v, want unresolved $ref warning", preview.Candidates[0].Warnings)
+	}
+}
+
+// fakeProbeChat 是 InferOutputFromSample 的最小 ChatCompleter stub。
+type fakeProbeChat struct {
+	response string
+	err      error
+}
+
+func (f fakeProbeChat) Complete(_ context.Context, _, _ string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.response, nil
+}
+
+func probeDraft() capabilities.Capability {
+	return capabilities.Capability{
+		SchemaVersion: 1,
+		Name:          "kafka.topic.health.read",
+		Status:        capabilities.StatusNeedsReview,
+		Domain:        "kafka",
+		ResourceType:  "topic",
+		Operation:     tools.Read,
+		Risk:          tools.Low,
+		Backend: capabilities.BackendSpec{
+			Adapter: "http", Method: "GET",
+			Path: "/api/kafka/topics/{topic}/health", TimeoutMS: 3000,
+		},
+		InputSchema: map[string]capabilities.InputField{
+			"topic": {Type: "string", Required: true},
+		},
+		Output: capabilities.OutputSpec{Kind: "observation", SummaryTemplate: "查询完成"},
+		Auth:   capabilities.AuthSpec{Roles: []string{"viewer"}},
+	}
+}
+
+// LLM 按真实样本推断的映射经 extractPath 校验：取不到值的路径被丢弃，
+// 全部无效时返回错误（调用方回退规则），不给幻觉留活路。
+func TestInferOutputFromSampleValidatesAgainstSample(t *testing.T) {
+	sample := []byte(`{"code":0,"message":"ok","data":{"status":"healthy","topic_name":"orders","lag":5}}`)
+	chat := fakeProbeChat{response: "```json\n" + `{
+		"summary_template": "topic {topic_name} 状态为 {status}",
+		"severity_path": "$.data.status",
+		"output_fields": {
+			"status": "$.data.status",
+			"topic_name": "$.data.topic_name",
+			"hallucinated": "$.data.does_not_exist"
+		}
+	}` + "\n```"}
+	draft := probeDraft()
+
+	spec, err := capabilities.InferOutputFromSample(context.Background(), chat, draft, sample)
+	if err != nil {
+		t.Fatalf("InferOutputFromSample returned %v", err)
+	}
+	if spec.Fields["status"] != "$.data.status" || spec.Fields["topic_name"] != "$.data.topic_name" {
+		t.Fatalf("fields = %v, want validated paths kept", spec.Fields)
+	}
+	if _, exists := spec.Fields["hallucinated"]; exists {
+		t.Fatalf("fields = %v, want hallucinated path dropped", spec.Fields)
+	}
+	if spec.SeverityPath != "$.data.status" {
+		t.Fatalf("severity_path = %q", spec.SeverityPath)
+	}
+	if spec.SummaryTemplate != "topic {topic_name} 状态为 {status}" {
+		t.Fatalf("summary_template = %q", spec.SummaryTemplate)
+	}
+}
+
+// LLM 输出的路径在真实响应上全部无效时返回错误，不让无效映射覆盖草稿。
+func TestInferOutputFromSampleRejectsAllInvalidPaths(t *testing.T) {
+	sample := []byte(`{"code":0,"data":{"status":"healthy"}}`)
+	chat := fakeProbeChat{response: `{"output_fields":{"bad":"$.nowhere.to_be_found"}}`}
+	if _, err := capabilities.InferOutputFromSample(context.Background(), chat, probeDraft(), sample); err == nil {
+		t.Fatal("want error when all LLM paths invalid on sample")
+	}
+}
+
+// ProbeAndInfer 集成：真实调用 mock 后端 + LLM 推断，映射来源标记为 llm_sample。
+func TestManagerProbeAndInferUsesLLMOnSample(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "message": "ok",
+			"data": map[string]any{"status": "healthy", "topic_name": "orders"},
+		})
+	}))
+	defer server.Close()
+
+	chat := fakeProbeChat{response: `{
+		"summary_template": "topic {topic_name} 状态为 {status}",
+		"severity_path": "$.data.status",
+		"output_fields": {"status": "$.data.status", "topic_name": "$.data.topic_name"}
+	}`}
+	manager := NewManagerForTest(t).WithChat(chat)
+	draft := probeDraft()
+	draft.Backend.BaseURL = server.URL
+
+	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"})
+	if err != nil {
+		t.Fatalf("ProbeAndInfer returned %v", err)
+	}
+	if result.Probe == nil {
+		t.Fatal("probe result missing")
+	}
+	if result.InferredBy != "llm_sample" {
+		t.Fatalf("inferred_by = %q, want llm_sample", result.InferredBy)
+	}
+	if result.Inferred.Fields["status"] != "$.data.status" {
+		t.Fatalf("inferred fields = %v", result.Inferred.Fields)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", result.Warnings)
+	}
+}
+
+// 无 LLM 时 ProbeAndInfer 回退规则推断（来源 rules），试调本身不受影响。
+func TestManagerProbeAndInferFallsBackToRules(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "data": map[string]any{"status": "healthy"},
+		})
+	}))
+	defer server.Close()
+
+	manager := NewManagerForTest(t)
+	draft := probeDraft()
+	draft.Backend.BaseURL = server.URL
+
+	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"})
+	if err != nil {
+		t.Fatalf("ProbeAndInfer returned %v", err)
+	}
+	if result.InferredBy != "rules" {
+		t.Fatalf("inferred_by = %q, want rules", result.InferredBy)
+	}
+	if result.Probe == nil || result.Probe.Data["data.status"] != "healthy" {
+		t.Fatalf("probe = %+v, want smart-extracted data", result.Probe)
+	}
+}
+
+// 后端不可达时 ProbeAndInfer 不报错，而是把失败原因放进 warnings——
+// 让"连不通"在导入时可见。
+func TestManagerProbeAndInferReportsBackendFailure(t *testing.T) {
+	manager := NewManagerForTest(t)
+	draft := probeDraft()
+	draft.Backend.BaseURL = "http://127.0.0.1:1"
+
+	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"})
+	if err != nil {
+		t.Fatalf("ProbeAndInfer returned %v", err)
+	}
+	if result.Probe != nil {
+		t.Fatalf("probe = %+v, want nil on backend failure", result.Probe)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("warnings empty, want backend failure reason")
+	}
+}
+
+// NewManagerForTest 用临时目录构造测试 Manager。
+func NewManagerForTest(t *testing.T) *capabilities.Manager {
+	t.Helper()
+	return capabilities.NewManager(t.TempDir(), nil)
 }

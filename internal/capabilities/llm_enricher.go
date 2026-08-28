@@ -34,11 +34,11 @@ func NewLLMImportEnricher(chat ChatCompleter) *LLMImportEnricher {
 
 // enrichedDraftShape 描述 LLM 需要填写的字段。字段尽量精简，减小 token 与出错率。
 type enrichedDraftShape struct {
-	Description    string                      `json:"description"`
-	Summary        string                      `json:"summary,omitempty"`
-	Risk           string                      `json:"risk,omitempty"`
-	InputSchema    map[string]enrichedField    `json:"input_schema"`
-	OutputFields   map[string]string           `json:"output_fields,omitempty"`
+	Description  string                   `json:"description"`
+	Summary      string                   `json:"summary,omitempty"`
+	Risk         string                   `json:"risk,omitempty"`
+	InputSchema  map[string]enrichedField `json:"input_schema"`
+	OutputFields map[string]string        `json:"output_fields,omitempty"`
 }
 
 type enrichedField struct {
@@ -199,3 +199,81 @@ func extractEnrichJSON(s string) string {
 	}
 	return strings.TrimSpace(s)
 }
+
+// probeResponseShape 是一次真实试调后交给 LLM 的上下文：草稿 + 脱敏后的
+// 实际响应样本。LLM 据此生成与真实响应匹配的输出映射，而不是对着 Swagger
+// 声明猜——后者常与实际响应（信封、字段命名）不一致。
+type probeResponseShape struct {
+	SummaryTemplate string            `json:"summary_template"`
+	SeverityPath    string            `json:"severity_path,omitempty"`
+	StatusMapping   map[string]string `json:"status_mapping,omitempty"`
+	OutputFields    map[string]string `json:"output_fields"`
+}
+
+// InferOutputFromSample 用一次真实后端响应样本让 LLM 推断输出映射。
+// 返回的映射经 extractPath 校验：路径取不到值的字段会被丢弃（LLM 幻觉防御），
+// 全部无效或 LLM 失败时返回错误，由调用方回退到规则推断。
+func InferOutputFromSample(ctx context.Context, chat ChatCompleter, draft Capability, sampleBody []byte) (OutputSpec, error) {
+	out := draft.Output
+	if chat == nil {
+		return out, fmt.Errorf("no LLM configured")
+	}
+	// 响应样本截断，控制 prompt 体积
+	sample := string(sampleBody)
+	if len(sample) > 4096 {
+		sample = sample[:4096] + "\n...（已截断）"
+	}
+	var inputDesc []string
+	for name, f := range draft.InputSchema {
+		inputDesc = append(inputDesc, fmt.Sprintf("%s(%s)", name, f.Type))
+	}
+	user := fmt.Sprintf(
+		"接口: %s %s\n用途: %s\n输入参数: %s\n\n真实响应样本(JSON):\n%s\n\n"+
+			"请基于真实响应样本推断输出映射，返回 JSON:\n"+
+			"{\"summary_template\":\"中文摘要模板，可用 {字段名} 引用 output_fields 中的字段或输入参数\",\n"+
+			" \"severity_path\":\"严重级别字段的 JSONPath（如 $.status），没有则留空\",\n"+
+			" \"status_mapping\":{\"原始值\":\"ok/warning/critical/info\"}(可选，把非标准状态值归一),\n"+
+			" \"output_fields\":{\"字段名\":\"$.JSONPath\"}}\n\n"+
+			"规则：路径必须能在样本上取到值；优先 status/health/name/id/count/total/message 等诊断关键字段；最多 10 个。",
+		strings.ToUpper(draft.Backend.Method), draft.Backend.Path,
+		strings.TrimSpace(draft.AI.Description),
+		strings.Join(inputDesc, "; "), sample,
+	)
+	response, err := chat.Complete(ctx, probeSystemPrompt, user)
+	if err != nil {
+		return out, err
+	}
+	jsonStr := extractEnrichJSON(response)
+	var shape probeResponseShape
+	if err := json.Unmarshal([]byte(jsonStr), &shape); err != nil {
+		return out, err
+	}
+	// 幻觉防御：LLM 给的路径逐个在真实样本上验证，取不到值的丢弃
+	var raw map[string]any
+	if err := json.Unmarshal(sampleBody, &raw); err == nil {
+		validated := make(map[string]string, len(shape.OutputFields))
+		for name, path := range shape.OutputFields {
+			if _, ok := extractPath(raw, path); ok {
+				validated[name] = path
+			}
+		}
+		shape.OutputFields = validated
+	}
+	if len(shape.OutputFields) == 0 {
+		return out, fmt.Errorf("LLM 推断的输出映射在真实响应上全部无效")
+	}
+	if template := strings.TrimSpace(shape.SummaryTemplate); template != "" {
+		out.SummaryTemplate = template
+	}
+	if path := strings.TrimSpace(shape.SeverityPath); path != "" {
+		out.SeverityPath = path
+	}
+	if len(shape.StatusMapping) > 0 {
+		out.StatusMapping = shape.StatusMapping
+	}
+	out.Fields = shape.OutputFields
+	return out, nil
+}
+
+const probeSystemPrompt = `你是 API 能力映射专家。给你一个接口定义和一次真实响应样本，推断让运维 AI 能读懂该接口输出的字段映射。只返回合法 JSON，不要解释。
+JSONPath 使用 $.前缀支持点路径，如 $.data.items[0].status。summary_template 用花括号 {字段名} 引用字段。`

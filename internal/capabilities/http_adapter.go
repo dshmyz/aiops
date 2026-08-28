@@ -14,8 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
 
 const maxBackendResponseBytes = 1024 * 1024
@@ -172,7 +170,8 @@ func (a *HTTPAdapter) Execute(ctx context.Context, capability Capability, input 
 	if input == nil {
 		return NormalizedResult{}, errors.New("input must not be nil")
 	}
-	if err := validateAdapterInput(capability, input); err != nil {
+	filtered := filterAdapterInput(capability, input)
+	if err := validateAdapterInput(capability, filtered); err != nil {
 		return NormalizedResult{}, err
 	}
 
@@ -183,14 +182,16 @@ func (a *HTTPAdapter) Execute(ctx context.Context, capability Capability, input 
 	requestContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	path, err := buildPath(capability.Backend.Path, input)
+	path, err := buildPath(capability.Backend.Path, filtered)
 	if err != nil {
 		return NormalizedResult{}, err
 	}
-	if capability.Operation == tools.Write {
-		return a.executeWrite(requestContext, capability, input, path)
+	// 非 GET 的读能力（POST 查询等）也发 JSON body，与写能力同一套 body 构造；
+	// GET 读能力走 query 参数。
+	if capability.Backend.Method != http.MethodGet {
+		return a.executeWrite(requestContext, capability, filtered, path)
 	}
-	return a.executeRead(requestContext, capability, input, path)
+	return a.executeRead(requestContext, capability, filtered, path)
 }
 
 // do wraps a single HTTP request with circuit-breaker and retry logic.
@@ -300,50 +301,13 @@ func (a *HTTPAdapter) executeRead(ctx context.Context, capability Capability, in
 		return normalizeTextResult(payload, capability, input), nil
 	}
 
-	fields := make(map[string]any)
-	if len(capability.Output.Fields) == 0 {
-		// 没有显式字段映射时，智能提取：递归展开嵌套对象、数组截断、敏感字段过滤
-		fields = smartExtractFields(raw)
-	} else {
-		for name, path := range capability.Output.Fields {
-			if isSensitive(name) || isSensitivePath(path) {
-				continue
-			}
-			if value, ok := extractPath(raw, path); ok {
-				// 标量值保留原始类型（与原行为一致）；数组/对象智能展开
-				if _, ok := scalarString(value); ok {
-					fields[name] = value
-				} else if arr, ok := value.([]any); ok && len(arr) > 0 {
-					// 数组字段：保留前 maxArrayItems 个标量元素 + 总数
-					safeArr := make([]any, 0, maxArrayItems)
-					for i, item := range arr {
-						if i >= maxArrayItems {
-							break
-						}
-						if _, ok := scalarString(item); ok {
-							safeArr = append(safeArr, item)
-						}
-					}
-					if len(safeArr) > 0 {
-						fields[name] = safeArr
-						fields[name+"_count"] = len(arr)
-					}
-				} else if obj, ok := value.(map[string]any); ok && len(obj) > 0 {
-					// 对象字段：展开扁平子字段
-					subFields := make(map[string]any)
-					flattenObject(name, obj, subFields)
-					for k, v := range subFields {
-						fields[k] = v
-					}
-				}
-			}
-		}
-	}
+	fields := extractMappedFields(capability, raw)
+	name := resourceNameFromInput(capability, input)
 	// 严重级别：优先用显式配置的 severity_path，否则智能推断
 	severity := "info"
 	if capability.Output.SeverityPath != "" {
 		if !isSensitivePath(capability.Output.SeverityPath) {
-			if value, ok := extractPath(raw, capability.Output.SeverityPath); ok {
+			if value, ok := extractField(raw, capability.Output.SeverityPath); ok {
 				if scalar, ok := scalarString(value); ok {
 					severity = scalar
 				}
@@ -355,7 +319,6 @@ func (a *HTTPAdapter) executeRead(ctx context.Context, capability Capability, in
 	// status_mapping：按能力自配置把原始状态值归一到标准严重级（未命中则保持不变），
 	// 让"值→层级"可针对具体接口配置，而非只能靠全局 classifySeverity 猜。
 	severity = applyStatusMapping(severity, capability.Output.StatusMapping)
-	name := resourceNameFromInput(capability, input)
 	// 摘要：优先用 summary_template，否则智能生成
 	summary := ""
 	if strings.TrimSpace(capability.Output.SummaryTemplate) != "" {
@@ -383,6 +346,10 @@ func (a *HTTPAdapter) executeWrite(ctx context.Context, capability Capability, i
 		return NormalizedResult{}, err
 	}
 	endpoint := strings.TrimRight(capability.Backend.BaseURL, "/") + path
+	// in:query 的参数（POST 查询接口的分页/过滤等）拼到 URL，不进 JSON body。
+	if query := buildQueryValues(capability, input); len(query) > 0 {
+		endpoint = endpoint + "?" + query.Encode()
+	}
 	var reader io.Reader
 	if len(body) > 0 {
 		reader = bytes.NewReader(body)
@@ -420,42 +387,7 @@ func (a *HTTPAdapter) executeWrite(ctx context.Context, capability Capability, i
 		}
 	}
 
-	fields := make(map[string]any)
-	if len(capability.Output.Fields) == 0 {
-		// 无显式映射时智能提取（与读操作一致）
-		fields = smartExtractFields(raw)
-	} else {
-		for name, fieldPath := range capability.Output.Fields {
-			if isSensitive(name) || isSensitivePath(fieldPath) {
-				continue
-			}
-			if value, ok := extractPath(raw, fieldPath); ok {
-				if _, ok := scalarString(value); ok {
-					fields[name] = value
-				} else if arr, ok := value.([]any); ok && len(arr) > 0 {
-					safeArr := make([]any, 0, maxArrayItems)
-					for i, item := range arr {
-						if i >= maxArrayItems {
-							break
-						}
-						if _, ok := scalarString(item); ok {
-							safeArr = append(safeArr, item)
-						}
-					}
-					if len(safeArr) > 0 {
-						fields[name] = safeArr
-						fields[name+"_count"] = len(arr)
-					}
-				} else if obj, ok := value.(map[string]any); ok && len(obj) > 0 {
-					subFields := make(map[string]any)
-					flattenObject(name, obj, subFields)
-					for k, v := range subFields {
-						fields[k] = v
-					}
-				}
-			}
-		}
-	}
+	fields := extractMappedFields(capability, raw)
 	name := resourceNameFromInput(capability, input)
 	// 写操作也智能推断摘要
 	summary := ""
@@ -569,6 +501,82 @@ func validateOutputMappings(output OutputSpec) error {
 	return nil
 }
 
+// envelopePrefixes 是常见后端信封包装（{code,message,data:{...}}）。
+// 显式字段路径在顶层取不到值时按序在这些包装下重试。
+var envelopePrefixes = []string{"data", "result", "response"}
+
+// extractField 用显式路径提取字段，未命中时做信封感知重试：
+// $.foo 在顶层取不到时依次尝试 $.data.foo / $.result.foo / $.response.foo。
+// 真实后端常在 Swagger 样例响应外多包一层信封，这层重试让映射"稍不一致"
+// 时仍能取到值，而不是静默丢弃。
+func extractField(raw map[string]any, path string) (any, bool) {
+	if value, ok := extractPath(raw, path); ok {
+		return value, true
+	}
+	trimmed := strings.TrimSpace(path)
+	if !strings.HasPrefix(trimmed, "$.") {
+		return nil, false
+	}
+	rest := strings.TrimPrefix(trimmed, "$.")
+	if rest == "" {
+		return nil, false
+	}
+	for _, prefix := range envelopePrefixes {
+		if value, ok := extractPath(raw, "$."+prefix+"."+rest); ok {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+// extractMappedFields 按显式 output.fields 映射提取字段；全部未命中时回退
+// smartExtractFields（信封/嵌套/数组截断）。此前"映射存在但全 miss"会得到
+// 空结果，看起来成功却没有数据；回退保证格式稍不一致时退化为"退化但可用"。
+func extractMappedFields(capability Capability, raw map[string]any) map[string]any {
+	fields := make(map[string]any)
+	for name, path := range capability.Output.Fields {
+		if isSensitive(name) || isSensitivePath(path) {
+			continue
+		}
+		value, ok := extractField(raw, path)
+		if !ok {
+			continue
+		}
+		if _, ok := scalarString(value); ok {
+			fields[name] = value
+			continue
+		}
+		if arr, ok := value.([]any); ok && len(arr) > 0 {
+			// 数组字段：保留前 maxArrayItems 个标量元素 + 总数
+			safeArr := make([]any, 0, maxArrayItems)
+			for i, item := range arr {
+				if i >= maxArrayItems {
+					break
+				}
+				if _, ok := scalarString(item); ok {
+					safeArr = append(safeArr, item)
+				}
+			}
+			if len(safeArr) > 0 {
+				fields[name] = safeArr
+				fields[name+"_count"] = len(arr)
+			}
+			continue
+		}
+		if obj, ok := value.(map[string]any); ok && len(obj) > 0 {
+			subFields := make(map[string]any)
+			flattenObject(name, obj, subFields)
+			for k, v := range subFields {
+				fields[k] = v
+			}
+		}
+	}
+	if len(fields) == 0 && len(raw) > 0 {
+		return smartExtractFields(raw)
+	}
+	return fields
+}
+
 func validateAdapterInput(capability Capability, input map[string]any) error {
 	for name, field := range capability.InputSchema {
 		value, ok := input[name]
@@ -588,18 +596,31 @@ func validateAdapterInput(capability Capability, input map[string]any) error {
 			if !validAdapterInteger(value) {
 				return fmt.Errorf("input %q must be an integer", name)
 			}
+		case "number":
+			if !validAdapterNumber(value) {
+				return fmt.Errorf("input %q must be a number", name)
+			}
 		case "boolean":
 			if _, ok := value.(bool); !ok {
 				return fmt.Errorf("input %q must be a boolean", name)
 			}
 		}
 	}
-	for name := range input {
-		if _, ok := capability.InputSchema[name]; !ok {
-			return fmt.Errorf("input %q is not allowed", name)
+	// schema 外的多余字段不再整单拒绝：LLM 偶尔多猜一个字段就全盘失败太脆。
+	// 调用方在构造请求时会过滤掉未知 key，这里只放行校验。
+	return nil
+}
+
+// filterAdapterInput 返回仅含 schema 内 key 的输入副本。未知字段被静默丢弃，
+// 避免下游 buildWriteBody/buildQueryValues 把它们发给后端。
+func filterAdapterInput(capability Capability, input map[string]any) map[string]any {
+	filtered := make(map[string]any, len(input))
+	for name, value := range input {
+		if _, known := capability.InputSchema[name]; known {
+			filtered[name] = value
 		}
 	}
-	return nil
+	return filtered
 }
 
 func validAdapterInteger(value any) bool {
@@ -613,6 +634,18 @@ func validAdapterInteger(value any) bool {
 	case json.Number:
 		_, err := value.Int64()
 		return err == nil
+	default:
+		return false
+	}
+}
+
+// validAdapterNumber 校验任意数值（含小数）。integer 之外，number 类型接受
+// 所有 JSON 数字。
+func validAdapterNumber(value any) bool {
+	switch value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64,
+		float32, float64, json.Number:
+		return true
 	default:
 		return false
 	}
@@ -681,15 +714,23 @@ func isSensitivePath(path string) bool {
 }
 
 // injectAuthHeader 根据 BackendAuthConfig 在 HTTP 请求中注入认证头。
+// 支持 bearer（Authorization: Bearer <token>）与 api_key（自定义 header，
+// 默认 X-API-Key，可用 header_name 覆盖）。
 func injectAuthHeader(req *http.Request, capability Capability) {
-	if capability.Backend.Auth.Type != "bearer" {
-		return
-	}
 	token := resolveAuthToken(capability.Backend.Auth.Token)
 	if token == "" {
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	switch capability.Backend.Auth.Type {
+	case "bearer":
+		req.Header.Set("Authorization", "Bearer "+token)
+	case "api_key":
+		name := capability.Backend.Auth.HeaderName
+		if strings.TrimSpace(name) == "" {
+			name = "X-API-Key"
+		}
+		req.Header.Set(name, token)
+	}
 }
 
 // resolveAuthToken 解析 token 值。支持 ${ENV_VAR} 语法：以 ${ 开头、}

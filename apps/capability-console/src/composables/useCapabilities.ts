@@ -27,6 +27,7 @@ import type {
   InputField,
   ManagedCapability,
   NormalizedResult,
+  ProbeInferResult,
   ValidationResult,
 } from '../types';
 
@@ -47,6 +48,9 @@ export interface UseCapabilities {
   selected: Ref<ManagedCapability>;
   validation: Ref<ValidationResult>;
   preview: Ref<NormalizedResult | null>;
+  /** 试调探活结果（null 表示尚未试调）。 */
+  probeResult: Ref<ProbeInferResult | null>;
+  probeLoading: Ref<boolean>;
   error: Ref<string>;
   loading: Ref<boolean>;
   /** 能力存储是否已配置。false 时列表为空是"未启用"而非"零能力"。 */
@@ -93,6 +97,13 @@ export interface UseCapabilities {
   selectedImportCandidates: ComputedRef<ReturnType<typeof selectedCandidates>>;
   canCommitImportPreview: ComputedRef<boolean>;
   importCommitSummary: ComputedRef<{ selected: number; reads: number; writes: number; highRisk: number }>;
+  /** 候选批量试调结果（候选 ID → 结果；ok=false 表示有问题需人工处理）。 */
+  candidateProbeResults: Ref<Record<string, ProbeInferResult & { ok: boolean }>>;
+  candidateProbing: Ref<boolean>;
+  candidateProbedProgress: Ref<number>;
+  candidateProbedCount: ComputedRef<number>;
+  cleanProbedCandidates: ComputedRef<ImportCandidate[]>;
+  problemProbedCandidates: ComputedRef<ImportCandidate[]>;
   publishedCapabilityNames: ComputedRef<Set<string>>;
   stats: ComputedRef<{ published: number; review: number; invalid: number; publishable: number }>;
   filteredCapabilities: ComputedRef<ManagedCapability[]>;
@@ -101,7 +112,7 @@ export interface UseCapabilities {
   outputRows: ComputedRef<{ name: string; path: string }[]>;
   publishTargetPath: ComputedRef<string>;
   governanceSummary: ComputedRef<string>;
-  publishChecks: ComputedRef<{ label: string; ok: boolean; detail: string }[]>;
+  publishChecks: ComputedRef<import('./useCapabilityEditor').CheckItem[]>;
   publishReady: ComputedRef<boolean>;
 
   // 分页和批量操作
@@ -121,17 +132,24 @@ export interface UseCapabilities {
   saveSelectedDraft: () => Promise<void>;
   validateSelected: () => Promise<void>;
   testSelected: () => Promise<void>;
+  /** 试调真实接口：调一次后端并按真实响应推断输出映射。 */
+  probeSelected: () => Promise<void>;
+  /** 把试调推断出的输出映射写回当前草稿。 */
+  applyInferredOutput: () => void;
+  /** 批量试调勾选的候选（仅 GET 读能力），结果内联到候选列表。 */
+  probeSelectedCandidates: () => Promise<void>;
   previewSwaggerURL: () => Promise<void>;
   clearImportPreview: () => void;
   loadBuiltinExample: () => Promise<void>;
   builtinExampleActive: ComputedRef<boolean>;
-  commitSwaggerImport: () => Promise<void>;
+  commitSwaggerImport: (options?: { autoPublishClean?: boolean }) => Promise<void>;
   updateCandidateOverride: (id: string, patch: Partial<ImportCandidateOverride>) => void;
   toggleImportIgnored: (name: string, ignored: boolean) => void;
   openImportedCapability: (item: ImportBatch['items'][number]) => void;
   publishSelected: (capability: ManagedCapability) => Promise<void>;
   publishCurrent: () => Promise<void>;
   unpublishSelected: (capability: ManagedCapability) => Promise<void>;
+  deleteSelectedDraft: (capability: ManagedCapability) => Promise<void>;
   handleQuickPublished: (capability: ManagedCapability) => void;
   handleQuickPublishError: (message: string) => void;
   runAIPreflight: () => Promise<void>;
@@ -315,6 +333,8 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     selected: editor.selected,
     validation: editor.validation,
     preview: editor.preview,
+    probeResult: editor.probeResult,
+    probeLoading: editor.probeLoading,
     error,
     loading,
     configured,
@@ -360,6 +380,12 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     selectedImportCandidates: importWizard.selectedImportCandidates,
     canCommitImportPreview: importWizard.canCommitImportPreview,
     importCommitSummary: importWizard.importCommitSummary,
+    candidateProbeResults: importWizard.candidateProbeResults,
+    candidateProbing: importWizard.candidateProbing,
+    candidateProbedProgress: importWizard.candidateProbedProgress,
+    candidateProbedCount: importWizard.candidateProbedCount,
+    cleanProbedCandidates: importWizard.cleanProbedCandidates,
+    problemProbedCandidates: importWizard.problemProbedCandidates,
     publishedCapabilityNames: publish.publishedCapabilityNames,
     stats: publish.stats,
     filteredCapabilities: publish.filteredCapabilities,
@@ -387,6 +413,9 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     saveSelectedDraft: editor.saveSelectedDraft,
     validateSelected: editor.validateSelected,
     testSelected: editor.testSelected,
+    probeSelected: editor.probeSelected,
+    applyInferredOutput: editor.applyInferredOutput,
+    probeSelectedCandidates: importWizard.probeSelectedCandidates,
     previewSwaggerURL: importWizard.previewSwaggerURL,
     clearImportPreview: importWizard.clearImportPreview,
     loadBuiltinExample: importWizard.loadBuiltinExample,
@@ -398,6 +427,7 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     publishSelected: publish.publishSelected,
     publishCurrent: publish.publishCurrent,
     unpublishSelected: publish.unpublishSelected,
+    deleteSelectedDraft: publish.deleteSelectedDraft,
     handleQuickPublished: publish.handleQuickPublished,
     handleQuickPublishError: publish.handleQuickPublishError,
     runAIPreflight: editor.runAIPreflight,

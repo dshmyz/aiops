@@ -457,7 +457,7 @@ func main() {
 	} else if capDir != "" {
 		capStore = capabilities.NewFileCapabilityStore(capDir)
 	}
-	options := routerOptions(repository, assistantService, planService, executionService, capabilityManagerFromEnv(capStore, capabilityAdapter, capabilityRuntime, importEnricher(planner)), auditService)
+	options := routerOptions(repository, assistantService, planService, executionService, capabilityManagerFromEnv(capStore, capabilityAdapter, capabilityRuntime, importEnricher(planner), planner), auditService)
 	options = append(options, httpapi.WithConversations(assistantService))
 	options = append(options, httpapi.WithScheduledTasks(scheduledTaskService))
 	options = append(options, httpapi.WithInspectionReports(inspectionReportStore))
@@ -888,18 +888,32 @@ func importEnricher(planner assistant.Planner) capabilities.ImportEnricher {
 	return capabilities.NewLLMImportEnricher(assistant.NewChatCompleter(ep.ChatModel()))
 }
 
+// importChatCompleter 返回试调探活用的 ChatCompleter（与导入富化共用 chat model）。
+// planner 非 eino 或无 chat model 时返回 nil。
+func importChatCompleter(planner assistant.Planner) capabilities.ChatCompleter {
+	ep, ok := planner.(*assistant.EinoPlanner)
+	if !ok || ep == nil || ep.ChatModel() == nil {
+		return nil
+	}
+	return assistant.NewChatCompleter(ep.ChatModel())
+}
+
 // capabilityManagerFromEnv 构造能力管理 Manager。传入的 store 决定持久化后端：
 //   - SQLCapabilityStore（db != nil）→ 多节点一致的运行时事实源
 //   - FileCapabilityStore（db == nil）→ 单机文件模式（现有行为）
 //
 // 种子逻辑（SeedFromYAML）由 main() 在此处之外调用，因为需要 logger/serviceContext。
-func capabilityManagerFromEnv(store capabilities.CapabilityStore, adapter *capabilities.HTTPAdapter, runtime capabilities.PublishedCapabilityRuntime, enricher capabilities.ImportEnricher) httpapi.CapabilityManagementService {
+func capabilityManagerFromEnv(store capabilities.CapabilityStore, adapter *capabilities.HTTPAdapter, runtime capabilities.PublishedCapabilityRuntime, enricher capabilities.ImportEnricher, planner assistant.Planner) httpapi.CapabilityManagementService {
 	if store == nil {
 		return nil
 	}
 	manager := capabilities.NewManagerWithStore(store, adapter, runtime)
 	if enricher != nil {
 		manager = manager.WithEnricher(enricher)
+	}
+	// 试调探活的 LLM（按真实响应推断输出映射）与导入富化共用同一 chat model。
+	if chat := importChatCompleter(planner); chat != nil {
+		manager = manager.WithChat(chat)
 	}
 	return manager
 }

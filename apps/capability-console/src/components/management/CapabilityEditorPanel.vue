@@ -1,9 +1,50 @@
 <script setup lang="ts">
-import { ElInput, ElSelect, ElOption, ElTag } from 'element-plus';
+import { computed } from 'vue';
+import { ElInput, ElInputNumber, ElSelect, ElOption, ElTag } from 'element-plus';
 import type { UseCapabilities } from '../../composables/useCapabilities';
 import type { InputField } from '../../types';
 
 const props = defineProps<{ capabilities: UseCapabilities }>();
+
+// 鉴权配置三件套（type/header_name/token）与 backend.auth_config 双向绑定。
+// 用 computed 中转，避免直接改嵌套对象时 undefined 字段不触发响应式更新。
+const authType = computed({
+  get: () => props.capabilities.selected.value.backend.auth_config?.type ?? '',
+  set: (value: string) => {
+    if (!value) {
+      props.capabilities.selected.value.backend.auth_config = undefined;
+      return;
+    }
+    props.capabilities.selected.value.backend.auth_config = {
+      ...props.capabilities.selected.value.backend.auth_config,
+      type: value,
+    };
+  },
+});
+const authToken = computed({
+  get: () => props.capabilities.selected.value.backend.auth_config?.token ?? '',
+  set: (value: string) => {
+    if (authType.value) {
+      props.capabilities.selected.value.backend.auth_config = {
+        ...props.capabilities.selected.value.backend.auth_config,
+        type: authType.value,
+        token: value,
+      };
+    }
+  },
+});
+const authHeaderName = computed({
+  get: () => props.capabilities.selected.value.backend.auth_config?.header_name ?? '',
+  set: (value: string) => {
+    if (authType.value === 'api_key') {
+      props.capabilities.selected.value.backend.auth_config = {
+        ...props.capabilities.selected.value.backend.auth_config,
+        type: 'api_key',
+        header_name: value,
+      };
+    }
+  },
+});
 </script>
 
 <template>
@@ -26,6 +67,21 @@ const props = defineProps<{ capabilities: UseCapabilities }>();
         <label>后端 Base URL<el-input v-model="capabilities.selected.value.backend.base_url" placeholder="https://middleware.example.com" /></label>
         <label>请求方法<el-select v-model="capabilities.selected.value.backend.method"><el-option label="GET" value="GET" /><el-option label="POST" value="POST" /><el-option label="PUT" value="PUT" /><el-option label="PATCH" value="PATCH" /><el-option label="DELETE" value="DELETE" /></el-select></label>
         <label class="wide">接口路径<el-input data-test="backend-path" v-model="capabilities.selected.value.backend.path" placeholder="/api/minio/{cluster}/buckets/{bucket}" /></label>
+        <label>超时（毫秒）<el-input-number v-model="capabilities.selected.value.backend.timeout_ms" :min="500" :max="60000" :step="500" controls-position="right" /></label>
+      </div>
+      <div class="auth-config">
+        <div class="group-title compact"><h3>后端鉴权</h3><span>后端接口需要认证时配置；令牌支持写 ${环境变量名} 从环境变量读取</span></div>
+        <div class="form-grid">
+          <label>认证方式
+            <el-select v-model="authType" placeholder="无认证">
+              <el-option label="无认证" value="" />
+              <el-option label="Bearer Token（Authorization 头）" value="bearer" />
+              <el-option label="API Key（自定义 Header）" value="api_key" />
+            </el-select>
+          </label>
+          <label v-if="authType === 'api_key'">Header 名<el-input v-model="authHeaderName" placeholder="X-API-Key" /></label>
+          <label v-if="authType" class="wide">令牌 / 密钥<el-input v-model="authToken" placeholder="直接填值，或写 ${环境变量名} 从环境变量读取" show-password /></label>
+        </div>
       </div>
     </section>
     <section class="editor-group two-column">

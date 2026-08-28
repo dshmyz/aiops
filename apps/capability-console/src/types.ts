@@ -3,12 +3,19 @@ export type CapabilityRisk = 'low' | 'medium' | 'high';
 export type CapabilityStatus = 'discovered' | 'needs_review' | 'published' | 'deprecated';
 export type CapabilitySource = 'discovered' | 'published';
 
+export interface BackendAuthConfig {
+  type?: string;
+  token?: string;
+  header_name?: string;
+}
+
 export interface BackendSpec {
   adapter: string;
   method: string;
   path: string;
   timeout_ms: number;
   base_url?: string;
+  auth_config?: BackendAuthConfig;
 }
 
 export interface InputField {
@@ -27,6 +34,7 @@ export interface OutputSpec {
   severity_path: string;
   summary_template: string;
   fields: Record<string, string>;
+  status_mapping?: Record<string, string>;
 }
 
 export interface GovernanceSpec {
@@ -150,6 +158,16 @@ export interface NormalizedResult {
   severity: string;
   summary: string;
   data: Record<string, unknown>;
+}
+
+// 试调探活：真实调用一次后端并按真实响应推断输出映射。
+// 对应后端 capabilities.ProbeInferResponse。
+export interface ProbeInferResult {
+  probe?: NormalizedResult;
+  raw_body?: string;
+  inferred?: OutputSpec;
+  inferred_by?: 'llm_sample' | 'rules';
+  warnings?: string[];
 }
 
 export type DiagnosticSeverity = 'ok' | 'info' | 'warning' | 'critical';

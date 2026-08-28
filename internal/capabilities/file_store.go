@@ -204,6 +204,27 @@ func (s *FileCapabilityStore) MovePublishedToDraft(_ context.Context, name strin
 	return s.readPath(dstPath, SourceDiscovered)
 }
 
+// DeleteDraft 删除草稿文件。已发布能力不在此路径，天然不可删。
+func (s *FileCapabilityStore) DeleteDraft(_ context.Context, name string) error {
+	if err := s.Configured(); err != nil {
+		return err
+	}
+	if err := validateManagedCapabilityName(name); err != nil {
+		return err
+	}
+	path, err := s.pathFor(SourceDiscovered, name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return ErrCapabilityNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // pathFor 构造能力文件路径并校验 name/source。
 func (s *FileCapabilityStore) pathFor(source, name string) (string, error) {
 	if err := validateManagedCapabilityName(name); err != nil {

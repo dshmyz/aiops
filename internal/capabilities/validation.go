@@ -48,7 +48,7 @@ func Validate(capability Capability) error {
 		return errors.New("auth.roles are required")
 	}
 	for name, field := range capability.InputSchema {
-		if field.Type != "string" && field.Type != "integer" && field.Type != "boolean" {
+		if field.Type != "string" && field.Type != "integer" && field.Type != "number" && field.Type != "boolean" {
 			return fmt.Errorf("input %q has unsupported type %q", name, field.Type)
 		}
 		if err := validateInputBounds(name, field); err != nil {
@@ -64,8 +64,13 @@ func Validate(capability Capability) error {
 		return err
 	}
 	if capability.Operation == tools.Read {
-		if capability.Backend.Method != http.MethodGet {
-			return errors.New("read capability backend method must be GET")
+		// 国内内部系统大量用 POST 做查询（POST /search、POST /list），read 不再
+		// 限定 GET；POST/PUT/PATCH/DELETE 语义上都是"发请求拿响应"，由导入器
+		// 按方法自动填 in:body/in:query，读取时安全（不发副作用字段由 schema 约束）。
+		switch capability.Backend.Method {
+		case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		default:
+			return errors.New("read capability backend method must be GET, POST, PUT, PATCH, or DELETE")
 		}
 		if capability.Risk != tools.Low && capability.Risk != tools.Medium {
 			return errors.New("read risk must be low or medium")
@@ -142,7 +147,7 @@ func validateInputBounds(name string, field InputField) error {
 	if field.Min == nil && field.Max == nil {
 		return nil
 	}
-	if field.Type != "integer" {
+	if field.Type != "integer" && field.Type != "number" {
 		return fmt.Errorf("input %q declares min/max but is %q, not a numeric type", name, field.Type)
 	}
 	for label, bound := range map[string]*float64{"min": field.Min, "max": field.Max} {

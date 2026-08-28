@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue';
 import type { Ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { publishCapability, unpublishCapability } from '../api';
+import { deleteDraftCapability, publishCapability, unpublishCapability } from '../api';
 import { capabilityKey, upsert } from '../capabilityFormat';
 import type { ManagedCapability } from '../types';
 import type { ManagementPhase } from './useCapabilities';
@@ -159,6 +159,20 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
     }
   }
 
+  /** 删除草稿能力（误导入/作废候选）。已发布能力不可删，需先下线。 */
+  async function deleteSelectedDraft(capability: ManagedCapability) {
+    error.value = '';
+    try {
+      await deleteDraftCapability(capability.name);
+      capabilities.value = capabilities.value.filter((item) => item.name !== capability.name);
+      ElMessage.success(`已删除草稿 ${capability.name}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '删除草稿失败';
+      error.value = msg;
+      ElMessage.error(msg);
+    }
+  }
+
   function handleQuickPublished(capability: ManagedCapability) {
     upsert(capabilities, capability);
     onSelect(capability);
@@ -215,6 +229,7 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
     publishSelected,
     publishCurrent,
     unpublishSelected,
+    deleteSelectedDraft,
     handleQuickPublished,
     handleQuickPublishError,
     publishAll,

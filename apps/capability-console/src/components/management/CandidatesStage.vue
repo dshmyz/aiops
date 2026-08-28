@@ -4,7 +4,23 @@ import SwaggerSourceStrip from './SwaggerSourceStrip.vue';
 import type { UseCapabilities } from '../../composables/useCapabilities';
 import type { CapabilityOperation, CapabilityRisk } from '../../types';
 
-defineProps<{ capabilities: UseCapabilities }>();
+const props = defineProps<{ capabilities: UseCapabilities }>();
+
+// 试调结果列的提示文案：优先显示阻断问题；干净但走了规则推断的说明来源。
+function candidateProbeCellText(candidateId: string): string {
+  const probe = props.capabilities.candidateProbeResults.value[candidateId];
+  if (!probe) {
+    return '';
+  }
+  const blocking = (probe.warnings ?? []).find((w) => !w.includes('LLM 推断失败'));
+  if (blocking) {
+    return blocking;
+  }
+  if (probe.ok) {
+    return probe.inferred_by === 'rules' ? '试调成功（规则推断映射）' : '试调成功，AI 已配置映射';
+  }
+  return (probe.warnings ?? [])[0] ?? '试调失败';
+}
 </script>
 
 <template>
@@ -75,24 +91,27 @@ defineProps<{ capabilities: UseCapabilities }>();
           </select>
         </div>
         <div class="candidate-list">
-          <article v-for="candidate in capabilities.visibleImportCandidates.value" :key="candidate.id" class="candidate-row" :data-test="`candidate-row-${candidate.id}`">
+          <article v-for="candidate in capabilities.visibleImportCandidates.value" :key="candidate.id" class="candidate-row candidate-row--compact" :data-test="`candidate-row-${candidate.id}`">
             <label class="candidate-check">
               <input :data-test="`candidate-selected-${candidate.id}`" type="checkbox" v-model="capabilities.candidateSelections.value[candidate.id]" />
               <span class="candidate-check__mark" aria-hidden="true"></span>
             </label>
             <div class="method-pill">{{ candidate.method }}</div>
-            <div class="candidate-main">
-              <strong>{{ candidate.path }}</strong>
-              <small class="candidate-meta">{{ candidate.operation_id || candidate.id }}</small>
+            <div class="candidate-main candidate-main--compact" :title="candidate.operation_id || candidate.id">
+              <strong class="candidate-path">{{ candidate.path }}</strong>
               <small v-if="capabilities.candidateOverrides.value[candidate.id]?.name" class="candidate-override">{{ capabilities.candidateOverrides.value[candidate.id]?.name }}</small>
-              <small v-if="capabilities.candidateReasonText(candidate)" class="candidate-reason">{{ capabilities.candidateReasonText(candidate) }}</small>
+              <small v-else-if="capabilities.candidateReasonText(candidate)" class="candidate-reason" :title="capabilities.candidateReasonText(candidate)">{{ capabilities.candidateReasonText(candidate) }}</small>
             </div>
-            <div class="verdict-cell" :data-verdict-cell="candidate.recommendation">
+            <div class="verdict-cell verdict-cell--compact" :data-verdict-cell="candidate.recommendation" :title="capabilities.candidateVerdictText(candidate)">
               <strong :data-verdict="candidate.recommendation">{{ capabilities.recommendationLabel(candidate.recommendation) }}</strong>
-              <small>{{ capabilities.candidateVerdictText(candidate) }}</small>
             </div>
-            <details class="candidate-adjust" :data-test="`candidate-adjust-${candidate.id}`">
-              <summary><span class="candidate-adjust__chevron" aria-hidden="true"></span>调整字段</summary>
+            <div v-if="capabilities.candidateProbeResults.value[candidate.id]" class="probe-cell probe-cell--compact" :data-test="`candidate-probe-${candidate.id}`" :data-probe-ok="capabilities.candidateProbeResults.value[candidate.id].ok" :title="candidateProbeCellText(candidate.id)">
+              <strong v-if="capabilities.candidateProbeResults.value[candidate.id].ok">✓ 可用</strong>
+              <strong v-else>⚠ 有问题</strong>
+              <small>{{ candidateProbeCellText(candidate.id) }}</small>
+            </div>
+            <details class="candidate-adjust candidate-adjust--compact" :data-test="`candidate-adjust-${candidate.id}`">
+              <summary title="调整命名、领域、风险等级"><span class="candidate-adjust__chevron" aria-hidden="true"></span>调整</summary>
               <div class="candidate-edit-grid">
                 <input :data-test="`candidate-name-${candidate.id}`" class="mini-input" :value="capabilities.candidateOverrides.value[candidate.id]?.name" @input="capabilities.updateCandidateOverride(candidate.id, { name: ($event.target as HTMLInputElement).value })" />
                 <input :data-test="`candidate-domain-${candidate.id}`" class="mini-input" :value="capabilities.candidateOverrides.value[candidate.id]?.domain" @input="capabilities.updateCandidateOverride(candidate.id, { domain: ($event.target as HTMLInputElement).value })" />
@@ -112,7 +131,19 @@ defineProps<{ capabilities: UseCapabilities }>();
         </div>
         <div data-test="import-commit-summary" class="commit-summary sticky-commit">
           <span class="commit-summary__text">已选择 <strong>{{ capabilities.importCommitSummary.value.selected }}</strong> 个候选 API，其中读取 {{ capabilities.importCommitSummary.value.reads }} 个，写入 {{ capabilities.importCommitSummary.value.writes }} 个，高风险 {{ capabilities.importCommitSummary.value.highRisk }} 个。</span>
-          <el-button data-test="commit-openapi-import" type="primary" :disabled="!capabilities.canCommitImportPreview.value" :loading="capabilities.importCommitLoading.value" @click="capabilities.commitSwaggerImport">生成 Capability 草稿</el-button>
+          <span v-if="capabilities.candidateProbing.value" data-test="probe-batch-progress" class="commit-hint">试调中… {{ capabilities.candidateProbedProgress.value }}</span>
+          <template v-else-if="capabilities.candidateProbedCount.value > 0">
+            <span data-test="probe-batch-result" class="commit-hint">试调完成：{{ capabilities.cleanProbedCandidates.value.length }} 个接口可用，{{ capabilities.problemProbedCandidates.value.length }} 个需人工处理</span>
+          </template>
+          <el-button data-test="probe-batch" :disabled="capabilities.importCommitSummary.value.selected === 0" :loading="capabilities.candidateProbing.value" @click="capabilities.probeSelectedCandidates">试调所选接口</el-button>
+          <el-button
+            v-if="capabilities.cleanProbedCandidates.value.length > 0"
+            data-test="commit-and-publish-clean"
+            type="success"
+            :loading="capabilities.importCommitLoading.value"
+            @click="capabilities.commitSwaggerImport({ autoPublishClean: true })"
+          >试调通过的 {{ capabilities.cleanProbedCandidates.value.length }} 个直接发布</el-button>
+          <el-button data-test="commit-openapi-import" type="primary" :disabled="!capabilities.canCommitImportPreview.value" :loading="capabilities.importCommitLoading.value" @click="capabilities.commitSwaggerImport()">生成 Capability 草稿</el-button>
         </div>
       </section>
     </section>

@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { ElButton, ElMessage, ElMessageBox } from 'element-plus';
 import type { UseCapabilities } from '../../composables/useCapabilities';
+import type { ManagedCapability } from '../../types';
 
 const props = defineProps<{ capabilities: UseCapabilities }>();
 
@@ -34,6 +35,19 @@ async function handlePublishAll() {
       customClass: 'publish-result-dialog',
     },
   );
+}
+
+async function confirmDeleteDraft(item: ManagedCapability) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除草稿「${item.name}」吗？删除后不可恢复。`,
+      '删除草稿',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    );
+  } catch {
+    return; // 用户取消
+  }
+  await props.capabilities.deleteSelectedDraft(item);
 }
 
 function escapeHtml(value: string): string {
@@ -151,6 +165,14 @@ function escapeHtml(value: string): string {
               {{ capabilities.publishActionLabel(item) }}
             </el-button>
             <el-button size="small" :disabled="item.source !== 'published'" @click.stop="capabilities.unpublishSelected(item)">下线</el-button>
+            <el-button
+              v-if="item.source === 'discovered'"
+              size="small"
+              type="danger"
+              plain
+              :data-test="`delete-draft-${item.name}`"
+              @click.stop="confirmDeleteDraft(item)"
+            >删除</el-button>
           </div>
         </div>
       </article>

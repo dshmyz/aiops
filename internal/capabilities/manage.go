@@ -26,7 +26,7 @@ var (
 	ErrInvalidCapabilityName       = errors.New("invalid capability name")
 	ErrCapabilityNotFound          = errors.New("capability not found")
 	ErrCapabilityNameConflict      = errors.New("capability name conflict")
-	ErrTestRequiresReadGET         = errors.New("test endpoint only supports published read GET capabilities")
+	ErrTestRequiresRead = errors.New("test endpoint only supports read capabilities")
 	ErrInvalidOpenAPIURL           = errors.New("invalid OpenAPI URL")
 	ErrInvalidOpenAPIFingerprint   = errors.New("invalid OpenAPI fingerprint")
 	ErrOpenAPIFingerprintChanged   = errors.New("OpenAPI fingerprint changed")
@@ -97,6 +97,8 @@ type Manager struct {
 	adapter  *HTTPAdapter
 	runtime  PublishedCapabilityRuntime
 	enricher ImportEnricher
+	// chat 用于试调探活时按真实响应样本推断输出映射（可选）。
+	chat ChatCompleter
 }
 
 func NewManager(root string, adapter *HTTPAdapter) *Manager {
@@ -129,9 +131,16 @@ func (m *Manager) WithStore(store CapabilityStore) *Manager {
 // WithEnricher 设置导入草稿的富化器（如 LLM 补参数说明）。传 nil 恢复为不做加工。
 func (m *Manager) WithEnricher(enricher ImportEnricher) *Manager {
 	if enricher == nil {
-		enricher = nopEnricher{}
+		m.enricher = nopEnricher{}
+	} else {
+		m.enricher = enricher
 	}
-	m.enricher = enricher
+	return m
+}
+
+// WithChat 设置试调探活的 LLM（按真实响应推断输出映射）。传 nil 关闭。
+func (m *Manager) WithChat(chat ChatCompleter) *Manager {
+	m.chat = chat
 	return m
 }
 
@@ -166,15 +175,81 @@ func (m *Manager) ValidateCapability(capability Capability) ValidationResult {
 	return ValidationResult{Valid: true}
 }
 
+// Test 试调治理边界：只允许读能力（read），方法不限——POST 查询接口也是读取。
+// 写能力永远走审批链路，禁止试调。
 func (m *Manager) Test(ctx context.Context, capability Capability, input map[string]any) (NormalizedResult, error) {
-	if capability.Operation != tools.Read || capability.Backend.Method != http.MethodGet {
-		return NormalizedResult{}, ErrTestRequiresReadGET
+	if capability.Operation != tools.Read {
+		return NormalizedResult{}, ErrTestRequiresRead
 	}
 	capability.Status = StatusPublished
 	if err := Validate(capability); err != nil {
 		return NormalizedResult{}, err
 	}
 	return m.adapter.Execute(ctx, capability, input)
+}
+
+// ProbeInferResponse 是试调探活的结果：真实调用一次后端，把原始响应、
+// 归一化摘要、映射命中情况一并返回，并（在配置 LLM 时）用真实响应推断
+// 输出映射。它把"这个 Swagger 导入后能不能达到预期"暴露在导入时，
+// 而不是等上线后 AI 调用才发现字段取不到。
+type ProbeInferResponse struct {
+	// Probe 是试调的归一化结果（HTTP 状态错误时为 nil）。
+	Probe *NormalizedResult `json:"probe,omitempty"`
+	// RawBody 是脱敏截断后的原始响应体，供人工确认格式。
+	RawBody string `json:"raw_body,omitempty"`
+	// Inferred 是按真实响应推断/校验后的输出映射（规则或 LLM 生成）。
+	Inferred *OutputSpec `json:"inferred,omitempty"`
+	// InferredBy 标记映射来源："llm_sample"（真实样本+LLM）或 "rules"（规则回退）。
+	InferredBy string `json:"inferred_by,omitempty"`
+	// Warnings 汇总试调和推断过程中的问题（后端不可达、映射全 miss 等）。
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// ProbeAndInfer 对一个读能力草稿做试调 + 输出映射推断：
+//  1. 用 input 实调一次后端（复用 Test 的治理边界：仅读 GET）；
+//  2. 拿真实响应样本让 LLM 推断 output 映射并逐路径校验（未配 LLM 或 LLM
+//     失败时回退规则推断 extractMappedFields 校验）；
+//  3. 返回可写回草稿的 OutputSpec。
+func (m *Manager) ProbeAndInfer(ctx context.Context, capability Capability, input map[string]any) (ProbeInferResponse, error) {
+	result := ProbeInferResponse{Warnings: []string{}}
+	probe, err := m.Test(ctx, capability, input)
+	if err != nil {
+		result.Warnings = append(result.Warnings, "试调失败: "+err.Error())
+		return result, nil
+	}
+	result.Probe = &probe
+	result.RawBody = probe.Raw
+
+	// 规则路径：按现有映射（或智能提取）在真实响应上的命中情况做基线
+	if m.chat != nil {
+		spec, inferErr := InferOutputFromSample(ctx, m.chat, capability, []byte(probe.Raw))
+		if inferErr == nil {
+			result.Inferred = &spec
+			result.InferredBy = "llm_sample"
+			return result, nil
+		}
+		result.Warnings = append(result.Warnings, "LLM 推断失败，回退规则: "+inferErr.Error())
+	}
+	// 规则回退：把智能提取结果转成 OutputSpec，标记来源
+	spec := capability.Output
+	if len(probe.Data) > 0 {
+		fields := make(map[string]string, len(probe.Data))
+		for key := range probe.Data {
+			if strings.Contains(key, "_count") || strings.Contains(key, "_sample") || strings.Contains(key, "_overview") {
+				continue
+			}
+			if len(fields) >= 10 {
+				break
+			}
+			fields[key] = "$." + key
+		}
+		if len(fields) > 0 {
+			spec.Fields = fields
+		}
+	}
+	result.Inferred = &spec
+	result.InferredBy = "rules"
+	return result, nil
 }
 
 func (m *Manager) fetchOpenAPIFromURL(ctx context.Context, openAPIURL string) ([]byte, string, error) {
@@ -305,6 +380,21 @@ func (m *Manager) CommitOpenAPIFromURL(ctx context.Context, request OpenAPIURLCo
 		}
 		result.Capabilities = append(result.Capabilities, item)
 	}
+	// 与 PreviewOpenAPIFromURL 一致：commit 前对选中的候选做 LLM 富化（一次批量
+	// 调用），否则用户在预览阶段看到的 AI 补充（参数说明/示例/枚举）不会落到草稿。
+	// 富化在落库后进行并回写，失败不影响草稿保存。
+	if len(result.Capabilities) > 0 {
+		drafts := make([]Capability, 0, len(result.Capabilities))
+		for _, item := range result.Capabilities {
+			drafts = append(drafts, item.Capability)
+		}
+		enriched := m.enrichDrafts(ctx, drafts)
+		for i := range result.Capabilities {
+			if saved, err := m.SaveDraft(ctx, enriched[i]); err == nil {
+				result.Capabilities[i] = saved
+			}
+		}
+	}
 	for _, candidate := range preview.Candidates {
 		if _, ok := selected[candidate.ID]; !ok {
 			result.Skipped = append(result.Skipped, OpenAPIURLCommitSkipped{CandidateID: candidate.ID, Reason: "not selected"})
@@ -339,6 +429,11 @@ func (m *Manager) ImportOpenAPIFromURL(ctx context.Context, request OpenAPIURLIm
 		imported = append(imported, item)
 	}
 	return imported, nil
+}
+
+// DeleteDraft 删除草稿能力（清理误导入/作废候选）。已发布能力需先下架。
+func (m *Manager) DeleteDraft(ctx context.Context, name string) error {
+	return m.store.DeleteDraft(ctx, name)
 }
 
 func (m *Manager) Publish(ctx context.Context, name string) (ManagedCapability, error) {

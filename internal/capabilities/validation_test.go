@@ -71,17 +71,28 @@ func TestValidateRejectsPathVariableMissingInputSchema(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsReadWithMutatingBackendMethod(t *testing.T) {
+func TestValidateRejectsReadWithUnsupportedBackendMethod(t *testing.T) {
 	t.Parallel()
 
+	// read 已放开 GET/POST/PUT/PATCH/DELETE（POST 查询很常见），只剩真正的
+	// 非 HTTP 语义方法仍被拒绝。
 	for _, status := range []string{capabilities.StatusPublished, capabilities.StatusNeedsReview} {
-		for _, method := range []string{"HEAD", "POST", "PUT", "PATCH", "DELETE"} {
+		for _, method := range []string{"HEAD", "OPTIONS", "TRACE", "CONNECT"} {
 			capability := validReadCapability()
 			capability.Status = status
 			capability.Backend.Method = method
 
 			if err := capabilities.Validate(capability); err == nil {
 				t.Errorf("Validate accepted %s read capability with %s backend method", status, method)
+			}
+		}
+		for _, method := range []string{"POST", "DELETE"} {
+			capability := validReadCapability()
+			capability.Status = status
+			capability.Backend.Method = method
+
+			if err := capabilities.Validate(capability); err != nil {
+				t.Errorf("Validate rejected %s read capability with %s backend method: %v", status, method, err)
 			}
 		}
 	}

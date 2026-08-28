@@ -40,6 +40,7 @@ import type {
   OverviewData,
   PendingPlanDetail,
   PendingPlanSummary,
+  ProbeInferResult,
   QuickPublishPayload,
   RejectPlanPayload,
   RejectPlanResult,
@@ -247,11 +248,13 @@ export async function saveDraft(capability: Capability): Promise<ManagedCapabili
 }
 
 export async function validateCapability(capability: Capability): Promise<ValidationResult> {
-  const body = await request<{ validation: ValidationResult }>('/v1/capabilities/validate', {
+  const body = await request<{ validation?: ValidationResult } | null>('/v1/capabilities/validate', {
     method: 'POST',
     body: JSON.stringify(capability),
   });
-  return body.validation;
+  // 边界兜底：响应缺 validation 字段时不能把 undefined 写进状态，否则渲染层
+  // 读取 validation.valid 直接崩溃。
+  return body?.validation ?? { valid: false, error: '校验失败' };
 }
 
 export async function testCapability(capability: Capability, input: Record<string, unknown>): Promise<NormalizedResult> {
@@ -260,6 +263,15 @@ export async function testCapability(capability: Capability, input: Record<strin
     body: JSON.stringify({ capability, input }),
   });
   return body.result;
+}
+
+// 试调探活：真实调用一次后端 + 按真实响应推断输出映射（LLM 优先、规则兜底）。
+// 对应 POST /v1/capabilities/probe-infer。
+export async function probeInferCapability(capability: Capability, input: Record<string, unknown>): Promise<ProbeInferResult> {
+  return request<ProbeInferResult>('/v1/capabilities/probe-infer', {
+    method: 'POST',
+    body: JSON.stringify({ capability, input }),
+  });
 }
 
 export async function sendAssistantMessage(
@@ -378,6 +390,13 @@ export async function unpublishCapability(name: string): Promise<ManagedCapabili
     body: '{}',
   });
   return normalizeCapability({ name, ...(body ?? {}), status: 'needs_review', source: 'discovered' });
+}
+
+/** 删除草稿能力（误导入/作废候选）。已发布能力需先下架，不支持删除。 */
+export async function deleteDraftCapability(name: string): Promise<void> {
+  await request<{ status: string }>(`/v1/capabilities/drafts/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function quickPublishCapability(payload: QuickPublishPayload): Promise<ManagedCapability> {
@@ -1016,4 +1035,16 @@ export async function updateSkill(id: string, input: Partial<SkillRecord>): Prom
 
 export async function deleteSkill(id: string): Promise<void> {
   await request<{ deleted?: string }>(`/v1/skills/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/**
+ * 取消指定会话正在进行的流式助手运行（后端 agent loop 检查点 + executor
+ * context 取消）。前端停止按钮除 abort 本地 fetch 外还应调用此 API，确保
+ * 服务端不再继续跑完剩余工具步骤。未在运行时后端返回 200 + cancelled:false。
+ */
+export async function cancelAssistantConversation(conversationID: string): Promise<void> {
+  await request<{ cancelled: boolean }>(
+    `/v1/assistant/conversations/${encodeURIComponent(conversationID)}/cancel`,
+    { method: 'POST' },
+  );
 }

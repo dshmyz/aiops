@@ -1280,7 +1280,7 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="import-preview"]').text()).toContain('minio.bucket.capacity.read.imported');
     expect(wrapper.find('[data-test="import-preview"]').text()).toContain('kafka.topic.retention.update');
     expect(wrapper.find('[data-test="candidate-adjust-GET /api/minio/{cluster}/buckets/{bucket}/capacity"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="candidate-adjust-GET /api/minio/{cluster}/buckets/{bucket}/capacity"]').text()).toContain('调整字段');
+    expect(wrapper.find('[data-test="candidate-adjust-GET /api/minio/{cluster}/buckets/{bucket}/capacity"]').text()).toContain('调整');
     expect((wrapper.find('[data-test="candidate-selected-GET /api/minio/{cluster}/buckets/{bucket}/capacity"]').element as HTMLInputElement).checked).toBe(true);
     expect((wrapper.find('[data-test="candidate-selected-POST /api/kafka/{cluster}/topics/{topic}/retention"]').element as HTMLInputElement).checked).toBe(false);
     expect(wrapper.find('[data-test="workflow-review"]').exists()).toBe(false);
@@ -1307,7 +1307,7 @@ describe('Capability Console', () => {
         },
       }],
     });
-    expect(wrapper.find('[data-test="import-result"]').text()).toContain('已生成 1 个待评审草稿');
+    expect(wrapper.find('[data-test="import-result"]').text()).toContain('1 个待评审草稿');
     expect(wrapper.find('[data-test="import-batch"]').text()).toContain('本次导入');
     expect(wrapper.find('[data-test="import-batch"]').text()).toContain('minio.bucket.capacity.read.imported');
     expect(wrapper.find('[data-test="import-batch-stat-total"]').text()).toContain('1');
@@ -1524,16 +1524,16 @@ describe('Capability Console', () => {
     expect(safeChecklist).toContain('capabilities/published/minio.bucket.capacity.read.yaml');
     expect(safeChecklist).toContain('读取类能力');
     expect(safeChecklist).toContain('GET 请求');
-    expect(safeChecklist).toContain('校验通过');
+    expect(safeChecklist).toContain('格式检查');
 
     await wrapper.find('[data-test="edit-kafka.topic.retention.set"]').trigger('click');
     const unsafeChecklist = wrapper.find('[data-test="publish-checklist"]').text();
     expect(unsafeChecklist).toContain('写入类能力');
     expect(unsafeChecklist).toContain('POST 请求');
-    expect(unsafeChecklist).toContain('需执行计划');
-    expect(unsafeChecklist).toContain('需审批');
-    expect(unsafeChecklist).toContain('预检能力');
-    expect(unsafeChecklist).toContain('回滚策略');
+    expect(unsafeChecklist).toContain('执行前生成计划');
+    expect(unsafeChecklist).toContain('执行前需审批');
+    expect(unsafeChecklist).toContain('执行前预检');
+    expect(unsafeChecklist).toContain('回滚方式');
   });
 
   test('renders governance summary per capability operation', async () => {
