@@ -3065,6 +3065,8 @@ type capabilityManagementService struct {
 	commitCalls        int
 	publishName        string
 	unpublishName      string
+	deleteDraftName    string
+	deleteDraftErr     error
 	quickPublishResult capabilities.ManagedCapability
 	quickPublishErr    error
 	quickPublishCalls  int
@@ -3101,6 +3103,10 @@ func (s *capabilityManagementService) Test(context.Context, capabilities.Capabil
 	return capabilities.NormalizedResult{Kind: "observation", Summary: "ok", Data: map[string]any{"status": "ok"}}, nil
 }
 
+func (s *capabilityManagementService) ProbeAndInfer(context.Context, capabilities.Capability, map[string]any) (capabilities.ProbeInferResponse, error) {
+	return capabilities.ProbeInferResponse{InferredBy: "rules"}, nil
+}
+
 func (s *capabilityManagementService) ImportOpenAPIFromURL(_ context.Context, request capabilities.OpenAPIURLImportRequest) ([]capabilities.ManagedCapability, error) {
 	s.importCalls++
 	s.importedRequest = request
@@ -3127,6 +3133,11 @@ func (s *capabilityManagementService) Publish(_ context.Context, name string) (c
 func (s *capabilityManagementService) Unpublish(_ context.Context, name string) (capabilities.ManagedCapability, error) {
 	s.unpublishName = name
 	return s.unpublished, nil
+}
+
+func (s *capabilityManagementService) DeleteDraft(_ context.Context, name string) error {
+	s.deleteDraftName = name
+	return s.deleteDraftErr
 }
 
 func (s *capabilityManagementService) QuickPublish(_ context.Context, request capabilities.QuickPublishRequest) (capabilities.ManagedCapability, error) {

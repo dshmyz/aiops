@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (event: 'regenerate', turn: ConversationTurn): void;
   (event: 'retry'): void;
   (event: 'edit', turn: ConversationTurn): void;
+  (event: 'quote', turn: ConversationTurn): void;
 }>();
 
 const transcriptRef = ref<HTMLElement | null>(null);
@@ -169,6 +170,7 @@ function dividerLabel(index: number): string {
         @regenerate="emit('regenerate', $event)"
         @retry="emit('retry')"
         @edit="emit('edit', $event)"
+        @quote="emit('quote', $event)"
       />
     </template>
 

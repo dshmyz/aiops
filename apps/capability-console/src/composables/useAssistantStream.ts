@@ -21,6 +21,8 @@ export interface PageContext {
   domain?: string;
   resource_type?: string;
   resource_name?: string;
+  /** 用户引用的历史消息 turn ID（"引用此消息追问"），后端注入原文绕过摘要窗口 */
+  quote_turn_id?: string;
 }
 
 /**
@@ -108,7 +110,7 @@ export async function streamAssistantMessage(
     payload.conversation_id = params.conversationID;
   }
   // PageContext 是结构化页面上下文，非空时发送 page_context。
-  if (params.pageContext && (params.pageContext.domain || params.pageContext.resource_type || params.pageContext.resource_name)) {
+  if (params.pageContext && (params.pageContext.domain || params.pageContext.resource_type || params.pageContext.resource_name || params.pageContext.quote_turn_id)) {
     payload.page_context = params.pageContext;
   }
   // 附件随消息整体传输（后端统一校验 + 截断注入 prompt）。

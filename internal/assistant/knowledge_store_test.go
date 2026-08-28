@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -155,5 +156,72 @@ func TestKnowledgeStore_SaveConversationSummary(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected 1 record, got %d", count)
+	}
+}
+
+func TestKnowledgeStore_SearchFeedbackKeywordRecall(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	store := NewKnowledgeStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// 历史反馈：整句 query（模拟真实用户消息）
+	if err := store.SaveFeedback(ctx, "prod 集群 kafka 消费延迟告警", -1, "应先查 broker 存活再查 lag", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveFeedback(ctx, "minio 容量不足", -1, "先看 bucket 配额", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// 用户新消息包含多个历史 query 的关键词：应命中（旧 LIKE 全文实现必然 0 命中）
+	results, err := store.SearchFeedback(ctx, "prod 集群 kafka 又出现消费延迟了，怎么排查", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 feedback hit, got %d: %+v", len(results), results)
+	}
+	if results[0]["query"] != "prod 集群 kafka 消费延迟告警" {
+		t.Errorf("wrong hit: %v", results[0]["query"])
+	}
+
+	// 不相关问题：不应误召回
+	none, err := store.SearchFeedback(ctx, "今天天气怎么样", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("expected 0 hits for unrelated query, got %d", len(none))
+	}
+
+	// 空消息：直接返回 nil
+	empty, err := store.SearchFeedback(ctx, "  ", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty != nil {
+		t.Fatalf("expected nil for empty query, got %d", len(empty))
+	}
+}
+
+func TestFeedbackKeywords(t *testing.T) {
+	kws := feedbackKeywords("查一下 prod m1 的 kafka lag？")
+	joined := strings.Join(kws, ",")
+	for _, want := range []string{"prod", "m1", "kafka", "lag"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing keyword %q in %q", want, joined)
+		}
+	}
+	for _, banned := range []string{"的", "查一下"} {
+		if strings.Contains(joined, banned) {
+			t.Errorf("stopword/short token %q leaked into %q", banned, joined)
+		}
 	}
 }

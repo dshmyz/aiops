@@ -183,6 +183,7 @@ const {
   assistantEntryLoading,
   assistantPageContext,
   setAssistantPageContext,
+  quotedTurnID: assistantQuotedTurnID,
   assistantEntryError,
   assistantDiagnostic,
   assistantBlocks,
@@ -721,6 +722,16 @@ function handleEditAssistantTurn(turn: ConversationTurn) {
   });
 }
 
+// 引用历史消息追问：记录 turn ID，随下一条消息作为 page_context.quote_turn_id
+// 发送；后端把被引用原文注入上下文（绕过滚动摘要窗口）。输入框聚焦待输入。
+function handleQuoteAssistantTurn(turn: ConversationTurn) {
+  assistantQuotedTurnID.value = turn.id;
+  copyNotice.value = '已引用该消息，输入你的追问后发送';
+  void nextTick(() => {
+    focusTextareaEnd();
+  });
+}
+
 // 点击空状态建议提问：回填输入框 + 回焦，让用户可直接回车发送
 function handleSuggestionPick(prompt: string) {
   fillAssistantPrompt(prompt);
@@ -1049,6 +1060,7 @@ onUnmounted(() => {
               @regenerate="regenerateAssistantMessage"
               @retry="retryLastAssistantMessage"
               @edit="handleEditAssistantTurn"
+              @quote="handleQuoteAssistantTurn"
             >
               <!-- 待确认计划内联进对话流：紧跟最后一条消息，随消息一起滚动 -->
               <template #footer>

@@ -698,6 +698,15 @@ func runFailedTools(run *AgentRun) []string {
 		// marker rather than fabricate a tool name.
 		note("诊断链条中断")
 	}
+	// Scan executed steps: denied or failed steps carry their failure in
+	// StepOutcome.Err (or an Err-bearing payload). Without this scan a run
+	// whose model still emits final_answer would hide the failed evidence
+	// gathering from the disclosure logic.
+	for _, out := range run.Steps {
+		if out.Err != "" {
+			note(out.Tool)
+		}
+	}
 	return failed
 }
 

@@ -172,6 +172,10 @@ type PageContext struct {
 	Domain       string `json:"domain,omitempty"`
 	ResourceType string `json:"resource_type,omitempty"`
 	ResourceName string `json:"resource_name,omitempty"`
+	// QuoteTurnID 是用户显式引用的历史 turn（"引用此消息追问"）。为空时
+	// 无引用行为；非空时该 turn 原文会被注入上下文，绕过滚动摘要窗口的
+	// 限制——解决"很久之前说过的话已被压缩进摘要"的失忆问题。
+	QuoteTurnID string `json:"quote_turn_id,omitempty"`
 }
 
 type DeterministicPlanner struct{}

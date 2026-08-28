@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
@@ -32,7 +33,26 @@ const (
 	compactThreshold = 12
 	keepRecentTurns  = 8
 	compactBatchSize = compactThreshold - keepRecentTurns // 4 turns per round
+
+	// compactionTimeout bounds the background LLM summarization call so a
+	// hung provider cannot leak goroutines.
+	compactionTimeout = 60 * time.Second
 )
+
+// compactionFailures tracks consecutive background compaction failures
+// (LLM error or persist error) for observability. A success resets it to
+// zero. Exposed via AdminStatus so operators can spot conversations whose
+// history keeps growing because summarization keeps failing.
+var compactionFailures atomic.Int64
+
+func recordCompactionFailure() { compactionFailures.Add(1) }
+
+// CompactionFailureCount returns the current consecutive compaction failure
+// count. Zero means the last compaction succeeded (or none has run).
+func CompactionFailureCount() int64 { return compactionFailures.Load() }
+
+// resetCompactionFailures is called after a successful compaction.
+func resetCompactionFailures() { compactionFailures.Store(0) }
 
 // compactorTracer returns the tracer for compaction spans.
 func compactorTracer() trace.Tracer {
@@ -61,11 +81,15 @@ func (c *LLMCompactor) WithLLMAudit(auditSvc *audit.Service, model string) *LLMC
 }
 
 const compactionPrompt = `You are summarizing a multi-turn operations assistant conversation.
-Compress the following turns into a concise summary (max 200 words) that preserves:
-- Which tools/capabilities were invoked and their key parameters
-- Any decisions, errors, or clarifications
-- User preferences or constraints mentioned
-Return plain text only, no JSON.`
+Compress the following turns into a structured summary (max 500 words) using exactly these sections:
+
+Symptoms: what problem the user reported and how it evolved
+Investigated: tools/capabilities invoked, with key parameters and what each check ruled out (已排除的假设要写明)
+Key facts: concrete numbers, error strings, IPs, ports, resource names — copy them verbatim, never paraphrase
+User constraints: requirements or preferences the user stated explicitly — copy verbatim
+Open items: unresolved questions, pending actions, what to check next
+
+Omit casual conversation. If a section has nothing, write "无". Return plain text only, no JSON.`
 
 // Compact calls the LLM to produce a summary of the given turns. The turns
 // slice includes the previous summary (if any) as the first element with

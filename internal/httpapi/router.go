@@ -97,6 +97,9 @@ type ConversationService interface {
 	ArchiveConversation(context.Context, string, string) error
 	DeleteConversation(context.Context, string, string) error
 	RenameConversation(context.Context, string, string, string) error
+	// CancelConversation aborts an in-flight streaming assistant run for the
+	// conversation. Returns assistant.ErrNotRunning when nothing is running.
+	CancelConversation(context.Context, string, string) error
 }
 
 // FeedbackService is the persistence boundary for user feedback on assistant
@@ -113,11 +116,15 @@ type CapabilityManagementService interface {
 	SaveDraft(context.Context, capabilities.Capability) (capabilities.ManagedCapability, error)
 	ValidateCapability(capabilities.Capability) capabilities.ValidationResult
 	Test(context.Context, capabilities.Capability, map[string]any) (capabilities.NormalizedResult, error)
+	// ProbeAndInfer 试调探活：真实调用一次后端，并按真实响应推断输出映射
+	// （LLM 优先，规则回退）。把"导入后能不能达到预期"暴露在导入时。
+	ProbeAndInfer(context.Context, capabilities.Capability, map[string]any) (capabilities.ProbeInferResponse, error)
 	ImportOpenAPIFromURL(context.Context, capabilities.OpenAPIURLImportRequest) ([]capabilities.ManagedCapability, error)
 	PreviewOpenAPIFromURL(context.Context, capabilities.OpenAPIURLPreviewRequest) (capabilities.ImportPreview, error)
 	CommitOpenAPIFromURL(context.Context, capabilities.OpenAPIURLCommitRequest) (capabilities.OpenAPIURLCommitResult, error)
 	Publish(context.Context, string) (capabilities.ManagedCapability, error)
 	Unpublish(context.Context, string) (capabilities.ManagedCapability, error)
+	DeleteDraft(context.Context, string) error
 	QuickPublish(context.Context, capabilities.QuickPublishRequest) (capabilities.ManagedCapability, error)
 }
 
@@ -279,6 +286,7 @@ func (r *Router) registerMuxRoutes() {
 	r.mux.HandleFunc("/v1/admin/knowledge/status", r.serveKnowledgeStatus)
 	r.mux.HandleFunc("/v1/admin/knowledge", r.serveAdminKnowledge)
 	r.mux.HandleFunc("/v1/admin/knowledge/", r.serveAdminKnowledge)
+	r.mux.HandleFunc("GET /v1/admin/assistant/status", r.serveAssistantStatus)
 
 	// --- 文档 / MCP ---
 	r.mux.HandleFunc("/v1/docs/", r.serveDocs)
@@ -772,6 +780,34 @@ func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Req
 			return
 		}
 		writeCapabilityJSON(writer, map[string]any{"result": result})
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/capabilities/probe-infer":
+		var body struct {
+			Capability capabilities.Capability `json:"capability"`
+			Input      map[string]any          `json:"input"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
+		decoder.UseNumber()
+		if err := decoder.Decode(&body); err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid JSON input")
+			return
+		}
+		result, err := r.capability.ProbeAndInfer(ctx, body.Capability, body.Input)
+		if err != nil {
+			writeCapabilityError(writer, err)
+			return
+		}
+		writeCapabilityJSON(writer, result)
+	case request.Method == http.MethodDelete && strings.HasPrefix(request.URL.Path, "/v1/capabilities/drafts/"):
+		name := strings.TrimPrefix(request.URL.Path, "/v1/capabilities/drafts/")
+		if strings.TrimSpace(name) == "" || strings.Contains(name, "/") {
+			writeError(writer, http.StatusNotFound, "capability not found")
+			return
+		}
+		if err := r.capability.DeleteDraft(ctx, name); err != nil {
+			writeCapabilityError(writer, err)
+			return
+		}
+		writeCapabilityJSON(writer, map[string]any{"status": "deleted", "name": name})
 	case request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/capabilities/") && strings.HasSuffix(request.URL.Path, "/publish"):
 		name := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/capabilities/"), "/publish")
 		item, err := r.capability.Publish(ctx, name)
@@ -822,7 +858,7 @@ func writeCapabilityError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, capabilities.ErrCapabilityNotFound):
 		writeError(writer, http.StatusNotFound, err.Error())
-	case errors.Is(err, capabilities.ErrInvalidCapabilityName), errors.Is(err, capabilities.ErrTestRequiresReadGET), errors.Is(err, capabilities.ErrInvalidOpenAPIURL):
+	case errors.Is(err, capabilities.ErrInvalidCapabilityName), errors.Is(err, capabilities.ErrTestRequiresRead), errors.Is(err, capabilities.ErrInvalidOpenAPIURL):
 		writeError(writer, http.StatusBadRequest, err.Error())
 	case errors.Is(err, capabilities.ErrOpenAPIFingerprintChanged):
 		writeError(writer, http.StatusConflict, "Swagger 文档已变化，请重新预览")
@@ -1786,6 +1822,25 @@ func (r *Router) serveConversations(writer http.ResponseWriter, request *http.Re
 			return
 		}
 		r.serveRenameConversation(writer, request, user, conversationID)
+	case strings.HasSuffix(path, "/cancel") && request.Method == http.MethodPost:
+		conversationID := strings.TrimSuffix(path, "/cancel")
+		if conversationID == "" || strings.Contains(conversationID, "/") {
+			writeError(writer, http.StatusNotFound, "conversation not found")
+			return
+		}
+		if err := r.conversations.CancelConversation(request.Context(), conversationID, user.Subject); err != nil {
+			if errors.Is(err, assistant.ErrNotRunning) {
+				writeCappedJSON(writer, map[string]any{"cancelled": false, "reason": "not_running"})
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(writer, http.StatusNotFound, "conversation not found")
+				return
+			}
+			writeError(writer, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeCappedJSON(writer, map[string]any{"cancelled": true})
 	default:
 		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -3340,6 +3395,30 @@ func (r *Router) serveAdminKnowledge(writer http.ResponseWriter, request *http.R
 	default:
 		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// serveAssistantStatus handles GET /v1/admin/assistant/status. Exposes the
+// rolling-compaction health: consecutive background compaction failures.
+// A non-zero count means conversation summaries stopped being persisted and
+// history windows keep growing until the LLM call recovers.
+func (r *Router) serveAssistantStatus(writer http.ResponseWriter, request *http.Request) {
+	if r.auth == nil {
+		writeError(writer, http.StatusInternalServerError, "router is not configured")
+		return
+	}
+	user, _, ok := r.authenticate(writer, request)
+	if !ok {
+		return
+	}
+	if !userHasAnyRole(user, "admin") {
+		r.writeForbidden(writer, request, user, string(policy.PermissionDenied), request.URL.Path)
+		return
+	}
+	failures := assistant.CompactionFailureCount()
+	writeCappedJSON(writer, map[string]any{
+		"compaction_consecutive_failures": failures,
+		"healthy":                         failures < 3,
+	})
 }
 
 // serveKnowledgeStatus handles GET /v1/admin/knowledge/status. Returns whether

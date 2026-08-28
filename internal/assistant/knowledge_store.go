@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
+	"unicode"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
@@ -89,17 +91,35 @@ func (s *KnowledgeStore) SaveFeedback(ctx context.Context, query string, rating 
 	return err
 }
 
-// SearchFeedback 搜索相似问题的用户反馈
+// SearchFeedback 搜索相似问题的用户反馈。query 是完整的用户消息原文，直接
+// LIKE 全文几乎不可能命中（历史 query 也是整句），所以这里把消息切成关键词，
+// 多个 LIKE 条件取 OR，按命中词数降序——命中越多越相关。至少命中 2 个词
+// 才返回，避免单凭"的/日志"这类泛词误召回。
 func (s *KnowledgeStore) SearchFeedback(ctx context.Context, query string, limit int) ([]map[string]any, error) {
 	if limit <= 0 {
 		limit = 5
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT query, rating, correction, tools_called, created_at
+	keywords := feedbackKeywords(query)
+	if len(keywords) == 0 {
+		return nil, nil
+	}
+	var conds []string
+	var scoreParts []string
+	var args []any
+	for _, kw := range keywords {
+		conds = append(conds, `(query LIKE ? OR correction LIKE ?)`)
+		scoreParts = append(scoreParts, `CASE WHEN query LIKE ? OR correction LIKE ? THEN 1 ELSE 0 END`)
+		// 每个关键词占 4 个参数：WHERE 2 个 + score 2 个
+		args = append(args, "%"+kw+"%", "%"+kw+"%", "%"+kw+"%", "%"+kw+"%")
+	}
+	args = append(args, limit)
+
+	sql := `SELECT query, rating, correction, tools_called, created_at,
+			(` + strings.Join(scoreParts, " + ") + `) AS hits
 		 FROM feedback_learning
-		 WHERE query LIKE ? OR correction LIKE ?
-		 ORDER BY created_at DESC LIMIT ?`,
-		"%"+query+"%", "%"+query+"%", limit)
+		 WHERE (` + strings.Join(conds, " OR ") + `)
+		 ORDER BY hits DESC, created_at DESC LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +128,11 @@ func (s *KnowledgeStore) SearchFeedback(ctx context.Context, query string, limit
 	var results []map[string]any
 	for rows.Next() {
 		var q, correction, toolsJSON, createdAt string
-		var rating int
-		if err := rows.Scan(&q, &rating, &correction, &toolsJSON, &createdAt); err != nil {
+		var rating, hits int
+		if err := rows.Scan(&q, &rating, &correction, &toolsJSON, &createdAt, &hits); err != nil {
+			continue
+		}
+		if hits < 2 && len(keywords) >= 2 {
 			continue
 		}
 		results = append(results, map[string]any{
@@ -121,6 +144,37 @@ func (s *KnowledgeStore) SearchFeedback(ctx context.Context, query string, limit
 		})
 	}
 	return results, nil
+}
+
+// feedbackKeywords 从用户消息中提取检索关键词：去标点、按空白切分、去掉
+// 过短的词（<2 字节）和常见停用词。与分词无关的朴素策略——够用于召回，
+// 不追求精度。
+func feedbackKeywords(query string) []string {
+	stop := map[string]bool{
+		"的": true, "了": true, "吗": true, "呢": true, "是": true, "在": true,
+		"和": true, "与": true, "怎么": true, "什么": true, "为什么": true,
+		"查一下": true, "帮忙": true, "请问": true, "看看": true, "排查": true,
+		"the": true, "a": true, "an": true, "is": true, "of": true, "to": true,
+		"what": true, "why": true, "how": true,
+	}
+	split := strings.FieldsFunc(query, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	seen := map[string]bool{}
+	var kws []string
+	for _, w := range split {
+		w = strings.ToLower(strings.TrimSpace(w))
+		if len(w) < 2 || stop[w] || seen[w] {
+			continue
+		}
+		seen[w] = true
+		kws = append(kws, w)
+	}
+	// 中文整句无空格切不出词：整句作为单一关键词回退，仍优于 LIKE 全文
+	if len(kws) == 0 && strings.TrimSpace(query) != "" {
+		kws = []string{strings.TrimSpace(query)}
+	}
+	return kws
 }
 
 // AnalyzeFeedback 分析累积的反馈模式，返回改进建议。

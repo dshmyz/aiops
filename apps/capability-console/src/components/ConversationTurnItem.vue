@@ -26,6 +26,7 @@ const emit = defineEmits<{
   (event: 'regenerate', turn: ConversationTurn): void;
   (event: 'retry'): void;
   (event: 'edit', turn: ConversationTurn): void;
+  (event: 'quote', turn: ConversationTurn): void;
 }>();
 
 const isAssistant = computed(() => props.turn.role === 'assistant');
@@ -456,6 +457,22 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
             />
           </svg>
           <span>复制</span>
+        </button>
+
+        <button
+          type="button"
+          data-test="conversation-turn-quote"
+          class="action-button"
+          :title="'引用此消息追问'"
+          @click="emit('quote', turn)"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z"
+            />
+          </svg>
+          <span>引用</span>
         </button>
 
         <button

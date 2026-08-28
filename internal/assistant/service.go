@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -71,6 +73,9 @@ type Service struct {
 	conversations store.AssistantConversationStore
 	compactor     Compactor
 	clock         func() time.Time
+	// compactInFlight 对同一会话的后台压缩去重：值存在表示该会话已有一次
+	// 压缩在跑，避免连续消息触发重复 LLM 摘要调用。
+	compactInFlight sync.Map
 	// audit 记录 agent 循环内策略拒绝事件（读/写路径提前 return 时，走不到
 	// ReadOnlyService 内部审计）。为 nil 时跳过记录，不阻塞调用。
 	audit *audit.Service
@@ -109,6 +114,10 @@ type Service struct {
 	// supervisor 是通用助手入口（恒 supervisor 角色，见 supervisor.go）。
 	// WithAgentExecutor 注入 executor 时自动创建，nil 时退化为直接调用 executor。
 	supervisor *Supervisor
+	// cancelRegistry tracks in-flight streaming runs per conversation so a
+	// user can cancel a long-running agent loop mid-flight. Keyed by
+	// conversation ID; the cancel func aborts the run's context.
+	cancelRegistry sync.Map
 }
 
 // ExecutionRunner 自动执行已确认的 plan（低风险 Runbook 路径）。
@@ -410,6 +419,10 @@ func (s *Service) HandleMessage(ctx context.Context, user identity.CurrentUser, 
 	if err != nil {
 		return Response{}, err
 	}
+	history, err = s.applyQuoteTurn(ctx, user, conv.ID, history, pageContext)
+	if err != nil {
+		return Response{}, err
+	}
 	response, err := s.handleStatelessWithHistory(ctx, user, fullMessage, history, pageContext)
 	if err != nil {
 		// 把失败的工具调用落进时间线（用户消息 + 错误 turn），刷新/换会话后
@@ -465,10 +478,24 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 		if err != nil {
 			return nil, err
 		}
+		history, err = s.applyQuoteTurn(ctx, user, conv.ID, history, pageContext)
+		if err != nil {
+			return nil, err
+		}
 		hasConversation = true
 	}
 
 	events := make(chan StreamEvent, 16)
+
+	// Cancellation: wrap the request context in a per-run cancel so
+	// CancelConversation can abort a long-running agent loop mid-flight.
+	// Registered per conversation and unregistered when the stream ends.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	if hasConversation {
+		s.cancelRegistry.Store(conv.ID, cancelRun)
+		defer s.cancelRegistry.Delete(conv.ID)
+	}
 
 	// Wire tool call emitter to forward events to SSE channel. recover 兜底：
 	// SSE 客户端断开后 channel 关闭，后续工具调用不能 panic。
@@ -497,14 +524,14 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 		}()
 		// 新路径：AgentExecutor（LLM function calling）
 		if s.agentExecutor != nil {
-			s.runAgentExecutorInStream(ctx, events, user, fullMessage, history, conv.ID, hasConversation)
+			s.runAgentExecutorInStream(runCtx, events, user, fullMessage, history, conv.ID, hasConversation)
 			return
 		}
 		if s.agentEnabled() {
-			s.runAgentLoopInStream(ctx, events, user, fullMessage, history, pageContext, conv.ID, hasConversation)
+			s.runAgentLoopInStream(runCtx, events, user, fullMessage, history, pageContext, conv.ID, hasConversation)
 			return
 		}
-		planEvents := s.startPlannerStream(ctx, user, fullMessage, history, pageContext)
+		planEvents := s.startPlannerStream(runCtx, user, fullMessage, history, pageContext)
 		var (
 			resolvedIntent Intent
 			planErr        error
@@ -531,7 +558,7 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 		// same logic as HandleMessage via executeFromIntent.
 		// 整形器摘要叙述以 delta 流式转发（消除诊断/读路径整形期间的空窗等待），
 		// 最终 response 事件权威覆盖前端文本。
-		resp, err := s.executeFromIntent(ctx, user, fullMessage, resolvedIntent, planErr, func(delta string) {
+		resp, err := s.executeFromIntent(runCtx, user, fullMessage, resolvedIntent, planErr, func(delta string) {
 			events <- StreamEvent{Delta: delta}
 		})
 		if err != nil {
@@ -573,6 +600,28 @@ func (s *Service) agentLoopSequence(ctx context.Context, message string) []strin
 // Response. TerminalClarification carries ClarifiedFields as an approval_form
 // block so the frontend renders a clickable form instead of plain text;
 // every other terminal reason maps 1:1 to the previous inline switch.
+// AgentRunResponse maps a finished agent run to the user-facing Response.
+// Exported so the eval harness (and any future caller) can assert on the
+// exact fallback/disclosure text operators see, not just loop internals.
+func AgentRunResponse(run *AgentRun) Response {
+	return agentRunResponse(run)
+}
+
+// discloseFailedSteps appends a failure-disclosure note to a model-authored
+// final answer when any executed step failed. The model's conclusion may be
+// fabricated precisely because its evidence-gathering failed; without this
+// note the operator cannot tell an authoritative conclusion from a guess.
+// The Answer payload (authoritative for the frontend) keeps the model's text,
+// while Message (what the transcript renders) carries the appended note.
+func discloseFailedSteps(run *AgentRun, answer string) string {
+	failed := runFailedTools(run)
+	if len(failed) == 0 {
+		return answer
+	}
+	return answer + "\n\n⚠️ 注意：本轮有 " + fmt.Sprint(len(failed)) + " 个检查环节失败（" +
+		strings.Join(failed, "、") + "），模型结论可能缺少这部分证据支撑，请酌情核验。"
+}
+
 func agentRunResponse(run *AgentRun) Response {
 	switch run.Reason {
 	case TerminalDone:
@@ -583,7 +632,7 @@ func agentRunResponse(run *AgentRun) Response {
 			answer := stepsAnswer(run)
 			return Response{Type: responseTypeFallbackAnswer, Message: answer, Answer: map[string]any{"message": answer}}
 		}
-		return Response{Type: "answer", Answer: map[string]any{"message": run.FinalAnswer}, Message: run.FinalAnswer}
+		return Response{Type: "answer", Answer: map[string]any{"message": run.FinalAnswer}, Message: discloseFailedSteps(run, run.FinalAnswer)}
 	case TerminalClarification:
 		resp := BuildClarificationResponse(ClarificationError{Message: run.Clarified, Fields: run.ClarifiedFields})
 		if strings.TrimSpace(resp.Message) == "" {
@@ -1493,51 +1542,14 @@ func (s *Service) loadHistory(ctx context.Context, conversationID string) ([]Tur
 		unsummarized = append(unsummarized, t)
 	}
 
-	// Compaction: when unsummarized count reaches compactThreshold, split
-	// into [recent (newest keepRecentTurns)] and [excluded (rest)]. Compact
-	// only the oldest compactBatchSize of the excluded turns; the remainder
-	// of excluded is covered by the summary boundary so they are not
-	// re-counted next time.
+	// Compaction: when unsummarized count reaches compactThreshold, the
+	// oldest batch is compacted into a system_summary turn. The LLM call is
+	// NOT on the request path: loadHistory returns the current window
+	// immediately and schedules the compaction in the background (deduped
+	// per conversation). The persisted summary takes effect on the next
+	// loadHistory after ReplaceSummary lands.
 	if s.compactor != nil && len(unsummarized) >= compactThreshold {
-		recent := unsummarized[:keepRecentTurns]
-		excluded := unsummarized[keepRecentTurns:]
-
-		// Compact the oldest compactBatchSize of the excluded turns.
-		compactCount := compactBatchSize
-		if len(excluded) < compactBatchSize {
-			compactCount = len(excluded)
-		}
-		toCompact := excluded[len(excluded)-compactCount:]
-
-		// Build compactor input in chronological order (oldest first):
-		// [existing summary, ...toCompact reversed].
-		var compactInput []Turn
-		if hasSummary {
-			compactInput = append(compactInput, toPlannerTurn(existingSummary))
-		}
-		for i := len(toCompact) - 1; i >= 0; i-- {
-			compactInput = append(compactInput, toPlannerTurn(toCompact[i]))
-		}
-
-		newSummary, err := s.compactor.Compact(ctx, compactInput)
-		if err != nil {
-			return nil, err
-		}
-		// ParentTurnID = newest excluded turn (excluded[0] in newest-first
-		// order). This is the boundary: the next loadHistory breaks at this
-		// ID and only counts turns newer than the boundary as unsummarized.
-		boundaryTurn := excluded[0]
-		savedSummary, err := s.conversations.ReplaceSummary(ctx, conversationID, newSummary, boundaryTurn.ID, s.now())
-		if err != nil {
-			return nil, err
-		}
-
-		// Return [new summary, ...recent turns] in chronological order.
-		history := []Turn{toPlannerTurn(savedSummary)}
-		for i := len(recent) - 1; i >= 0; i-- {
-			history = append(history, toPlannerTurn(recent[i]))
-		}
-		return history, nil
+		s.scheduleCompaction(conversationID, existingSummary, hasSummary, unsummarized)
 	}
 
 	// No compaction needed. When a summary exists, cap unsummarized at
@@ -1557,6 +1569,60 @@ func (s *Service) loadHistory(ctx context.Context, conversationID string) ([]Tur
 		history = append(history, toPlannerTurn(recent[i]))
 	}
 	return history, nil
+}
+
+// scheduleCompaction kicks off a background compaction for the conversation
+// if one is not already in flight. unsummarized is newest-first as produced
+// by loadHistory; the batch to compact is re-derived inside the goroutine
+// from a snapshot taken now, so the request path never blocks on the LLM.
+func (s *Service) scheduleCompaction(conversationID string, existingSummary store.Turn, hasSummary bool, unsummarized []store.Turn) {
+	if _, busy := s.compactInFlight.LoadOrStore(conversationID, struct{}{}); busy {
+		return
+	}
+
+	// Snapshot the batch under the same rules the synchronous path used:
+	// recent = newest keepRecentTurns, excluded = the rest, compact the
+	// oldest compactBatchSize of excluded. recent is returned verbatim by
+	// loadHistory regardless, so only excluded needs snapshotting.
+	excluded := unsummarized[keepRecentTurns:]
+	compactCount := compactBatchSize
+	if len(excluded) < compactBatchSize {
+		compactCount = len(excluded)
+	}
+	toCompact := excluded[len(excluded)-compactCount:]
+
+	compactInput := make([]Turn, 0, len(toCompact)+1)
+	if hasSummary {
+		compactInput = append(compactInput, toPlannerTurn(existingSummary))
+	}
+	for i := len(toCompact) - 1; i >= 0; i-- {
+		compactInput = append(compactInput, toPlannerTurn(toCompact[i]))
+	}
+	boundaryTurnID := excluded[0].ID
+
+	go func() {
+		defer s.compactInFlight.Delete(conversationID)
+
+		// Detach from the request context: compaction must survive the
+		// HTTP request returning, but still honor process shutdown.
+		ctx, cancel := context.WithTimeout(context.Background(), compactionTimeout)
+		defer cancel()
+
+		newSummary, err := s.compactor.Compact(ctx, compactInput)
+		if err != nil {
+			// 摘要失败不阻断对话：轮次未入摘要边界，下次 loadHistory
+			// 触发压缩时会重试。连续失败由 compactionFailures 指标暴露。
+			log.Printf("assistant: background compaction failed for conversation %s: %v", conversationID, err)
+			recordCompactionFailure()
+			return
+		}
+		if _, err := s.conversations.ReplaceSummary(ctx, conversationID, newSummary, boundaryTurnID, s.now()); err != nil {
+			log.Printf("assistant: background compaction persist failed for conversation %s: %v", conversationID, err)
+			recordCompactionFailure()
+			return
+		}
+		resetCompactionFailures()
+	}()
 }
 
 // persistTurns records the user message and assistant response as two turns.
@@ -1793,11 +1859,72 @@ func (s *Service) DeleteConversation(ctx context.Context, id, subject string) er
 	return s.conversations.DeleteConversation(ctx, id, subject)
 }
 
+// applyQuoteTurn injects the verbatim content of the user-referenced turn
+// (PageContext.QuoteTurnID) at the end of the history window. Quote turns
+// may already be covered by the rolling summary, so this bypasses the
+// compaction boundary on purpose: the user explicitly pointed at an older
+// message and expects it verbatim. Ownership is enforced by fetching the
+// turn through the conversation store scoped to the subject. An unknown or
+// foreign turn ID is a client error.
+func (s *Service) applyQuoteTurn(ctx context.Context, user identity.CurrentUser, conversationID string, history []Turn, pageContext PageContext) ([]Turn, error) {
+	if pageContext.QuoteTurnID == "" || s.conversations == nil {
+		return history, nil
+	}
+	if _, err := s.conversations.GetConversation(ctx, conversationID, user.Subject); err != nil {
+		return nil, err
+	}
+	page, err := s.conversations.ListTurns(ctx, conversationID, 0, "")
+	if err != nil {
+		return nil, err
+	}
+	var quoted *store.Turn
+	for i := range page.Turns {
+		if page.Turns[i].ID == pageContext.QuoteTurnID {
+			quoted = &page.Turns[i]
+			break
+		}
+	}
+	if quoted == nil || quoted.Content == "" {
+		return nil, fmt.Errorf("assistant: quoted turn %q not found in conversation", pageContext.QuoteTurnID)
+	}
+	role := "user"
+	if quoted.Role == store.ConversationRoleAssistant {
+		role = "assistant"
+	}
+	return append(history, Turn{
+		Role:    role,
+		Content: "[用户引用的历史消息]\n" + quoted.Content,
+	}), nil
+}
+
+// CancelConversation aborts an in-flight streaming run for the conversation.
+// Ownership is enforced via the conversation store before cancelling, so a
+// user can only cancel their own runs. Returns store.ErrNotFound when the
+// conversation is missing or foreign, and ErrNotRunning when nothing is
+// currently streaming for it.
+func (s *Service) CancelConversation(ctx context.Context, id, subject string) error {
+	if s.conversations == nil {
+		return errors.New("conversation store is not configured")
+	}
+	if _, err := s.conversations.GetConversation(ctx, id, subject); err != nil {
+		return err
+	}
+	value, ok := s.cancelRegistry.Load(id)
+	if !ok {
+		return ErrNotRunning
+	}
+	value.(context.CancelFunc)()
+	return nil
+}
+
+// ErrNotRunning is returned by CancelConversation when the conversation has
+// no in-flight streaming run to cancel.
+var ErrNotRunning = errors.New("assistant: no in-flight run for conversation")
+
 // RenameConversation updates a conversation's display title after trimming.
 // Returns store.ErrInvalidTitle for empty titles and store.ErrNotFound for
 // missing or foreign conversations.
-func (s *Service) RenameConversation(ctx context.Context, id, subject, title string) error {
-	if s.conversations == nil {
+func (s *Service) RenameConversation(ctx context.Context, id, subject, title string) error {	if s.conversations == nil {
 		return errors.New("conversation store is not configured")
 	}
 	title = strings.TrimSpace(title)

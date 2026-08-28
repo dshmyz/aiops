@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import type { Ref } from 'vue';
-import { getPendingPlan, sendAssistantMessage } from '../api';
+import { cancelAssistantConversation, getPendingPlan, sendAssistantMessage } from '../api';
 import { streamAssistantMessage } from './useAssistantStream';
 import type { PageContext } from './useAssistantStream';
 import { validateAttachmentList } from '../utils/attachments';
@@ -51,6 +51,8 @@ export interface UseAssistant {
   assistantEntryLoading: Ref<boolean>;
   assistantPageContext: Ref<PageContext | null>;
   setAssistantPageContext: (ctx: PageContext | null) => void;
+  /** 引用追问：待随下一条消息发送的历史 turn ID（空串表示无引用） */
+  quotedTurnID: Ref<string>;
   assistantEntryError: Ref<string>;
   assistantDiagnostic: Ref<DiagnosticPackage | null>;
   assistantBlocks: Ref<Block[]>;
@@ -198,6 +200,10 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
   function setAssistantPageContext(ctx: PageContext | null) {
     assistantPageContext.value = ctx;
   }
+  // 引用追问：用户在历史气泡上点"引用"后记录该 turn ID，随下一条消息发送
+  // （page_context.quote_turn_id），后端把被引用消息原文注入上下文，绕过
+  // 滚动摘要窗口对久远细节的稀释。
+  const quotedTurnID = ref('');
   const assistantEntryError = ref('');
   const assistantDiagnostic = ref<DiagnosticPackage | null>(null);
   const assistantBlocks = ref<Block[]>([]);
@@ -246,14 +252,17 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     const attachments = pendingAttachments.value;
     pendingAttachments.value = [];
     let sendFailed = false;
-    // 组装 pageContext：仅当跳转设置了 assistantPageContext 时才启用 page_context。
-    const pageContext: PageContext | undefined = assistantPageContext.value
-      ? {
-          domain: assistantPageContext.value.domain,
-          resource_type: assistantPageContext.value.resource_type,
-          resource_name: assistantPageContext.value.resource_name,
-        }
-      : undefined;
+    // 组装 pageContext：跳转上下文 + 引用追问（quoteTurnID，一次性，随本条消息发送）。
+    const pageContext: PageContext | undefined =
+      assistantPageContext.value || quotedTurnID.value
+        ? {
+            domain: assistantPageContext.value?.domain,
+            resource_type: assistantPageContext.value?.resource_type,
+            resource_name: assistantPageContext.value?.resource_name,
+            quote_turn_id: quotedTurnID.value || undefined,
+          }
+        : undefined;
+    quotedTurnID.value = '';
     assistantEntryLoading.value = true;
     assistantEntryError.value = '';
     lastFailedAssistantMessage.value = '';
@@ -497,6 +506,13 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
 
   function stop() {
     if (activeAbortController.value) {
+      // 双管齐下：abort 断开本地 SSE fetch；cancel API 让服务端 agent loop /
+      // executor 的 context 同步终止，避免后端继续跑完剩余工具步骤。
+      if (activeConversationID.value) {
+        void cancelAssistantConversation(activeConversationID.value).catch(() => {
+          // 取消失败不阻断本地停止——fetch abort 已让前端退出流式状态。
+        });
+      }
       activeAbortController.value.abort();
       activeAbortController.value = null;
       assistantEntryLoading.value = false;
@@ -662,6 +678,7 @@ export function useAssistant(options: UseAssistantOptions): UseAssistant {
     assistantEntryLoading,
     assistantPageContext,
     setAssistantPageContext,
+    quotedTurnID,
     assistantEntryError,
     assistantDiagnostic,
     assistantBlocks,
