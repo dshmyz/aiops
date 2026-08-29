@@ -490,11 +490,14 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 	// Cancellation: wrap the request context in a per-run cancel so
 	// CancelConversation can abort a long-running agent loop mid-flight.
 	// Registered per conversation and unregistered when the stream ends.
+	// cancelRun 必须在流式 goroutine 结束时才调用：本函数在 goroutine 启动后
+	// 立即返回，若在此 defer 取消，整个请求会带着已死的上下文运行——首个
+	// ctx 感知的调用（真实 LLM 流式、审计落库）就会以 "context canceled"
+	// 中断（TestEinoSSEStreamEndToEnd 回归的根因）。客户端断开仍由父级
+	// request context 传播兜底。
 	runCtx, cancelRun := context.WithCancel(ctx)
-	defer cancelRun()
 	if hasConversation {
 		s.cancelRegistry.Store(conv.ID, cancelRun)
-		defer s.cancelRegistry.Delete(conv.ID)
 	}
 
 	// Wire tool call emitter to forward events to SSE channel. recover 兜底：
@@ -516,6 +519,12 @@ func (s *Service) HandleMessageStream(ctx context.Context, user identity.Current
 
 	go func() {
 		defer close(events)
+		// 流式结束：取消 runCtx 并从注册表注销（CancelConversation 只对在途
+		// 流有意义）。defer 顺序保证 cancelRun/Delete 先于 close(events)。
+		defer cancelRun()
+		if hasConversation {
+			defer s.cancelRegistry.Delete(conv.ID)
+		}
 		// 流式结束：清空 emitter，避免下个请求（一次性或新的流式）复用指向
 		// 已关闭 channel 的回调，导致 send on closed channel panic。
 		defer func() {
