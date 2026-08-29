@@ -53,8 +53,10 @@ const routes = [
     handler: ([cluster, topic]) => {
       const key = `${cluster}/${topic}`;
       const hours = topicRetention.has(key) ? topicRetention.get(key) : 24;
+      // 保留期 ≤24h 视为风险配置（缩短保留窗口易丢审计数据），驱动告警处置
+      // 闭环的演示：warning 触发研判 → 推荐调整保留期 → 确认执行 → 验证读回。
       return {
-        status: 'ok',
+        status: hours <= 24 ? 'warning' : 'ok',
         data: {
           cluster,
           topic,

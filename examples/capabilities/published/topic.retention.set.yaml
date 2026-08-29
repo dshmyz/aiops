@@ -51,3 +51,9 @@ ai:
  examples:
  - set kafka orders topic retention to 72 hours
  - 配置 kafka orders topic 保留 48 小时
+verify:
+  read_capability: kafka.topic.retention.read
+  input_mapping:
+    topic: "{topic}"
+    cluster: "default"
+  timeout_ms: 5000
