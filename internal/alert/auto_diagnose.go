@@ -68,6 +68,7 @@ func (d *Diagnoser) Diagnose(ctx context.Context, alert Alert) {
 
 	req := diagnostics.Request{
 		Domain: domain,
+		Labels: alert.Labels,
 	}
 	if alert.ResourceType != "" {
 		req.ResourceType = alert.ResourceType

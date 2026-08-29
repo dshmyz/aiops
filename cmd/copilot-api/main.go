@@ -517,9 +517,10 @@ func main() {
 	// 注册表已优先承载规则来源；若需要纯 env 场景可改走 NewStaticActionMatcher。
 	// LLM 智能研判（最高优先级）：需要 eino-openai 模式 + 显式开启。
 	// 内置 fallback 到确定性 Diagnoser，LLM 失败不影响告警接入。
+	// planCreator 为两条研判路径共用：诊断产出的可执行推荐 → 待确认 plan。
 	var fallbackDiag *alert.Diagnoser
+	planCreator := alert.NewPlanCreator(planService, alertSvc).WithNotifier(notifier)
 	if os.Getenv("COPILOT_ALERT_AUTO_DIAGNOSE") == "1" {
-		planCreator := alert.NewPlanCreator(planService, alertSvc)
 		chainDiag := alert.NewChainDiagnoser(diagService, alertSvc, planCreator, readService.ExecuteRead).
 			WithRunStore(store.NewSQLAlertActionRunStore(db))
 		alertWebhook = alertWebhook.WithChainDiagnoser(chainDiag)
@@ -531,7 +532,10 @@ func main() {
 	if os.Getenv("COPILOT_ALERT_LLM_DIAGNOSE") == "1" {
 		if chatModel != nil {
 			llmDiag := alert.NewLLMDiagnoser(chatModel, diagService, alertSvc).
-				WithFallback(fallbackDiag)
+				WithFallback(fallbackDiag).
+				// LLM 报告路径同样接入处置闭环：修复前只有 fallback 有建 plan
+				// 能力，LLM 研判成功时（主路径）处置闭环是断的。
+				WithRecommendationPlanCreator(planCreator)
 			if auditService != nil {
 				llmDiag.WithAudit(auditService, os.Getenv("COPILOT_OPENAI_MODEL"))
 			}

@@ -115,7 +115,7 @@ func (s *Service) Run(ctx context.Context, user identity.CurrentUser, request Re
 	if name == "" {
 		name = defaultResourceName(domain, resourceType)
 	}
-	input := buildReadInput(validated.inputSchema, name)
+	input := buildReadInput(validated.inputSchema, name, request.Labels)
 	result, err := s.reads.ExecuteRead(ctx, user, toolName, input)
 	if err != nil {
 		return Package{}, err
@@ -351,7 +351,11 @@ func (s *Service) resolveRunbookCapability(domain, requestedResourceType string)
 // first field declared in the schema (preferring "name" when present). When
 // no schema is supplied, the input defaults to the standard {name} shape used
 // by the built-in health read tools.
-func buildReadInput(schema map[string]any, name string) map[string]any {
+//
+// labels 优先：请求携带的上下文标签（告警 labels）按字段名精确填充入参，
+// 资源名只落到标签未覆盖的第一个必填字段。多字段能力（如 cluster+group）
+// 在无标签时维持旧行为（资源名 → 第一个字段，其余必填留空报缺参）。
+func buildReadInput(schema map[string]any, name string, labels map[string]string) map[string]any {
 	if len(schema) == 0 {
 		return map[string]any{"name": name}
 	}
@@ -365,10 +369,28 @@ func buildReadInput(schema map[string]any, name string) map[string]any {
 		fields = append(fields, field)
 	}
 	sort.Strings(fields)
-	if len(fields) > 0 {
-		input[fields[0]] = name
-	} else {
-		input["name"] = name
+	for _, field := range fields {
+		if v, ok := labels[field]; ok && strings.TrimSpace(v) != "" {
+			input[field] = v
+		}
+	}
+	if _, ok := input["name"]; !ok {
+		// 资源名落到第一个未被标签覆盖的必填字段；全部必填已被标签覆盖时
+		// 不强行塞入。无标签时等价旧行为（资源名 → 排序后的第一个字段）。
+		for _, field := range fields {
+			if _, filled := input[field]; filled {
+				continue
+			}
+			if spec, ok := schema[field].(map[string]any); ok {
+				if req, _ := spec["required"].(bool); req {
+					input[field] = name
+					break
+				}
+			}
+		}
+		if len(input) == 0 && len(fields) > 0 {
+			input[fields[0]] = name
+		}
 	}
 	return input
 }
@@ -378,7 +400,13 @@ func defaultResourceName(domain, resourceType string) string {
 }
 
 func severityFromResult(result map[string]any) Severity {
+	// 能力读结果的规范键是 severity（CapabilityReadRunner），旧内置健康工具
+	// 用 status。修复前只认 status——能力驱动的诊断 severity 恒为 info，
+	// 自动处置推荐（要求 ≥warning）从不触发。
 	status, _ := result["status"].(string)
+	if strings.TrimSpace(status) == "" {
+		status, _ = result["severity"].(string)
+	}
 	switch strings.ToLower(status) {
 	case "critical", "red":
 		return SeverityCritical
@@ -393,6 +421,9 @@ func severityFromResult(result map[string]any) Severity {
 
 func summaryFromResult(domain, name string, result map[string]any) string {
 	status, _ := result["status"].(string)
+	if strings.TrimSpace(status) == "" {
+		status, _ = result["severity"].(string)
+	}
 	if strings.TrimSpace(status) == "" {
 		status = "可用"
 	}

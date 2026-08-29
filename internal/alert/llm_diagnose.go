@@ -25,11 +25,12 @@ import (
 //
 // 任何阶段 LLM 失败都 fallback 到注入的确定性 Diagnoser（可 nil）。
 type LLMDiagnoser struct {
-	chat     model.BaseChatModel
-	diag     *diagnostics.Service
-	alertSvc *Service
-	fallback *Diagnoser            // 可 nil，LLM 失败时的兜底
-	audit    *diagLLMAuditRecorder // 可 nil
+	chat        model.BaseChatModel
+	diag        *diagnostics.Service
+	alertSvc    *Service
+	fallback    *Diagnoser                // 可 nil，LLM 失败时的兜底
+	audit       *diagLLMAuditRecorder     // 可 nil
+	planCreator RecommendationPlanCreator // 可 nil，处置闭环：报告后自动建待确认 plan
 }
 
 // NewLLMDiagnoser 创建 LLM 智能研判器。chat 不能 nil。
@@ -40,6 +41,14 @@ func NewLLMDiagnoser(chat model.BaseChatModel, diag *diagnostics.Service, alertS
 // WithFallback 设置 LLM 失败时的确定性兜底研判器。
 func (d *LLMDiagnoser) WithFallback(f *Diagnoser) *LLMDiagnoser {
 	d.fallback = f
+	return d
+}
+
+// WithRecommendationPlanCreator 注入处置闭环：LLM 报告产出后，把注册表派生的
+// 修复候选（与确定性模板同一派生规则）转成待确认 action plan。修复前 LLM 路径
+// 只写报告不建 plan——处置闭环在主研判路径上是断的。
+func (d *LLMDiagnoser) WithRecommendationPlanCreator(creator RecommendationPlanCreator) *LLMDiagnoser {
+	d.planCreator = creator
 	return d
 }
 
@@ -165,10 +174,10 @@ const llmDiagnosisReportPrompt = `你是中间件运维的告警研判助手。�
 
 // diagnosisReport 是 LLM 第二阶段的输出。
 type diagnosisReport struct {
-	Status         string               `json:"status"`
-	Summary        string               `json:"summary"`
-	RootCause      string               `json:"root_cause"`
-	Impact         string               `json:"impact"`
+	Status          string                 `json:"status"`
+	Summary         string                 `json:"summary"`
+	RootCause       string                 `json:"root_cause"`
+	Impact          string                 `json:"impact"`
 	Recommendations []reportRecommendation `json:"recommendations"`
 }
 
@@ -182,8 +191,8 @@ type reportRecommendation struct {
 // --- 主流程 ---
 
 const (
-	maxLLMDiagnosisSteps        = 3
-	llmDiagnosisOverallTimeout  = 120 * time.Second
+	maxLLMDiagnosisSteps       = 3
+	llmDiagnosisOverallTimeout = 120 * time.Second
 )
 
 // Diagnose 对一条 firing 告警执行 LLM 智能研判。
@@ -228,13 +237,76 @@ func (d *LLMDiagnoser) Diagnose(ctx context.Context, alert Alert) {
 		return
 	}
 
-	// 写回告警
+	// 写回告警；处置闭环结果并入描述（建议了什么、落地成 plan 没有、为什么没落地）。
 	desc := d.formatReport(alert, report)
 	if desc == "" {
 		return
 	}
+	if d.planCreator != nil && d.alertSvc != nil {
+		desc += "\n\n" + d.dispositionSummary(ctx, alert, report, observations)
+	}
 	if d.alertSvc != nil {
 		_ = d.alertSvc.UpdateDescription(ctx, alert.ID, desc)
+	}
+}
+
+// dispositionSummary 把报告结论经注册表派生的修复候选转成待确认 plan，
+// 追加到研判描述。候选工具与确定性模板同源（recommendationAction，注册表
+// 派生），LLM 报告里的工具名不采信——它可能编造注册表外工具。severity 取
+// 报告结论状态；候选入参从观测数据同名键提取，缺必填时由建 plan 的
+// ValidateInput 明确报错，不会带着残缺输入确认执行。
+func (d *LLMDiagnoser) dispositionSummary(ctx context.Context, alert Alert, report diagnosisReport, observations []diagnostics.Observation) string {
+	user := d.autodiagUser()
+	severity := diagnostics.SeverityInfo
+	switch strings.ToLower(strings.TrimSpace(report.Status)) {
+	case "critical", "red":
+		severity = diagnostics.SeverityCritical
+	case "warning", "yellow":
+		severity = diagnostics.SeverityWarning
+	}
+	merged := map[string]any{}
+	for _, obs := range observations {
+		for k, v := range obs.Data {
+			merged[k] = v
+		}
+		// 能力读结果的业务字段嵌在 data 子键（{kind,severity,summary,data:{...}}），
+		// 扁平化合并让 retention_hours 等字段能被候选入参提取。
+		if nested, ok := obs.Data["data"].(map[string]any); ok {
+			for k, v := range nested {
+				merged[k] = v
+				// 适配器字段提取把嵌套对象打平成 "data.X" 点号键存进 data，
+				// 提升为裸键让 retention_hours 等字段能被候选入参提取。
+				if name, ok := strings.CutPrefix(k, "data."); ok {
+					if _, exists := merged[name]; !exists {
+						merged[name] = v
+					}
+				}
+			}
+		}
+	}
+	toolName, candidateInput := diagnostics.DeriveFixAction(alert.Domain, severity, alert.ResourceName, merged)
+	if toolName == "" {
+		return "**建议处置**：无（域内没有可自动派生的修复工具，或严重级别未达处置阈值）"
+	}
+	planID, err := d.planCreator.CreateRecommendationPlan(ctx, user, diagnostics.Recommendation{
+		ID:             "rec-" + alert.ID,
+		Summary:        report.Summary,
+		Rationale:      report.RootCause,
+		ToolName:       toolName,
+		CandidateInput: candidateInput,
+	})
+	if err != nil {
+		return "**建议处置未落地**：" + toolName + ": " + err.Error()
+	}
+	log.Printf("[alert-auto-plan] created plan %s from LLM report (tool=%s)", planID[:8], toolName)
+	return "**建议处置（待确认）**：" + toolName + " (plan " + planID + ")"
+}
+
+// autodiagUser 与确定性 Diagnoser 一致：内部可信身份，只读 + 建待确认 plan。
+func (d *LLMDiagnoser) autodiagUser() identity.CurrentUser {
+	return identity.CurrentUser{
+		Subject: "alert-llm-diag",
+		Roles:   []string{"admin"},
 	}
 }
 
@@ -285,6 +357,12 @@ func (d *LLMDiagnoser) executePlan(ctx context.Context, alert Alert, plan diagno
 		req := diagnostics.Request{
 			Domain:  step.Domain,
 			Runbook: step.Runbook,
+			Labels:  alert.Labels,
+		}
+		// 资源类型决定 resolver 选哪个诊断读能力：缺失时按域取第一个匹配，
+		// topic 告警会被误读成 consumer_group（orders 被当组名查 lag）。
+		if alert.ResourceType != "" {
+			req.ResourceType = alert.ResourceType
 		}
 		if alert.ResourceName != "" {
 			req.ResourceName = alert.ResourceName
@@ -371,11 +449,17 @@ func (d *LLMDiagnoser) formatReport(alert Alert, report diagnosisReport) string 
 	return desc
 }
 
-// fallbackDiagnose 调用确定性兜底研判器。
+// fallbackDiagnose 调用确定性兜底研判器。fallback 拿到独立的超时预算：
+// 它通常在 LLM 各阶段耗尽 llmDiagnosisOverallTimeout 之后才被调用，
+// 复用同一个 ctx 会让兜底在起跑线上就 context deadline exceeded（实测：
+// 报告阶段超时后 fallback 静默失败，告警连摘要都没有）。
 func (d *LLMDiagnoser) fallbackDiagnose(ctx context.Context, alert Alert) {
-	if d.fallback != nil {
-		d.fallback.Diagnose(ctx, alert)
+	if d.fallback == nil {
+		return
 	}
+	fallbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), llmDiagnosisOverallTimeout)
+	defer cancel()
+	d.fallback.Diagnose(fallbackCtx, alert)
 }
 
 // --- 工具函数 ---

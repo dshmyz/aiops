@@ -47,15 +47,16 @@ func (r *publishedCapabilityResolver) ResolveDiagnosticTool(domain, resourceType
 
 // inputSchemaAsMap converts a capability's input_schema (field name → InputField)
 // into the map[string]any shape the diagnostics service uses to key the read
-// input by field name (see buildReadInput). The value is the field's declared
-// type; buildReadInput only reads the keys.
+// input by field name (see buildReadInput). The value carries the declared type
+// and required flag; buildReadInput uses "required" to decide where the
+// resource name lands when labels don't cover a field.
 func inputSchemaAsMap(c capabilities.Capability) map[string]any {
 	if len(c.InputSchema) == 0 {
 		return nil
 	}
 	schema := make(map[string]any, len(c.InputSchema))
 	for name, field := range c.InputSchema {
-		schema[name] = field.Type
+		schema[name] = map[string]any{"type": field.Type, "required": field.Required}
 	}
 	return schema
 }

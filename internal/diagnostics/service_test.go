@@ -537,7 +537,7 @@ func TestPackageHasActionableRecommendations(t *testing.T) {
 		},
 		{
 			name: "nil recommendations",
-			pkg: diagnostics.Package{},
+			pkg:  diagnostics.Package{},
 			want: false,
 		},
 	}

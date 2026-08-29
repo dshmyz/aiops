@@ -33,6 +33,10 @@ type Request struct {
 	ResourceType string
 	ResourceName string
 	Runbook      string
+	// Labels 携带告警/调用方的上下文标签（如 cluster、group），用于填充
+	// 诊断读工具的同名必填入参——多字段能力此前只把资源名映射进 schema
+	// 第一个字段，其余必填字段留空导致 invalid_input。
+	Labels map[string]string
 }
 
 type ResourceRef struct {

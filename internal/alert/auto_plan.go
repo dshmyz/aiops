@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/diagnostics"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
+	"github.com/gracegaoya/ai-operations-copilot/internal/notification"
 	"github.com/gracegaoya/ai-operations-copilot/internal/plans"
 	"github.com/gracegaoya/ai-operations-copilot/internal/policy"
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
@@ -18,11 +20,40 @@ import (
 type PlanCreator struct {
 	planSvc  *plans.Service
 	alertSvc *Service
+	notifier notification.Notifier // 可 nil：建 plan 后把确认 token 推给审批人
 }
 
 // NewPlanCreator 创建自动建 plan 器。
 func NewPlanCreator(planSvc *plans.Service, alertSvc *Service) *PlanCreator {
 	return &PlanCreator{planSvc: planSvc, alertSvc: alertSvc}
+}
+
+// WithNotifier 注入确认通知通道。自动建 plan 的确认 token 只随创建响应存在，
+// 不通知就没人能确认——闭环会停在待确认态。
+func (c *PlanCreator) WithNotifier(n notification.Notifier) *PlanCreator {
+	c.notifier = n
+	return c
+}
+
+// notifyConfirmation 把确认请求推给审批人（飞书/日志）。通知失败不影响建 plan。
+func (c *PlanCreator) notifyConfirmation(ctx context.Context, plan plans.Plan, user identity.CurrentUser, input map[string]any) {
+	if c.notifier == nil || plan.ConfirmationToken == "" {
+		return
+	}
+	req := notification.ConfirmationRequest{
+		PlanID:            plan.ID,
+		ConfirmationToken: plan.ConfirmationToken,
+		ToolName:          plan.ToolName,
+		Risk:              plan.RiskLevel,
+		Subject:           user.Subject,
+		Input:             input,
+	}
+	if !plan.ExpiresAt.IsZero() {
+		req.ExpiresAt = plan.ExpiresAt.Format(time.RFC3339)
+	}
+	if err := c.notifier.NotifyConfirmation(ctx, req); err != nil {
+		log.Printf("[alert-auto-plan] notify confirmation failed: %v", err)
+	}
 }
 
 // CreateRecommendationPlan 把诊断产出的可执行推荐转成待确认的 action plan
@@ -53,6 +84,7 @@ func (c *PlanCreator) CreateRecommendationPlan(ctx context.Context, user identit
 	}
 
 	log.Printf("[alert-auto-plan] created plan %s from recommendation (tool=%s)", plan.ID[:8], toolName)
+	c.notifyConfirmation(ctx, plan, user, rec.CandidateInput)
 	return plan.ID, nil
 }
 
@@ -92,5 +124,6 @@ func (c *PlanCreator) CreatePlanForStep(ctx context.Context, alert Alert, action
 	}
 
 	log.Printf("[alert-auto-plan] created plan %s for step %d (tool=%s)", plan.ID[:8], stepIdx+1, step.Tool)
+	c.notifyConfirmation(ctx, plan, user, input)
 	return nil
 }

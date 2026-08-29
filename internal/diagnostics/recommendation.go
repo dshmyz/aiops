@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cloudwego/eino/components/model"
@@ -19,7 +20,7 @@ import (
 // automatically.
 type RecommendationResult struct {
 	Summary        string
-	Rationale       string
+	Rationale      string
 	ToolName       string
 	CandidateInput map[string]any
 }
@@ -76,9 +77,12 @@ func recommendationAction(domain string, severity Severity, name string, observa
 				input[field] = name
 				continue
 			}
-			// 其余必填字段：从观察数据同名键提取。
+			// 其余必填字段：从观察数据同名键提取。适配器字段提取产出的是
+			// 字符串（展示取向），按 schema 声明类型矫正为数值/布尔，否则
+			// ValidateInput 的 integer/number 校验必拒。不可解析时原样保留，
+			// 由 ValidateInput 明确报错（fail-loud 设计不变）。
 			if v, present := observationData[field]; present {
-				input[field] = v
+				input[field] = coerceObservationValue(schema[field].Type, v)
 			}
 		}
 	} else {
@@ -204,4 +208,52 @@ func (g *HybridRecommendationGenerator) Generate(ctx context.Context, domain, na
 
 	// LLM 失败时回退到模板
 	return g.template.Generate(ctx, domain, name, severity, observationData)
+}
+
+// DeriveFixAction 供 alert 包的 LLM 研判处置闭环复用：按确定性模板同一规则
+// 从注册表派生候选修复工具与入参（retention 语义写工具优先）。导出包装，
+// 保持 recommendationAction 私有。
+func DeriveFixAction(domain string, severity Severity, name string, observationData map[string]any) (string, map[string]any) {
+	return recommendationAction(domain, severity, name, observationData)
+}
+
+// coerceObservationValue 把观测数据值矫正为动态工具 schema 声明的类型。
+// 仅做无损转换：不可解析的字符串原样返回，交由 ValidateInput 报缺参/类型错。
+func coerceObservationValue(fieldType string, v any) any {
+	switch fieldType {
+	case "integer":
+		switch n := v.(type) {
+		case string:
+			if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+				return i
+			}
+		case float64:
+			if i := int64(n); float64(i) == n {
+				return i
+			}
+		case float32:
+			if i := int64(n); float64(i) == float64(n) {
+				return i
+			}
+		}
+	case "number":
+		switch n := v.(type) {
+		case string:
+			if f, err := strconv.ParseFloat(strings.TrimSpace(n), 64); err == nil {
+				return f
+			}
+		case float32:
+			return float64(n)
+		}
+	case "boolean":
+		if b, ok := v.(string); ok {
+			switch strings.ToLower(strings.TrimSpace(b)) {
+			case "true":
+				return true
+			case "false":
+				return false
+			}
+		}
+	}
+	return v
 }
