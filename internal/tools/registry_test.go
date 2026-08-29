@@ -650,3 +650,25 @@ func TestUnregisterDynamicToolsAllListUpdated(t *testing.T) {
 		t.Fatalf("All() count after unregister = %d, want %d", afterCount, beforeCount-1)
 	}
 }
+
+func TestValidateInputPrometheusQuery(t *testing.T) {
+	tool, ok := Lookup(PrometheusQuery)
+	if !ok {
+		t.Fatalf("static tool %q is not registered", PrometheusQuery)
+	}
+	if tool.Operation != Read || tool.Risk != Low {
+		t.Fatalf("prometheus.query must be a low-risk read tool, got %s/%s", tool.Operation, tool.Risk)
+	}
+	if err := ValidateInput(tool, map[string]any{"query": `up{job="kafka"}`}); err != nil {
+		t.Fatalf("valid query rejected: %v", err)
+	}
+	if err := ValidateInput(tool, nil); err == nil {
+		t.Fatal("missing query must be rejected")
+	}
+	if err := ValidateInput(tool, map[string]any{"query": "up", "start": "x"}); err == nil {
+		t.Fatal("unknown parameter must be rejected")
+	}
+	if err := ValidateInput(tool, map[string]any{"query": 123}); err == nil {
+		t.Fatal("non-string query must be rejected")
+	}
+}

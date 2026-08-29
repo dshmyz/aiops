@@ -229,6 +229,39 @@ func (s *KnowledgeStore) SaveWithReasoning(ctx context.Context, title, domain st
 	return err
 }
 
+// RecentProbes 返回最近的巡检记录（由 HealthChecker 写入，alert_title 形如
+// "巡检: <name>"），供系统态势聚合（system.posture.read）消费。按写入时间
+// 倒序，limit<=0 时取 10 条。
+func (s *KnowledgeStore) RecentProbes(ctx context.Context, limit int) ([]map[string]any, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT alert_title, domain, findings, created_at
+		 FROM diagnosis_history
+		 WHERE alert_title LIKE '巡检:%'
+		 ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []map[string]any
+	for rows.Next() {
+		var title, domain, findings, createdAt string
+		if err := rows.Scan(&title, &domain, &findings, &createdAt); err != nil {
+			continue
+		}
+		results = append(results, map[string]any{
+			"title":      title,
+			"domain":     domain,
+			"findings":   findings,
+			"created_at": createdAt,
+		})
+	}
+	return results, nil
+}
+
 // Search 搜索相似诊断历史
 func (s *KnowledgeStore) Search(ctx context.Context, query string, limit int) ([]map[string]any, error) {
 	if limit <= 0 {

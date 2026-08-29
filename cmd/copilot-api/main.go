@@ -195,6 +195,18 @@ func main() {
 	alertStore := store.NewSQLAlertStore(db)
 	alertSvc := alert.NewService(alertStore)
 	alertRunner := alertReadRunner{svc: alertSvc}
+	// 知识库：存储诊断经验，支持历史案例检索。在 readRunner 链之前创建——
+	// posture 聚合（system.posture.read）要读巡检历史。
+	var diagKnowledgeStore *assistant.KnowledgeStore
+	if db != nil {
+		diagKnowledgeStore = assistant.NewKnowledgeStore(db)
+		if err := diagKnowledgeStore.Init(serviceContext); err != nil {
+			logger.Warn("init knowledge store", zap.Error(err))
+			diagKnowledgeStore = nil
+		} else {
+			logger.Info("knowledge store enabled")
+		}
+	}
 	scheduledTaskStore := store.NewSQLScheduledTaskStore(db)
 	inspectionReportStore := store.NewSQLInspectionReportStore(db)
 	scheduledTaskService := scheduler.NewService(scheduledTaskStore, readService, auditService, nil)
@@ -216,12 +228,18 @@ func main() {
 		capabilities: loadedCapabilities,
 	}
 	readRunner = compositeReadRunner{
-		inner: readRunner,
+		// inner 先过 MCP 路由（外部服务器拥有的动态工具走真实 tools/call），
+		// 再落到 capability runner / 静态兜底。composite.byName 优先级最高，
+		// 静态数据源工具不会被 MCP 路由截胡。
+		inner: mcpReadRunner{manager: mcpManager, inner: readRunner},
 		byName: map[string]execution.ReadRunner{
-			tools.AlertQuery:   alertRunner,
-			tools.EventQuery:   eventReadRunner{svc: auditService},
-			tools.TaskQuery:    taskReadRunner{svc: scheduledTaskService},
-			tools.IncidentView: incidentRunner,
+			tools.AlertQuery:         alertRunner,
+			tools.EventQuery:         eventReadRunner{svc: auditService},
+			tools.TaskQuery:          taskReadRunner{svc: scheduledTaskService},
+			tools.IncidentView:       incidentRunner,
+			tools.QuerySystemPosture: postureReadRunner{alerts: alertSvc, probes: diagKnowledgeStore, capabilities: loadedCapabilities},
+			tools.ClusterStatusRead:  postureReadRunner{alerts: alertSvc, probes: diagKnowledgeStore, capabilities: loadedCapabilities},
+			tools.PrometheusQuery:    newPromReadRunner(os.Getenv("COPILOT_PROMETHEUS_URL")),
 		},
 	}
 	readService = execution.NewReadOnlyService(readRunner, auditService)
@@ -263,17 +281,7 @@ func main() {
 	conversationStore := store.NewSQLAssistantConversationStore(db)
 	assistantService := assistant.NewServiceWithCompactor(planner, readService, planService, conversationStore, compactor)
 	assistantService = assistantService.WithAuditService(auditService)
-	// 知识库：存储诊断经验，支持历史案例检索
-	var diagKnowledgeStore *assistant.KnowledgeStore
-	if db != nil {
-		diagKnowledgeStore = assistant.NewKnowledgeStore(db)
-		if err := diagKnowledgeStore.Init(serviceContext); err != nil {
-			logger.Warn("init knowledge store", zap.Error(err))
-			diagKnowledgeStore = nil
-		} else {
-			logger.Info("knowledge store enabled")
-		}
-	}
+	// （知识库已上移至 readRunner 链之前创建，供 posture 聚合与 agent executor 共用。）
 	// 启用自治 agent 循环（多步链式执行 + 结果反馈重规划）。只有 LLM planner
 	// （eino-openai）支持；确定性 planner 忽略历史，不启用。循环内只读工具自主
 	// 链式执行，写工具在建 plan/审批处停下交还给人，绝不自动执行写。
@@ -310,6 +318,9 @@ func main() {
 				AuditService:   auditService,
 				ModelName:      os.Getenv("COPILOT_OPENAI_MODEL"),
 				MaxSteps:       10,
+				// 内置数据源直连工具：告警/事件/任务/全景/态势/Prometheus，
+				// 让主执行路径的模型能查平台自有数据（走同一 readRunner 治理链）。
+				ExtraTools:     buildStaticAgentTools(readRunner, auditService),
 				KnowledgeStore: diagKnowledgeStore,
 				SkillLookup:    skillLookup,
 				CacheEnabled:   true,

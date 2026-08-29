@@ -32,6 +32,9 @@ const (
 	// 审计事件、定时巡检 run、可跑只读能力与匹配 runbook 串成一张可回链的
 	// incident 全景，让 AI 助手能回答"这个告警牵扯了什么、改过什么、怎么处置"。
 	IncidentView = "incident.view"
+	// PrometheusQuery 是指标查询工具：对 COPILOT_PROMETHEUS_URL 指向的
+	// Prometheus 执行一次 PromQL 即时查询（/api/v1/query）。
+	PrometheusQuery = "prometheus.query"
 )
 
 // Operation describes whether a tool has read-only or write semantics.
@@ -107,6 +110,15 @@ var registeredTools = map[string]Tool{
 		Name:      IncidentView,
 		Operation: Read,
 		Risk:      Low,
+	},
+	// PrometheusQuery 是指标查询工具：对操作者配置的 Prometheus 执行一次
+	// PromQL 即时查询。数据源未配置时 runner 如实返回 unconfigured（不伪造）。
+	PrometheusQuery: {
+		Name:         PrometheusQuery,
+		Operation:    Read,
+		Risk:         Low,
+		Domain:       "metrics",
+		ResourceType: "metrics",
 	},
 }
 
@@ -400,6 +412,12 @@ func ValidateInput(requested Tool, input map[string]any) error {
 			}
 		}
 		return nil
+	case PrometheusQuery:
+		if err := onlyFields(input, "query"); err != nil {
+			return err
+		}
+		_, err := requiredString(input, "query")
+		return err
 	default:
 		dynamicMu.RLock()
 		defer dynamicMu.RUnlock()
