@@ -168,7 +168,9 @@ func (t *staticReadTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	if err != nil {
 		if t.audit != nil {
 			_ = t.audit.Record(ctx, audit.Event{
-				Action:    "tool_executed",
+				ID:        audit.NewEventID(),
+				Action:    audit.ActionToolExecuted,
+				Decision:  audit.DecisionPermitted,
 				Subject:   caller.Subject,
 				RequestID: caller.RequestID,
 				ToolName:  t.spec.Name,
@@ -179,7 +181,9 @@ func (t *staticReadTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	}
 	if t.audit != nil {
 		_ = t.audit.Record(ctx, audit.Event{
-			Action:    "tool_executed",
+			ID:        audit.NewEventID(),
+			Action:    audit.ActionToolExecuted,
+			Decision:  audit.DecisionPermitted,
 			Subject:   caller.Subject,
 			RequestID: caller.RequestID,
 			ToolName:  t.spec.Name,

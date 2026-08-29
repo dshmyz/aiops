@@ -117,7 +117,9 @@ func (t *CapabilityTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 				meta["status_code"] = be.StatusCode
 			}
 			_ = t.audit.Record(ctx, audit.Event{
-				Action:    "tool_executed",
+				ID:        audit.NewEventID(),
+				Action:    audit.ActionToolExecuted,
+				Decision:  audit.DecisionPermitted,
 				Subject:   caller.Subject,
 				RequestID: caller.RequestID,
 				ToolName:  t.cap.Name,
@@ -130,7 +132,9 @@ func (t *CapabilityTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	// 4. 审计记录（绑定执行者身份，使 tool_executed 可归因）
 	if t.audit != nil {
 		_ = t.audit.Record(ctx, audit.Event{
-			Action:    "tool_executed",
+			ID:        audit.NewEventID(),
+			Action:    audit.ActionToolExecuted,
+			Decision:  audit.DecisionPermitted,
 			Subject:   caller.Subject,
 			RequestID: caller.RequestID,
 			ToolName:  t.cap.Name,

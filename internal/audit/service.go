@@ -3,6 +3,8 @@ package audit
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -125,4 +127,15 @@ func (s *Service) List(ctx context.Context, filter Filter) (Page, error) {
 	ctx, span := tracer().Start(ctx, "audit.List")
 	defer span.End()
 	return s.store.ListAudit(ctx, filter)
+}
+
+// NewEventID 生成审计事件 ID（16 字节密码学随机数的 hex）。audit.Service.Record
+// 要求事件携带 ID；此前 CapabilityTool / staticReadTool 未设 ID，Record 校验
+// 失败且错误被调用方 `_ =` 吞掉，工具执行审计静默丢失。统一从此处取 ID。
+func NewEventID() string {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		panic("secure random source unavailable: " + err.Error())
+	}
+	return hex.EncodeToString(value)
 }

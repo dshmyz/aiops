@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/alert"
+	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/assistant"
 	"github.com/gracegaoya/ai-operations-copilot/internal/capabilities"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
@@ -255,3 +256,39 @@ func TestStaticAgentToolSpecsAreRegisteredAndValid(t *testing.T) {
 var _ interface {
 	OwnsTool(string) bool
 } = (*mcp.Manager)(nil)
+
+// TestStaticReadToolAuditRecordLands 回归：修复前静态工具（及 CapabilityTool）
+// 用未注册的 action 字面量 "tool_executed" 记审计，audit.Record 枚举校验拒绝、
+// 调用方 `_ =` 吞错——主执行路径的工具执行从未落过审计。此测试锁死：合法调用
+// 必须产出一条可查的 ActionToolExecuted 事件。
+func TestStaticReadToolAuditRecordLands(t *testing.T) {
+	repo := store.NewMemoryActionPlanStore()
+	auditSvc := audit.NewService(repo)
+	alertTool := &staticReadTool{
+		spec: staticAgentToolSpec{
+			Name: tools.AlertQuery, Desc: "x",
+			Params: map[string]staticToolParam{"severity": {Type: "string", Enum: []string{"info", "warning", "critical"}}},
+		},
+		runner: alertReadRunner{svc: postureTestAlerts(t, alert.WebhookPayload{
+			Source: "am", ExternalID: "audit-1", Title: "t", Severity: "warning", Status: "firing",
+		})},
+		audit: auditSvc,
+	}
+	ctx := assistant.WithToolUser(t.Context(), identity.CurrentUser{Subject: "op-audit", Roles: []string{"admin"}})
+	if _, err := alertTool.InvokableRun(ctx, `{"severity":"warning"}`); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	page, err := auditSvc.List(context.Background(), audit.Filter{Limit: 50})
+	if err != nil {
+		t.Fatalf("list audit events: %v", err)
+	}
+	found := false
+	for _, e := range page.Events {
+		if e.Action == audit.ActionToolExecuted && e.ToolName == tools.AlertQuery && e.Subject == "op-audit" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no %s audit event for %s landed; executor-path tool audit is silently dropped", audit.ActionToolExecuted, tools.AlertQuery)
+	}
+}

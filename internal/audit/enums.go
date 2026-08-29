@@ -15,6 +15,11 @@ const (
 	ActionExecutionRejected   = "execution_rejected"
 	ActionReadonlyToolExecuted  = "readonly_tool_executed"
 	ActionReadonlyToolRejected  = "readonly_tool_rejected"
+	// ActionToolExecuted 记录 agent 执行路径（AgentExecutor 的 LLM 工具调用）
+	// 的一次工具执行。修复前 CapabilityTool 用字符串字面量 "tool_executed"
+	// 记账，但该值不在本枚举里，Record 校验直接拒绝、调用方 `_ =` 吞错——
+	// 主执行路径的工具执行从未真正落过审计。
+	ActionToolExecuted = "tool_executed"
 	ActionReadonlyToolFailed    = "readonly_tool_failed"
 	ActionScheduledTaskSucceeded = "scheduled_task_succeeded"
 	ActionScheduledTaskFailed    = "scheduled_task_failed"
@@ -51,6 +56,7 @@ var allowedActions = map[string]struct{}{
 	ActionExecutionSucceeded:     {},
 	ActionExecutionFailed:        {},
 	ActionExecutionRejected:      {},
+	ActionToolExecuted:           {},
 	ActionReadonlyToolExecuted:   {},
 	ActionReadonlyToolRejected:   {},
 	ActionReadonlyToolFailed:     {},
