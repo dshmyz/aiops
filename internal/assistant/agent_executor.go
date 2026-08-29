@@ -52,6 +52,10 @@ type AgentExecutorConfig struct {
 	AuditService   *audit.Service
 	ModelName      string
 	MaxSteps       int
+	// ExtraTools 是宿主进程注入的额外 eino 工具（如内置数据源直连工具：
+	// alert.query / system.posture.read / prometheus.query），与 capability
+	// 工具一起进入 LLM 工具集。注入方自带治理（policy/校验/审计）。
+	ExtraTools     []tool.BaseTool
 	KnowledgeStore *KnowledgeStore // 可选：知识库，用于经验积累和检索
 	SkillLookup    SkillLookup     // 可选：SOP/Skill 查询
 	CacheEnabled   bool            // 可选：启用 LLM 响应缓存
@@ -71,6 +75,7 @@ func NewAgentExecutor(cfg AgentExecutorConfig) (*AgentExecutor, error) {
 	// Run/HandleMessage 等入口通过 WithToolUser 注入 ctx。
 	user := identity.CurrentUser{}
 	einoTools := CapabilityToolsFromCapabilities(cfg.Capabilities, cfg.Adapter, cfg.AuditService, user)
+	einoTools = append(einoTools, cfg.ExtraTools...)
 	// 注：http.probe 不进入 agent 工具集——探活由独立的健康检查器（HealthChecker）
 	// 承担，agent 专注已发布能力工具，避免通用工具被 LLM 滥用。
 

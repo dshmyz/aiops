@@ -59,6 +59,13 @@ func toolUserFromContext(ctx context.Context) (identity.CurrentUser, bool) {
 	return user, ok
 }
 
+// ToolUserFromContext 返回 WithToolUser 注入的请求者身份。供宿主进程的
+// 自定义工具包装器（如内置数据源直连工具）读取，与 CapabilityTool 同一来源，
+// 保证策略检查与审计归因使用同一份身份。
+func ToolUserFromContext(ctx context.Context) (identity.CurrentUser, bool) {
+	return toolUserFromContext(ctx)
+}
+
 // InvokableRun 执行工具调用：策略检查 → HTTP 执行 → 审计 → 返回结果。
 func (t *CapabilityTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
 	// 1. 解析 LLM 传来的 JSON 参数
