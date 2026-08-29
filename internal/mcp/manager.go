@@ -32,9 +32,15 @@ type Manager struct {
 	snapshot ToolSnapshot
 	// emitter 是可选的事件回调，工具变更/健康异常时触发。
 	emitter EmitFunc
+	// caller 执行 tools/call；nil 表示当前传输不支持工具调用。
+	caller ToolCaller
+	// callable 是 工具全名 → 所属服务器配置 的映射，随 Reload 重建，
+	// 供 OwnsTool/Call 做执行路由。
+	callable map[string]MCPServerConfig
 }
 
 // NewManager 创建一个 MCP 热配置管理器。store 和 lister 不能为 nil。
+// 若 lister 同时实现了 ToolCaller（如 stdioLister），自动作为调用实现。
 func NewManager(store store.MCPServerStore, lister ToolLister) *Manager {
 	if store == nil {
 		panic("mcp.NewManager: store is nil")
@@ -42,11 +48,15 @@ func NewManager(store store.MCPServerStore, lister ToolLister) *Manager {
 	if lister == nil {
 		panic("mcp.NewManager: lister is nil")
 	}
-	return &Manager{
+	m := &Manager{
 		store:    store,
 		lister:   lister,
 		snapshot: ToolSnapshot{},
 	}
+	if caller, ok := lister.(ToolCaller); ok {
+		m.caller = caller
+	}
+	return m
 }
 
 // WithEventEmitter 注入事件回调，返回 Manager 自身便于链式调用。
@@ -153,8 +163,9 @@ func (m *Manager) Reload(ctx context.Context) error {
 		})
 	}
 
-	// 8. 更新快照
+	// 8. 更新快照与执行路由映射
 	m.snapshot = newSnapshot
+	m.rebuildCallables(configs, discovered)
 	return nil
 }
 

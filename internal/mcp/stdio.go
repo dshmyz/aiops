@@ -11,22 +11,36 @@ import (
 	"time"
 )
 
-// stdioLister 通过 stdio 与 MCP 服务器子进程通信，实现 ToolLister。
-// 它执行 initialize 握手后调用 tools/list 发现工具。
+// stdioLister 通过 stdio 与 MCP 服务器子进程通信，实现 ToolLister 与
+// ToolCaller。它执行 initialize 握手后调用 tools/list 发现工具、tools/call
+// 执行工具。
 //
 // 消息格式为 newline-delimited JSON-RPC 2.0（MCP stdio 传输规范）。
 // 仅支持 stdio 模式（config.Command）；URL 模式（SSE/HTTP）未实现，
 // 调用时返回错误。
+//
+// 每次调用（List/Call）都新起一个子进程完成握手后即退出——与 Discover/
+// 健康检查的进程模型一致，实现简单且不积累僵尸连接；代价是每次调用多
+// 一次握手开销（~百毫秒级），后续如成为瓶颈可演进为持久连接池。
 type stdioLister struct {
 	// handshakeTimeout 是 initialize 握手的超时。零值用默认 10s。
 	handshakeTimeout time.Duration
 	// listTimeout 是 tools/list 调用的超时。零值用默认 10s。
 	listTimeout time.Duration
+	// callTimeout 是单次 tools/call 的超时。零值用默认 30s（工具执行
+	// 可能比发现类调用慢得多）。
+	callTimeout time.Duration
 }
 
 // NewStdioLister 创建一个基于 stdio 的 ToolLister。
 func NewStdioLister() ToolLister {
 	return &stdioLister{}
+}
+
+// WithCallTimeout 设置单次 tools/call 的超时，返回自身便于链式调用。
+func (l *stdioLister) WithCallTimeout(d time.Duration) *stdioLister {
+	l.callTimeout = d
+	return l
 }
 
 // jsonrpcRequest 是 JSON-RPC 2.0 请求/通知的通用结构。
@@ -56,19 +70,17 @@ type toolsListResult struct {
 	NextCursor string    `json:"nextCursor,omitempty"`
 }
 
-func (l *stdioLister) List(ctx context.Context, config MCPServerConfig) ([]MCPTool, error) {
-	if strings.TrimSpace(config.Command) == "" {
-		return nil, fmt.Errorf("stdio lister requires command, config %q has none", config.Name)
-	}
-	handshakeTimeout := l.handshakeTimeout
-	if handshakeTimeout == 0 {
-		handshakeTimeout = 10 * time.Second
-	}
-	listTimeout := l.listTimeout
-	if listTimeout == 0 {
-		listTimeout = 10 * time.Second
-	}
+// mcpSession 是与 stdio MCP 服务器的一次已握手会话：initialize 完成、
+// initialized 通知已发，writer/scanner 可直接承载后续请求。
+type mcpSession struct {
+	writer  *json.Encoder
+	scanner *bufio.Scanner
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+}
 
+// startSession 启动子进程并完成 initialize 握手。
+func startSession(ctx context.Context, config MCPServerConfig, handshakeTimeout time.Duration) (*mcpSession, error) {
 	cmd := exec.CommandContext(ctx, config.Command, config.Args...)
 	// 注入环境变量（在当前进程环境之上叠加）
 	if len(config.Env) > 0 {
@@ -85,36 +97,64 @@ func (l *stdioLister) List(ctx context.Context, config MCPServerConfig) ([]MCPTo
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start MCP server %q: %w", config.Name, err)
 	}
-	// 确保子进程在函数退出时被清理。
-	defer func() {
-		_ = stdin.Close()
-		_ = cmd.Wait()
-	}()
-
-	writer := json.NewEncoder(stdin)
-	scanner := bufio.NewScanner(stdout)
+	// Close 会在调用方 defer 中执行；Start 失败路径由上面直接返回（无泄漏）。
+	s := &mcpSession{
+		writer:  json.NewEncoder(stdin),
+		scanner: bufio.NewScanner(stdout),
+		cmd:     cmd,
+		stdin:   stdin,
+	}
 	// MCP 工具 schema 可能较大，放宽 scanner buffer。
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	s.scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	// 1. initialize 握手
 	initCtx, initCancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer initCancel()
-	if err := send(writer, jsonrpcRequest{JSONRPC: "2.0", ID: 1, Method: "initialize", Params: map[string]any{
+	if err := s.writer.Encode(jsonrpcRequest{JSONRPC: "2.0", ID: 1, Method: "initialize", Params: map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "copilot-api", "version": "1.0"},
 	}}); err != nil {
+		s.Close()
 		return nil, fmt.Errorf("send initialize: %w", err)
 	}
-	if _, err := readResponse(initCtx, scanner, 1); err != nil {
+	if _, err := readResponse(initCtx, s.scanner, 1); err != nil {
+		s.Close()
 		return nil, fmt.Errorf("read initialize response: %w", err)
 	}
-	// 2. initialized 通知（无 id，无需响应）
-	if err := send(writer, jsonrpcRequest{JSONRPC: "2.0", Method: "notifications/initialized"}); err != nil {
+	// initialized 通知（无 id，无需响应）
+	if err := s.writer.Encode(jsonrpcRequest{JSONRPC: "2.0", Method: "notifications/initialized"}); err != nil {
+		s.Close()
 		return nil, fmt.Errorf("send initialized notification: %w", err)
 	}
+	return s, nil
+}
 
-	// 3. tools/list（支持 cursor 分页：循环请求直到 nextCursor 为空）
+// Close 关闭 stdin 并等待子进程退出。
+func (s *mcpSession) Close() {
+	_ = s.stdin.Close()
+	_ = s.cmd.Wait()
+}
+
+func (l *stdioLister) List(ctx context.Context, config MCPServerConfig) ([]MCPTool, error) {
+	if strings.TrimSpace(config.Command) == "" {
+		return nil, fmt.Errorf("stdio lister requires command, config %q has none", config.Name)
+	}
+	handshakeTimeout := l.handshakeTimeout
+	if handshakeTimeout == 0 {
+		handshakeTimeout = 10 * time.Second
+	}
+	listTimeout := l.listTimeout
+	if listTimeout == 0 {
+		listTimeout = 10 * time.Second
+	}
+
+	session, err := startSession(ctx, config, handshakeTimeout)
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	// tools/list（支持 cursor 分页：循环请求直到 nextCursor 为空）
 	var allTools []MCPTool
 	var cursor string
 	reqID := 2
@@ -130,11 +170,11 @@ func (l *stdioLister) List(ctx context.Context, config MCPServerConfig) ([]MCPTo
 		} else {
 			req = jsonrpcRequest{JSONRPC: "2.0", ID: reqID, Method: "tools/list"}
 		}
-		if err := send(writer, req); err != nil {
+		if err := session.writer.Encode(req); err != nil {
 			listCancel()
 			return nil, fmt.Errorf("send tools/list: %w", err)
 		}
-		resp, err := readResponse(listCtx, scanner, reqID)
+		resp, err := readResponse(listCtx, session.scanner, reqID)
 		listCancel()
 		if err != nil {
 			return nil, fmt.Errorf("read tools/list response: %w", err)
@@ -153,8 +193,40 @@ func (l *stdioLister) List(ctx context.Context, config MCPServerConfig) ([]MCPTo
 	return allTools, nil
 }
 
-func send(w *json.Encoder, req jsonrpcRequest) error {
-	return w.Encode(req)
+// Call 实现ToolCaller：握手后发起一次 tools/call，把结果转换为
+// map[string]any（转换规则见 parseToolsCallResult）。
+func (l *stdioLister) Call(ctx context.Context, config MCPServerConfig, toolName string, args map[string]any) (map[string]any, error) {
+	if strings.TrimSpace(config.Command) == "" {
+		return nil, fmt.Errorf("stdio caller requires command, config %q has none", config.Name)
+	}
+	handshakeTimeout := l.handshakeTimeout
+	if handshakeTimeout == 0 {
+		handshakeTimeout = 10 * time.Second
+	}
+	callTimeout := l.callTimeout
+	if callTimeout == 0 {
+		callTimeout = 30 * time.Second
+	}
+
+	session, err := startSession(ctx, config, handshakeTimeout)
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	callCtx, callCancel := context.WithTimeout(ctx, callTimeout)
+	defer callCancel()
+	if err := session.writer.Encode(jsonrpcRequest{JSONRPC: "2.0", ID: 2, Method: "tools/call", Params: map[string]any{
+		"name":      toolName,
+		"arguments": args,
+	}}); err != nil {
+		return nil, fmt.Errorf("send tools/call: %w", err)
+	}
+	result, err := readResponse(callCtx, session.scanner, 2)
+	if err != nil {
+		return nil, fmt.Errorf("read tools/call response: %w", err)
+	}
+	return parseToolsCallResult(result, config.Name, toolName)
 }
 
 // readResponse 读取 JSON-RPC 响应，跳过通知（无 id 的消息），
