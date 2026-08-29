@@ -64,9 +64,8 @@ type recorder struct {
 // scriptedPlanner adapts a StepScript to the assistant.Planner interface and
 // records every plan it produced.
 type scriptedPlanner struct {
-	script  StepScript
-	message string
-	rec     *recorder
+	script StepScript
+	rec    *recorder
 }
 
 func (p *scriptedPlanner) Plan(_ context.Context, _ identity.CurrentUser, message string, _ []assistant.Turn, _ assistant.PageContext) (assistant.Intent, error) {
@@ -89,6 +88,8 @@ func (e *scriptedExecute) invoke(intent assistant.Intent, stepIndex int) (assist
 	return out, err
 }
 
+// toRun 把已记录的 outcomes 作为 AgentRun 暴露给 planner 脚本。注意 Reason
+// 是硬编码的占位值——脚本只应依赖 Steps 轨迹，不要依赖 Reason 判断终止态。
 func (r *recorder) toRun() assistant.AgentRun {
 	return assistant.AgentRun{
 		Steps:  r.outcomes,
@@ -105,7 +106,7 @@ func Run(t interface {
 	t.Helper()
 	rec := &recorder{}
 	loop := assistant.NewAgentLoop(
-		&scriptedPlanner{script: c.Plan, message: c.Message, rec: rec},
+		&scriptedPlanner{script: c.Plan, rec: rec},
 		func(intent assistant.Intent, stepIndex int) (assistant.StepOutcome, error) {
 			return (&scriptedExecute{script: c.Tool, rec: rec}).invoke(intent, stepIndex)
 		},
@@ -201,6 +202,8 @@ func assertChangedApproach(prefix string, rec *recorder, run assistant.AgentRun)
 	return nil
 }
 
+// sameInput 依赖 fmt 对 map key 的排序输出做序列化比较（Go 1.12+ 稳定）。
+// 值类型差异（如 float64(100) vs int(100)）会被判为不同——对 eval 场景够用。
 func sameInput(a map[string]any, serialized string) bool {
 	return fmt.Sprint(a) == serialized
 }

@@ -46,17 +46,15 @@ func TestToolErrorsThenChangeApproach(t *testing.T) {
 			}
 			return toolOK(intent.ToolName, map[string]any{"logs": "no anomaly"})
 		},
-		Assert: func(run assistant.AgentRun) []string {
-			var fails []string
-			if run.Reason != assistant.TerminalDone {
-				fails = append(fails, "expected TerminalDone after changing approach")
-			}
-			return fails
-		},
 	}
-	rec := runWithRecorder(t, c)
-	if fails := assertChangedApproach("change-approach", rec, assistant.AgentRun{}); len(fails) > 0 {
-		t.Errorf("%v", fails)
+	// 只执行一次：重放同一 Case 会复用 Plan 闭包的 calls 计数，第二次行为完全
+	// 不同，之前的 Run+runWithRecorder 双跑会让换思路检测空跑通过。
+	rec, run := runWithRecorder(t, c)
+	if run.Reason != assistant.TerminalDone {
+		t.Errorf("expected TerminalDone after changing approach, got %v", run.Reason)
+	}
+	if len(run.Steps) != 2 {
+		t.Errorf("expected 2 executed steps (metrics fail + logs ok), got %d", len(run.Steps))
 	}
 	if fails := assertChangedApproach("change-approach", rec, assistant.AgentRun{}); len(fails) > 0 {
 		t.Errorf("%v", fails)
@@ -84,7 +82,7 @@ func TestRepeatedIdenticalCallAfterFailure(t *testing.T) {
 			return nil
 		},
 	}
-	rec := runWithRecorder(t, c)
+	rec, _ := runWithRecorder(t, c)
 	if fails := assertChangedApproach("repeat-detect", rec, assistant.AgentRun{}); len(fails) == 0 {
 		t.Errorf("expected repeated-identical-call to be flagged, got none")
 	} else {
@@ -257,18 +255,18 @@ func TestCompoundFaultBothCovered(t *testing.T) {
 	}
 }
 
-// runWithRecorder 在 Run 之外重新跑一遍场景以捕获 recorder（Run 的断言失败
-// 信息已经足够定位；这里重复执行仅用于换思路检测需要轨迹的场景，成本为零）。
-func runWithRecorder(t *testing.T, c Case) *recorder {
+// runWithRecorder 跑一遍场景并返回轨迹与最终 run：需要 recorder 做换思路检测、
+// 又需要对 run 本身断言的场景用它（Run 只回断言失败，拿不到轨迹）。
+func runWithRecorder(t *testing.T, c Case) (*recorder, assistant.AgentRun) {
 	t.Helper()
 	rec := &recorder{}
 	loop := assistant.NewAgentLoop(
-		&scriptedPlanner{script: c.Plan, message: c.Message, rec: rec},
+		&scriptedPlanner{script: c.Plan, rec: rec},
 		func(intent assistant.Intent, stepIndex int) (assistant.StepOutcome, error) {
 			return (&scriptedExecute{script: c.Tool, rec: rec}).invoke(intent, stepIndex)
 		},
 		c.MaxSteps,
 	)
-	loop.Run(context.Background(), identity.CurrentUser{Subject: "eval"}, c.Message, nil, assistant.PageContext{})
-	return rec
+	run := loop.Run(context.Background(), identity.CurrentUser{Subject: "eval"}, c.Message, nil, assistant.PageContext{})
+	return rec, *run
 }

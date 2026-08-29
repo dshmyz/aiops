@@ -51,7 +51,9 @@ func (c *jsonFallbackChat) Stream(ctx context.Context, input []*schema.Message, 
 
 // looksLikeJSON reports whether the model's message plausibly carries the
 // planning JSON. Empty/whitespace-only bodies are the observed failure mode;
-// a body without any '{' cannot parse either.
+// a body without any '{' cannot parse either. Note this means free-text
+// refusals (no '{') also trigger the plain re-issue — an extra call, but the
+// plain model's reply is the best recovery attempt in that case too.
 func looksLikeJSON(resp *schema.Message) bool {
 	if resp == nil {
 		return false

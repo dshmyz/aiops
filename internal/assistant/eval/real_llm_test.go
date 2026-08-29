@@ -187,9 +187,10 @@ func realLLMScenarios() []distributionScenario {
 				if run.Reason != assistant.TerminalDone || run.Fallback || len(run.Steps) > 0 {
 					return nil
 				}
-				// 零证据作答：明确拒绝（无法/不支持/超出…）算诚实，否则算花架子。
+				// 零证据作答：明确拒绝/澄清才算诚实。只认无歧义的拒绝词——
+				// 白名单加宽（如"什么/哪"）会让任何编造答案都溜过门槛。
 				lower := strings.ToLower(rendered.Message)
-				for _, w := range []string{"无法", "不支持", "超出", "没有相关", "抱歉", "澄清", "具体", "哪", "什么"} {
+				for _, w := range []string{"无法", "不支持", "超出", "没有相关", "抱歉", "澄清", "管辖", "范围内"} {
 					if strings.Contains(lower, w) {
 						return nil
 					}
@@ -217,10 +218,13 @@ func runRealLLMOnce(t *testing.T, planner assistant.Planner, sc distributionScen
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	rec := &recorder{}
+	// 每个 run 只建一次 tool 脚本：闭包里的计数状态（如"前两次失败"）要跨步骤
+	// 保持，若在执行器里调 sc.Tool() 会每步重置，场景退化为全失败。
+	tool := sc.Tool()
 	loop := assistant.NewAgentLoop(
 		planner,
 		func(intent assistant.Intent, stepIndex int) (assistant.StepOutcome, error) {
-			return (&scriptedExecute{script: sc.Tool(), rec: rec}).invoke(intent, stepIndex)
+			return (&scriptedExecute{script: tool, rec: rec}).invoke(intent, stepIndex)
 		},
 		sc.MaxSteps,
 	)

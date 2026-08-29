@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -128,6 +129,7 @@ func NewPlannerFromEnv(ctx context.Context, env map[string]string) (Planner, Com
 	plainChat, perr := chatFromConfig(ctx, plannerCfg, env, false, defaultChatTimeout)
 	if perr != nil {
 		plainChat = nil // 兜底副本建不出来时退回单模型，不阻断构建
+		log.Printf("[provider] json-fallback plain replica unavailable, empty-json recovery disabled: %v", perr)
 	}
 	fallbackChat := withJSONFallback(chat, plainChat, nil)
 	// LLMFormatter 用独立的无 json_object chat：其 prompt 是分隔符格式的自由文本
