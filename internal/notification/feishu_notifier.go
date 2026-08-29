@@ -82,7 +82,7 @@ func (n *FeishuNotifier) buildCard(req ConfirmationRequest) map[string]any {
 			"tag": "div",
 			"text": map[string]any{
 				"tag":     "lark_md",
-				"content": fmt.Sprintf("%s **操作审批待处理**\n\n**工具**: %s\n**风险**: %s\n**提交人**: %s\n**Plan ID**: `%s`", riskEmoji, req.ToolName, req.Risk, req.Subject, req.PlanID),
+				"content": fmt.Sprintf("%s **操作审批待处理**\n\n**工具**: %s\n**风险**: %s\n**提交人**: %s\n**Plan ID**: `%s`\n**确认 Token**: `%s`", riskEmoji, req.ToolName, req.Risk, req.Subject, req.PlanID, req.ConfirmationToken),
 			},
 		},
 	}

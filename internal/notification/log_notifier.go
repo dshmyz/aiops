@@ -24,6 +24,9 @@ func (n *LogNotifier) NotifyConfirmation(ctx context.Context, req ConfirmationRe
 		zap.String("risk", req.Risk),
 		zap.String("subject", req.Subject),
 		zap.String("expires_at", req.ExpiresAt),
+		// token 只在创建响应/通知通道存在（库内仅哈希）；确认通知是它的
+		// 正当分发渠道，不含 token 的通知无法完成审批。
+		zap.String("confirmation_token", req.ConfirmationToken),
 	)
 	return nil
 }
