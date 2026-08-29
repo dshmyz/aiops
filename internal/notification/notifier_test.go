@@ -57,9 +57,9 @@ func TestConfirmationRequestJSONFieldNames(t *testing.T) {
 		"plan_id":            "plan-002",
 		"confirmation_token": "token-xyz",
 		"tool_name":          "minio.bucket.create.write",
-		"risk":                "high",
-		"subject":             "Create bucket data-prod",
-		"expires_at":          "2025-12-31T23:59:59Z",
+		"risk":               "high",
+		"subject":            "Create bucket data-prod",
+		"expires_at":         "2025-12-31T23:59:59Z",
 	}
 	for jsonKey, expected := range want {
 		got, ok := m[jsonKey]

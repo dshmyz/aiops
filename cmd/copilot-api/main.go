@@ -1559,14 +1559,23 @@ func (r taskReadRunner) Read(ctx context.Context, tool tools.Tool, input map[str
 // the LogNotifier so confirmation requests reach a real IM channel. Otherwise
 // the LogNotifier is used alone (local development default).
 func buildNotifier() notification.Notifier {
-	webhookURL := strings.TrimSpace(os.Getenv("COPILOT_FEISHU_WEBHOOK_URL"))
-	if webhookURL == "" {
-		return notification.NewLogNotifier()
+	// 通知通道按配置叠加：飞书（外网）与通用 webhook（内网自建端点）可并存，
+	// 日志通知始终兜底（确认 token 的最低可见渠道）。
+	var notifiers []notification.Notifier
+	if feishuURL := strings.TrimSpace(os.Getenv("COPILOT_FEISHU_WEBHOOK_URL")); feishuURL != "" {
+		notifiers = append(notifiers, notification.NewFeishuNotifier(feishuURL))
 	}
-	return notification.NewMultiNotifier(
-		notification.NewFeishuNotifier(webhookURL),
-		notification.NewLogNotifier(),
-	)
+	if webhookURL := strings.TrimSpace(os.Getenv("COPILOT_WEBHOOK_URL")); webhookURL != "" {
+		// 内网通用 webhook：POST JSON 信封到自建端点；可选 HMAC 签名让接收方
+		// 验签（与告警入站 webhook 同一模型）。
+		notifiers = append(notifiers, notification.NewWebhookNotifier(webhookURL,
+			strings.TrimSpace(os.Getenv("COPILOT_WEBHOOK_SECRET"))))
+	}
+	notifiers = append(notifiers, notification.NewLogNotifier())
+	if len(notifiers) == 1 {
+		return notifiers[0]
+	}
+	return notification.NewMultiNotifier(notifiers...)
 }
 
 type staticWriteExecutor struct{}

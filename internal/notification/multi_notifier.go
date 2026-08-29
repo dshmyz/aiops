@@ -47,6 +47,8 @@ func fmtNotifierName(n Notifier) string {
 		return "log"
 	case *FeishuNotifier:
 		return "feishu"
+	case *WebhookNotifier:
+		return "webhook"
 	default:
 		return "unknown"
 	}
