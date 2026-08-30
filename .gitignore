@@ -5,6 +5,7 @@ node_modules/
 # /copilot-api anchors the ignore to the repo-root binary; an unanchored
 # pattern ("copilot-api") would also ignore the cmd/copilot-api/ source dir.
 /copilot-api
+/copilot-api-bin
 
 # Local databases
 *.db
