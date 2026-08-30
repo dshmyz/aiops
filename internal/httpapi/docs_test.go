@@ -93,7 +93,7 @@ func TestServeDocsUnauthenticated(t *testing.T) {
 func TestServeDocsRejectsUnknownAndTraversalNames(t *testing.T) {
 	router := docsRouter(t)
 	cases := []string{
-		"/v1/docs/assistant.md",  // known doc, but not in the allow-list
+		"/v1/docs/assistant.md", // known doc, but not in the allow-list
 		"/v1/docs/../config.prod.yaml.example",
 		"/v1/docs/%2e%2e%2fconfig.prod.yaml.example",
 		"/v1/docs/README.md",

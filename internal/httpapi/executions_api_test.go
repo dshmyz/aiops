@@ -226,7 +226,7 @@ func TestListExecutionsPaginatesByKeyset(t *testing.T) {
 	started := base.Add(time.Minute)
 	seedExecutionForHTTP(t, repository, "plan-1", "topic.retention.set", "succeeded", &started, base)
 	seedExecutionForHTTP(t, repository, "plan-2", "topic.retention.set", "succeeded", &started, base.Add(time.Second))
-	seedExecutionForHTTP(t, repository, "plan-3", "topic.retention.set", "succeeded", &started, base.Add(2 * time.Second))
+	seedExecutionForHTTP(t, repository, "plan-3", "topic.retention.set", "succeeded", &started, base.Add(2*time.Second))
 
 	// 第一页
 	res := httptest.NewRecorder()

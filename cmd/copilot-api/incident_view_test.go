@@ -36,11 +36,11 @@ func buildIncidentHarness(t *testing.T, now time.Time) (incidentViewReadRunner, 
 	runbookStore := store.NewMemoryRunbookStore()
 
 	runner := incidentViewReadRunner{
-		alerts:       alertSvc,
-		audit:        auditSvc,
-		plans:        repo,
-		schedules:    schedSvc,
-		runbooks:     runbookStore,
+		alerts:    alertSvc,
+		audit:     auditSvc,
+		plans:     repo,
+		schedules: schedSvc,
+		runbooks:  runbookStore,
 		capabilities: []capabilities.Capability{
 			{Name: "minio.bucket.capacity.read", Domain: "minio", ResourceType: "bucket", Operation: tools.Read, InputSchema: map[string]capabilities.InputField{"cluster": {Type: "string"}, "bucket": {Type: "string"}}},
 			{Name: "minio.bucket.retention.set", Domain: "minio", ResourceType: "bucket", Operation: tools.Write},
@@ -145,7 +145,7 @@ func TestIncidentViewJoinsAlertAuditRunsRunbook(t *testing.T) {
 		"domain":        "minio",
 		"resource_type": "bucket",
 		"resource_name": "archive",
-		})
+	})
 	if err != nil {
 		t.Fatalf("incident.view: %v", err)
 	}

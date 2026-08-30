@@ -31,8 +31,8 @@ func (r *llmAuditRecorder) record(ctx context.Context, started time.Time, respon
 		return
 	}
 	metadata := map[string]any{
-		"model":     r.model,
-		"component": r.component,
+		"model":      r.model,
+		"component":  r.component,
 		"latency_ms": time.Since(started).Milliseconds(),
 	}
 	if response != nil && response.ResponseMeta != nil && response.ResponseMeta.Usage != nil {

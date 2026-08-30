@@ -69,9 +69,10 @@ func flattenObject(prefix string, obj map[string]any, out map[string]any) {
 }
 
 // flattenArray 处理数组字段（A+B 策略）：
-//   1. _count：数组元素总数
-//   2. _sample：首个元素的完整对象样例（保结构，任意层级过滤敏感字段）
-//   3. _overview：全量元素的关键判别字段（覆盖"有哪些、各自什么状态"）
+//  1. _count：数组元素总数
+//  2. _sample：首个元素的完整对象样例（保结构，任意层级过滤敏感字段）
+//  3. _overview：全量元素的关键判别字段（覆盖"有哪些、各自什么状态"）
+//
 // 它们各自占扁平结果的一个 key，因此不会像之前那样因深层路径在 20 字段截断里被优先丢弃。
 func flattenArray(fullKey string, items []any, out map[string]any) {
 	if len(items) == 0 {

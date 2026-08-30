@@ -15,7 +15,7 @@ type MCPReloader interface {
 }
 
 // MCPServerService 把 store.MCPServerStore（CRUD 持久化）和 MCPReloader
-//（Reload 增量注册/注销工具）组合成 MCPService，供 router 注入。
+// （Reload 增量注册/注销工具）组合成 MCPService，供 router 注入。
 //
 // CRUD 操作直接委托给 store，保留 store.ErrNotFound / store.ErrConflict
 // 哨兵错误，使 writeMCPError 能正确映射 HTTP 状态码。

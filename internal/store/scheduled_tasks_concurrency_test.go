@@ -97,10 +97,10 @@ func TestAppendRunAndUpdateTaskAtomicSuccess(t *testing.T) {
 	}
 
 	run := ScheduledTaskRun{
-		TaskID:     created.ID,
-		StartedAt:  now,
-		FinishedAt: now.Add(time.Second),
-		Status:     ScheduledTaskStatusSucceeded,
+		TaskID:        created.ID,
+		StartedAt:     now,
+		FinishedAt:    now.Add(time.Second),
+		Status:        ScheduledTaskStatusSucceeded,
 		ResultSummary: "ok",
 	}
 	updatedTask := created

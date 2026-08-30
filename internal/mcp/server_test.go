@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/capabilities"

@@ -83,7 +83,7 @@ func TestListExecutionsFiltersByStatus(t *testing.T) {
 	started := base.Add(time.Minute)
 	seedExecutionForTest(t, repo, "plan-1", "topic.retention.set", "succeeded", &started, base)
 	seedExecutionForTest(t, repo, "plan-2", "minio.bucket.quota.set", "failed", &started, base.Add(time.Second))
-	seedExecutionForTest(t, repo, "plan-3", "kafka.consumer.lag.read", "running", nil, base.Add(2 * time.Second))
+	seedExecutionForTest(t, repo, "plan-3", "kafka.consumer.lag.read", "running", nil, base.Add(2*time.Second))
 
 	page, err := repo.ListExecutions(ctx, store.ExecutionFilter{Status: "failed"})
 	if err != nil {
@@ -128,7 +128,7 @@ func TestListExecutionsFiltersByToolName(t *testing.T) {
 	started := base.Add(time.Minute)
 	seedExecutionForTest(t, repo, "plan-1", "topic.retention.set", "succeeded", &started, base)
 	seedExecutionForTest(t, repo, "plan-2", "minio.bucket.quota.set", "failed", &started, base.Add(time.Second))
-	seedExecutionForTest(t, repo, "plan-3", "topic.retention.set", "succeeded", &started, base.Add(2 * time.Second))
+	seedExecutionForTest(t, repo, "plan-3", "topic.retention.set", "succeeded", &started, base.Add(2*time.Second))
 
 	page, err := repo.ListExecutions(ctx, store.ExecutionFilter{ToolName: "topic.retention.set"})
 	if err != nil {
@@ -195,7 +195,7 @@ func TestListExecutionsPaginatesByKeyset(t *testing.T) {
 	started := base.Add(time.Minute)
 	seedExecutionForTest(t, repo, "plan-1", "topic.retention.set", "succeeded", &started, base)
 	seedExecutionForTest(t, repo, "plan-2", "topic.retention.set", "succeeded", &started, base.Add(time.Second))
-	seedExecutionForTest(t, repo, "plan-3", "topic.retention.set", "succeeded", &started, base.Add(2 * time.Second))
+	seedExecutionForTest(t, repo, "plan-3", "topic.retention.set", "succeeded", &started, base.Add(2*time.Second))
 
 	// 第一页：Limit=2，返回最新的 2 条（plan-3, plan-2），NextCursor 指向 plan-2
 	page1, err := repo.ListExecutions(ctx, store.ExecutionFilter{Limit: 2})

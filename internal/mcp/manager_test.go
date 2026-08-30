@@ -16,10 +16,10 @@ import (
 
 // managerTestEnv 封装 Manager 测试所需的依赖。
 type managerTestEnv struct {
-	store     *store.MemoryMCPServerStore
-	lister    *fakeManagerLister
-	manager   *mcp.Manager
-	emitter   *recordingEmitter
+	store   *store.MemoryMCPServerStore
+	lister  *fakeManagerLister
+	manager *mcp.Manager
+	emitter *recordingEmitter
 }
 
 // fakeManagerLister 是可控的 ToolLister，按服务器名返回不同工具集，
@@ -248,7 +248,7 @@ func TestManagerReloadNoEventWhenNoChanges(t *testing.T) {
 	env.lister.setTools(srvName, []mcp.MCPTool{envTool("query")})
 
 	_ = env.manager.Reload(context.Background())
-	env.emitter.events = nil // 清空首次事件
+	env.emitter.events = nil                     // 清空首次事件
 	_ = env.manager.Reload(context.Background()) // 第二次无变更
 
 	for _, event := range env.emitter.events {

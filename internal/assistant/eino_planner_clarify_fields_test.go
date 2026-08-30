@@ -29,8 +29,8 @@ func registerClarifyTool(t *testing.T) {
 			Tool: tools.Tool{Name: "kafka.consumer_group.lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
 
-				"cluster":     {Type: "string", Required: true},
-				"group":       {Type: "string", Required: true},
+				"cluster": {Type: "string", Required: true},
+				"group":   {Type: "string", Required: true},
 			},
 		},
 	})

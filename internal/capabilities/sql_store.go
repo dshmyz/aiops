@@ -251,14 +251,14 @@ func (s *SQLCapabilityStore) isSQLite() bool {
 
 // capabilityJSONRows 用于 upsert 参数的 JSON 字段。
 type capabilityJSONRows struct {
-	Backend    []byte
+	Backend     []byte
 	InputSchema []byte
-	Output     []byte
-	Governance []byte
-	Auth       []byte
-	AI         []byte
-	Verify     sql.NullString
-	DependsOn  sql.NullString
+	Output      []byte
+	Governance  []byte
+	Auth        []byte
+	AI          []byte
+	Verify      sql.NullString
+	DependsOn   sql.NullString
 }
 
 func marshalCapabilityJSON(cap Capability) (capabilityJSONRows, error) {

@@ -131,7 +131,7 @@ func (r *Router) verifyAlertWebhookSignature(request *http.Request) bool {
 type alertWebhookService struct {
 	svc            *alert.Service
 	audit          *audit.Service
-	llmDiagnoser   *alert.LLMDiagnoser   // LLM 智能研判（最高优先级）
+	llmDiagnoser   *alert.LLMDiagnoser // LLM 智能研判（最高优先级）
 	diagnoser      *alert.Diagnoser
 	chainDiagnoser chainExecutor
 	actionMatcher  alert.ActionMatcher

@@ -36,10 +36,8 @@ func TestKnownDomainsReflectsDynamicRegistration(t *testing.T) {
 	}
 
 	err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
-		Tool: tools.Tool{Name: "registrytest.ping.read", Operation: tools.Read, Risk: tools.Low, Domain: "registrytest", ResourceType: "endpoint"},
-		InputSchema: map[string]tools.DynamicInputField{
-
-		},
+		Tool:        tools.Tool{Name: "registrytest.ping.read", Operation: tools.Read, Risk: tools.Low, Domain: "registrytest", ResourceType: "endpoint"},
+		InputSchema: map[string]tools.DynamicInputField{},
 	}})
 	if err != nil {
 		t.Fatalf("RegisterDynamicTools returned %v", err)
@@ -68,10 +66,8 @@ func registerTestDomains(t *testing.T) {
 		{"glusterfs", "volume"},
 	} {
 		defs = append(defs, tools.DynamicToolDefinition{
-			Tool: tools.Tool{Name: d.domain + ".test.read", Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
-			InputSchema: map[string]tools.DynamicInputField{
-
-			},
+			Tool:        tools.Tool{Name: d.domain + ".test.read", Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
+			InputSchema: map[string]tools.DynamicInputField{},
 		})
 	}
 	if err := tools.RegisterDynamicTools(defs); err != nil {
@@ -98,18 +94,18 @@ func TestMatchDomainBoundedFindsCanonicalDomain(t *testing.T) {
 		want string
 	}{
 		{"查看 prod kafka 状态", "kafka"},
-		{"检查（minio）容量", "minio"},                      // 中文全角括号
-		{"glusterfs 卷健康", "glusterfs"},                 // 字符串起始
-		{"状态：kafka。", "kafka"},                         // 中文冒号、句号
-		{"kafka", "kafka"},                              // 单词即全文
-		{"kafka、minio、glusterfs", "kafka"},             // 顿号分隔，返回首个
-		{"prod/kafka/health", "kafka"},                  // 斜线分隔
-		{"检查 minio，kafka 延迟", "minio"},                // 中文逗号，返回首个
-		{"KAFKA", "kafka"},                              // 大写转小写
-		{"Kafka Status", "kafka"},                       // 首字母大写
-		{"check glusterfs volume", "glusterfs"},         // 英文空格
-		{"(kafka)", "kafka"},                            // 英文括号
-		{"kafka/minio", "kafka"},                        // 返回第一个
+		{"检查（minio）容量", "minio"},                // 中文全角括号
+		{"glusterfs 卷健康", "glusterfs"},          // 字符串起始
+		{"状态：kafka。", "kafka"},                  // 中文冒号、句号
+		{"kafka", "kafka"},                      // 单词即全文
+		{"kafka、minio、glusterfs", "kafka"},      // 顿号分隔，返回首个
+		{"prod/kafka/health", "kafka"},          // 斜线分隔
+		{"检查 minio，kafka 延迟", "minio"},          // 中文逗号，返回首个
+		{"KAFKA", "kafka"},                      // 大写转小写
+		{"Kafka Status", "kafka"},               // 首字母大写
+		{"check glusterfs volume", "glusterfs"}, // 英文空格
+		{"(kafka)", "kafka"},                    // 英文括号
+		{"kafka/minio", "kafka"},                // 返回第一个
 	} {
 		t.Run(test.text, func(t *testing.T) {
 			domain, ok := tools.MatchDomainBounded(test.text)
@@ -130,16 +126,16 @@ func TestMatchDomainBoundedRejectsBareSubstring(t *testing.T) {
 	registerTestDomains(t)
 
 	for _, text := range []string{
-		"kafkax",              // 域名内嵌于其他单词
+		"kafkax",            // 域名内嵌于其他单词
 		"查看 prod kafkax 状态", // 中文语境，域名后接字母
-		"minioadmin",          // minio 内嵌
-		"glusterfsx",          // glusterfs 后接字母
-		"xkafka",              // 域名前接字母
-		"检查xminio健康",         // 中文字 + 域名 + 中文字，无分隔符
-		"prod环境kafka集群",      // 中文字紧邻，无分隔符前缀
-		"",                    // 空字符串
-		"prod staging dev",    // 仅环境关键词
-		"健康状态",               // 仅中文，无域名
+		"minioadmin",        // minio 内嵌
+		"glusterfsx",        // glusterfs 后接字母
+		"xkafka",            // 域名前接字母
+		"检查xminio健康",        // 中文字 + 域名 + 中文字，无分隔符
+		"prod环境kafka集群",     // 中文字紧邻，无分隔符前缀
+		"",                  // 空字符串
+		"prod staging dev",  // 仅环境关键词
+		"健康状态",              // 仅中文，无域名
 	} {
 		t.Run(text, func(t *testing.T) {
 			if domain, ok := tools.MatchDomainBounded(text); ok {
@@ -158,10 +154,10 @@ func TestMatchDomainBoundedHandlesMultibyteCorrectly(t *testing.T) {
 		text string
 		want string
 	}{
-		{"查看（kafka）状态", "kafka"},      // 中文全角括号
-		{"检查、minio、容量", "minio"},      // 中文顿号
-		{"kafka。健康", "kafka"},          // 中文句号
-		{"状态：kafka：集群", "kafka"},     // 中文冒号
+		{"查看（kafka）状态", "kafka"}, // 中文全角括号
+		{"检查、minio、容量", "minio"}, // 中文顿号
+		{"kafka。健康", "kafka"},    // 中文句号
+		{"状态：kafka：集群", "kafka"}, // 中文冒号
 	} {
 		t.Run(test.text, func(t *testing.T) {
 			domain, ok := tools.MatchDomainBounded(test.text)

@@ -5,22 +5,22 @@ package audit
 // accepted by Service.Record so downstream queries and analytics can rely on
 // a closed set rather than parsing free-form strings.
 const (
-	ActionPlanCreated         = "plan_created"
-	ActionPlanConfirmed       = "plan_confirmed"
-	ActionPlanRejected        = "plan_rejected"
-	ActionExecutionStarted    = "execution_started"
-	ActionExecutionReused     = "execution_reused"
-	ActionExecutionSucceeded  = "execution_succeeded"
-	ActionExecutionFailed     = "execution_failed"
-	ActionExecutionRejected   = "execution_rejected"
-	ActionReadonlyToolExecuted  = "readonly_tool_executed"
-	ActionReadonlyToolRejected  = "readonly_tool_rejected"
+	ActionPlanCreated          = "plan_created"
+	ActionPlanConfirmed        = "plan_confirmed"
+	ActionPlanRejected         = "plan_rejected"
+	ActionExecutionStarted     = "execution_started"
+	ActionExecutionReused      = "execution_reused"
+	ActionExecutionSucceeded   = "execution_succeeded"
+	ActionExecutionFailed      = "execution_failed"
+	ActionExecutionRejected    = "execution_rejected"
+	ActionReadonlyToolExecuted = "readonly_tool_executed"
+	ActionReadonlyToolRejected = "readonly_tool_rejected"
 	// ActionToolExecuted 记录 agent 执行路径（AgentExecutor 的 LLM 工具调用）
 	// 的一次工具执行。修复前 CapabilityTool 用字符串字面量 "tool_executed"
 	// 记账，但该值不在本枚举里，Record 校验直接拒绝、调用方 `_ =` 吞错——
 	// 主执行路径的工具执行从未真正落过审计。
-	ActionToolExecuted = "tool_executed"
-	ActionReadonlyToolFailed    = "readonly_tool_failed"
+	ActionToolExecuted           = "tool_executed"
+	ActionReadonlyToolFailed     = "readonly_tool_failed"
 	ActionScheduledTaskSucceeded = "scheduled_task_succeeded"
 	ActionScheduledTaskFailed    = "scheduled_task_failed"
 	// ActionScheduledTaskSkipped 表示任务到期超过 maxLag 被跳过执行（专项：任务准-并发安全）。
@@ -77,19 +77,19 @@ var allowedActions = map[string]struct{}{
 // Decision records why an action was allowed or denied. Stored verbatim in
 // copilot_audit_events.decision.
 const (
-	DecisionPermitted                  = "permitted"
-	DecisionDenied                     = "denied"
-	DecisionImmutableInput             = "immutable_input"
-	DecisionConfirmationRequired       = "confirmation_required"
-	DecisionPlanExpired                = "plan_expired"
-	DecisionExecutionError             = "execution_error"
-	DecisionWriteToolNotAllowedOnRead  = "write_tool_not_allowed_on_read_endpoint"
-	DecisionExecutorMissing            = "executor_missing"
-	DecisionToolNotRegistered          = "tool_not_registered"
-	DecisionPermissionDenied           = "permission_denied"
-	DecisionInvalidInput               = "invalid_input"
-	DecisionParameterDenied            = "parameter_denied"
-	DecisionRiskDenied                 = "risk_denied"
+	DecisionPermitted                 = "permitted"
+	DecisionDenied                    = "denied"
+	DecisionImmutableInput            = "immutable_input"
+	DecisionConfirmationRequired      = "confirmation_required"
+	DecisionPlanExpired               = "plan_expired"
+	DecisionExecutionError            = "execution_error"
+	DecisionWriteToolNotAllowedOnRead = "write_tool_not_allowed_on_read_endpoint"
+	DecisionExecutorMissing           = "executor_missing"
+	DecisionToolNotRegistered         = "tool_not_registered"
+	DecisionPermissionDenied          = "permission_denied"
+	DecisionInvalidInput              = "invalid_input"
+	DecisionParameterDenied           = "parameter_denied"
+	DecisionRiskDenied                = "risk_denied"
 )
 
 var allowedDecisions = map[string]struct{}{

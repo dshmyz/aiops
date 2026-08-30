@@ -17,9 +17,9 @@ import (
 // Diagnoser 执行自动研判：从告警提取诊断请求，调诊断服务，把结果写回告警 description，
 // 并把可执行的处置推荐转成待确认的 action plan（补处置闭环）。
 type Diagnoser struct {
-	diag     *diagnostics.Service
-	alertSvc *Service
-	chat     model.BaseChatModel // 可选：LLM 用于智能 domain 推断
+	diag        *diagnostics.Service
+	alertSvc    *Service
+	chat        model.BaseChatModel       // 可选：LLM 用于智能 domain 推断
 	planCreator RecommendationPlanCreator // 可选：处置闭环，未注入则不建 plan
 }
 

@@ -118,7 +118,7 @@ type AgentRun struct {
 	// 由 planner 的 ClarificationError.Fields 透传，终态映射据此渲染
 	// approval_form block；为空时仅有自然语言消息。
 	ClarifiedFields []PreflightField
-	Handoff     *StepOutcome
+	Handoff         *StepOutcome
 	// Fallback is set when the loop concluded WITHOUT the planner emitting a
 	// final_answer — it ran out of steps (TerminalMaxSteps) or hit a repeated-read
 	// convergence backstop. In both cases FinalAnswer is a synthesized summary of
@@ -161,10 +161,10 @@ const (
 // steps are real tool invocations; control steps are replanning overhead
 // (sequence steers, failure retries) that must not eat the execution budget.
 type stepBudget struct {
-	exec          int
-	execLimit     int
-	control       int
-	controlLimit  int
+	exec         int
+	execLimit    int
+	control      int
+	controlLimit int
 }
 
 func (b *stepBudget) canExec() bool    { return b.exec < b.execLimit }
@@ -183,9 +183,9 @@ func (b *stepBudget) consumeControl()  { b.control++ }
 // failure feedback) are budgeted independently, so replanning overhead cannot
 // starve tool execution.
 type AgentLoop struct {
-	planner    Planner
-	execute    AgentExecute
-	maxSteps   int
+	planner  Planner
+	execute  AgentExecute
+	maxSteps int
 	// maxControlSteps bounds how many steering / failure-feedback turns the loop
 	// tolerates within a single run before giving up. Control turns are
 	// replanning overhead (sequence steers, error retries) that should not eat

@@ -250,7 +250,7 @@ func registerSchedulerLowRiskWriteTool(t *testing.T) {
 			},
 			InputSchema: map[string]tools.DynamicInputField{
 
-				"bucket":      {Type: "string", Required: true},
+				"bucket": {Type: "string", Required: true},
 				"retention_days": {Type: "integer", Required: true,
 					Min: e2eMinBound(1), Max: e2eMaxBound(3650)},
 			},

@@ -149,8 +149,8 @@ type Authenticator interface {
 type Option func(*Router)
 
 type Router struct {
-	auth               Authenticator
-	multiAuth          *MultiAuthenticator
+	auth      Authenticator
+	multiAuth *MultiAuthenticator
 	// mux 是 Go 1.22 方法+通配符模式路由（"GET /v1/skills/{id}"），新路由注册在此，
 	// 旧手写前缀分支渐进迁移中；ServeHTTP 先过 mux，未命中再走旧分支。
 	mux                *http.ServeMux
@@ -1571,10 +1571,10 @@ func (r *Router) serveAssistant(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	var body struct {
-		Message        string                  `json:"message"`
-		ConversationID string                  `json:"conversation_id"`
-		PageContext    assistant.PageContext   `json:"page_context,omitempty"`
-		Attachments    []assistant.Attachment  `json:"attachments,omitempty"`
+		Message        string                 `json:"message"`
+		ConversationID string                 `json:"conversation_id"`
+		PageContext    assistant.PageContext  `json:"page_context,omitempty"`
+		Attachments    []assistant.Attachment `json:"attachments,omitempty"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, assistantBodyLimit))
 	if err := decoder.Decode(&body); err != nil {
@@ -3122,13 +3122,13 @@ func (r *Router) serveAdminTools(writer http.ResponseWriter, request *http.Reque
 		Enum        []string `json:"enum,omitempty"`
 	}
 	type toolDTO struct {
-		Name             string              `json:"name"`
-		Operation        string              `json:"operation"`
-		Risk             string              `json:"risk"`
-		Domain           string              `json:"domain,omitempty"`
-		ResourceType     string              `json:"resource_type,omitempty"`
-		SupportsDryRun   bool                `json:"supports_dry_run,omitempty"`
-		InputSchema      map[string]toolField `json:"input_schema,omitempty"`
+		Name           string               `json:"name"`
+		Operation      string               `json:"operation"`
+		Risk           string               `json:"risk"`
+		Domain         string               `json:"domain,omitempty"`
+		ResourceType   string               `json:"resource_type,omitempty"`
+		SupportsDryRun bool                 `json:"supports_dry_run,omitempty"`
+		InputSchema    map[string]toolField `json:"input_schema,omitempty"`
 	}
 
 	all := tools.All()

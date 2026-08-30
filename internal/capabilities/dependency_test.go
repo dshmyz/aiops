@@ -190,7 +190,7 @@ func TestResolveAppliesInputMapping(t *testing.T) {
 	}
 
 	chain, err := capabilities.NewDependencyResolver(loaded).Resolve("service.restart", map[string]any{
-		"instance":    "10.0.1.5:8080",
+		"instance": "10.0.1.5:8080",
 	})
 	if err != nil {
 		t.Fatalf("Resolve returned %v", err)

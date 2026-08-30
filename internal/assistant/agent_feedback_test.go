@@ -102,7 +102,7 @@ func TestFeedbackTextPlainReadHasNoEvidenceBlock(t *testing.T) {
 		Tool:    "minio.bucket.health.read",
 		Summary: "minio 资源 bucket 状态为 ok",
 		Output: map[string]any{
-			"name":        "bucket",
+			"name": "bucket",
 		},
 	}
 	text := feedbackText(out)
@@ -120,7 +120,7 @@ func TestFeedbackTextPlainReadHasNoEvidenceBlock(t *testing.T) {
 func TestDiagnosticStepSummaryIsDataBearing(t *testing.T) {
 	t.Parallel()
 	pkg := diagnostics.Package{
-		Domains:     []string{"glusterfs"},
+		Domains: []string{"glusterfs"},
 		Resources: []diagnostics.ResourceRef{
 			{Domain: "glusterfs", Type: "volume", Name: "data"},
 		},
@@ -154,7 +154,7 @@ func TestDiagnosticStepSummaryIsDataBearing(t *testing.T) {
 func TestDiagnosticStepSummaryMultiDomainAggregatesAllDomains(t *testing.T) {
 	t.Parallel()
 	pkg := diagnostics.Package{
-		Domains:     []string{"glusterfs", "minio", "kafka"},
+		Domains: []string{"glusterfs", "minio", "kafka"},
 		Resources: []diagnostics.ResourceRef{
 			{Domain: "glusterfs", Type: "volume", Name: "glusterfs-volume"},
 			{Domain: "minio", Type: "bucket", Name: "minio-bucket"},

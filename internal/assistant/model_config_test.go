@@ -45,10 +45,10 @@ func TestLoadModelRegistry_PlannerOnly(t *testing.T) {
 // 主模型 + 推理模型并存：两个槽位独立生效。
 func TestLoadModelRegistry_PlannerAndReasoning(t *testing.T) {
 	env := envWith(map[string]string{
-		envOpenAIModel:       "gpt-4o",
-		envReasoningModel:    "deepseek-reasoner",
-		envReasoningAPIKey:   "k-r",
-		envReasoningBaseURL:  "https://api.deepseek.com/v1",
+		envOpenAIModel:      "gpt-4o",
+		envReasoningModel:   "deepseek-reasoner",
+		envReasoningAPIKey:  "k-r",
+		envReasoningBaseURL: "https://api.deepseek.com/v1",
 	})
 	reg, err := LoadModelRegistry(env)
 	if err != nil {
@@ -66,10 +66,10 @@ func TestLoadModelRegistry_PlannerAndReasoning(t *testing.T) {
 // 意图识别独立槽位：配置 COPILOT_INTENT_MODEL 后不再回退 planner。
 func TestLoadModelRegistry_IntentSlot(t *testing.T) {
 	env := envWith(map[string]string{
-		envOpenAIModel:    "gpt-4o",
-		envIntentModel:    "gpt-4o-mini",
-		envIntentAPIKey:   "k-int",
-		envIntentBaseURL:  "https://api.example.com/int",
+		envOpenAIModel:   "gpt-4o",
+		envIntentModel:   "gpt-4o-mini",
+		envIntentAPIKey:  "k-int",
+		envIntentBaseURL: "https://api.example.com/int",
 	})
 	reg, err := LoadModelRegistry(env)
 	if err != nil {
@@ -91,8 +91,8 @@ func TestLoadModelRegistry_IntentSlot(t *testing.T) {
 // 意图独立槽位缺省 key/url 时回退主模型 key/url。
 func TestLoadModelRegistry_IntentFallsBackKey(t *testing.T) {
 	env := envWith(map[string]string{
-		envOpenAIModel:  "gpt-4o",
-		envOpenAIAPIKey: "k-main",
+		envOpenAIModel:   "gpt-4o",
+		envOpenAIAPIKey:  "k-main",
 		envOpenAIBaseURL: "https://api.example.com/v1",
 		envIntentModel:   "gpt-4o-mini",
 		// 无 intent key/url，应回退主模型
@@ -143,11 +143,11 @@ models:
 		t.Fatal(err)
 	}
 	env := envWith(map[string]string{
-		envModelsConfig:       path,
-		envOpenAIModel:        "gpt-4o", // 应被 yaml 的 planner 覆盖
-		envOpenAIAPIKey:       "k-main",
-		envReasoningModel:     "deepseek-reasoner", // yaml 未定义 reasoning → 走 env
-		envReasoningAPIKey:    "k-r",
+		envModelsConfig:    path,
+		envOpenAIModel:     "gpt-4o", // 应被 yaml 的 planner 覆盖
+		envOpenAIAPIKey:    "k-main",
+		envReasoningModel:  "deepseek-reasoner", // yaml 未定义 reasoning → 走 env
+		envReasoningAPIKey: "k-r",
 	})
 	reg, err := LoadModelRegistry(env)
 	if err != nil {

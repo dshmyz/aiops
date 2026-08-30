@@ -35,7 +35,7 @@ func enrichTestService(t *testing.T) *Service {
 		t.Fatalf("register tools: %v", err)
 	}
 	policy.RegisterDynamicRolePermissions(map[string][]string{
-		"demo.health.read": {"viewer", "operator", "admin"},
+		"demo.health.read":   {"viewer", "operator", "admin"},
 		"demo.retention.set": {"operator", "admin"},
 	})
 	reads := execution.NewReadOnlyService(fakeReadRunner{}, nil)

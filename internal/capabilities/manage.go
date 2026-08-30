@@ -26,7 +26,7 @@ var (
 	ErrInvalidCapabilityName       = errors.New("invalid capability name")
 	ErrCapabilityNotFound          = errors.New("capability not found")
 	ErrCapabilityNameConflict      = errors.New("capability name conflict")
-	ErrTestRequiresRead = errors.New("test endpoint only supports read capabilities")
+	ErrTestRequiresRead            = errors.New("test endpoint only supports read capabilities")
 	ErrInvalidOpenAPIURL           = errors.New("invalid OpenAPI URL")
 	ErrInvalidOpenAPIFingerprint   = errors.New("invalid OpenAPI fingerprint")
 	ErrOpenAPIFingerprintChanged   = errors.New("OpenAPI fingerprint changed")

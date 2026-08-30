@@ -154,10 +154,10 @@ func TestEvaluateAppliesParameterFloorToDynamicWriteCapability(t *testing.T) {
 		hours any
 		want  Reason
 	}{
-		"below floor":            {hours: 1, want: ParameterDenied},
-		"above schema maximum":   {hours: 999999, want: InvalidInput},
+		"below floor":             {hours: 1, want: ParameterDenied},
+		"above schema maximum":    {hours: 999999, want: InvalidInput},
 		"json number below floor": {hours: json.Number("12"), want: ParameterDenied},
-		"at floor":               {hours: 24, want: Permitted},
+		"at floor":                {hours: 24, want: Permitted},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := Evaluate(user("admin"), tool, input(test.hours))

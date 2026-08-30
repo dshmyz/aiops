@@ -30,12 +30,12 @@ import (
 // RunbookDraft 是待人工确认的 runbook 草稿。草稿存内存（重启即清），activate 后
 // 落 SQL 持久化并删除草稿记录。
 type RunbookDraft struct {
-	ID            string     `json:"id"`
-	Slug          string     `json:"slug"`
-	Name          string     `json:"name"`
-	IntentPattern []string   `json:"intent_pattern"`
-	ToolSequence  []string   `json:"tool_sequence"`
-	RiskLevel     string     `json:"risk_level"`
+	ID            string   `json:"id"`
+	Slug          string   `json:"slug"`
+	Name          string   `json:"name"`
+	IntentPattern []string `json:"intent_pattern"`
+	ToolSequence  []string `json:"tool_sequence"`
+	RiskLevel     string   `json:"risk_level"`
 	// TopicKey 是产生该草稿的反馈主题键（如 retention），用于前端回链/溯源。
 	TopicKey string `json:"topic_key"`
 	// MissingReason 非空表示该主题无法落成 runbook（返回草稿但不可 activate）。
@@ -102,9 +102,9 @@ func retentionWriteTool() (tools.Tool, bool) {
 
 // runbookableTopics 是能落成 runbook 的主题键集合（其余如 format/unclassified 明确跳过）。
 var runbookableTopics = map[string]bool{
-	"retention":        true,
-	"capability-call":  true,
-	"latency":          true,
+	"retention":       true,
+	"capability-call": true,
+	"latency":         true,
 }
 
 // runbookDraftStore 是内存草稿暂存（无持久化；activate 后落 SQL）。

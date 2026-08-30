@@ -23,7 +23,7 @@ import (
 // (fabricated conclusions, identical retries, missing disclosure), this layer
 // verifies the wiring's guardrails actually catch them.
 type scriptedChatModel struct {
-	mu      sync.Mutex
+	mu sync.Mutex
 	// responses are returned in order; the last one repeats when exhausted.
 	responses []string
 	calls     int

@@ -635,8 +635,8 @@ func managedReadCapability(name, status string) capabilities.Capability {
 			TimeoutMS: 3000,
 		},
 		InputSchema: map[string]capabilities.InputField{
-			"cluster":     {Type: "string", Required: true},
-			"bucket":      {Type: "string", Required: true},
+			"cluster": {Type: "string", Required: true},
+			"bucket":  {Type: "string", Required: true},
 		},
 		Output: capabilities.OutputSpec{
 			Kind:            "observation",

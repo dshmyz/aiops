@@ -92,28 +92,28 @@ func (s *ReadOnlyService) readCtx(ctx context.Context) (context.Context, context
 }
 
 func (s *ReadOnlyService) ExecuteRead(ctx context.Context, user identity.CurrentUser, toolName string, input map[string]any) (map[string]any, error) {
-	
+
 	ctx, span := tracer().Start(ctx, "execution.ExecuteRead",
 		trace.WithAttributes(attribute.String("tool.name", toolName)))
 	defer span.End()
 	tool, ok := tools.Lookup(toolName)
 	if !ok {
-		
+
 		_ = s.record(ctx, user, toolName, audit.ActionReadonlyToolRejected, string(policy.ToolNotRegistered), nil)
 		return nil, ErrReadToolDenied
 	}
-	
+
 	if tool.Operation != tools.Read {
 		_ = s.record(ctx, user, toolName, audit.ActionReadonlyToolRejected, audit.DecisionWriteToolNotAllowedOnRead, nil)
 		return nil, ErrWriteTool
 	}
 	decision := policy.Evaluate(user, tool, input)
 	if !decision.Allowed {
-		
+
 		_ = s.record(ctx, user, toolName, audit.ActionReadonlyToolRejected, string(decision.Reason), nil)
 		return nil, ErrReadToolDenied
 	}
-	
+
 	if s.runner == nil {
 		_ = s.record(ctx, user, toolName, audit.ActionReadonlyToolFailed, audit.DecisionExecutorMissing, nil)
 		return nil, errors.New("read runner is required")

@@ -59,7 +59,7 @@ func (DefaultHTMLRenderer) Render(report InspectionReport) string {
 	sb.WriteString(fmt.Sprintf(`<div class="stat ok"><div class="num">%d</div><div class="label">正常</div></div>`, report.SucceededTasks))
 	sb.WriteString(fmt.Sprintf(`<div class="stat failed"><div class="num">%d</div><div class="label">异常</div></div>`, report.FailedTasks))
 	sb.WriteString(fmt.Sprintf(`<div class="stat failed"><div class="num">%.0f%%</div><div class="label">异常率</div></div>`, failureRate))
-	sb.WriteString(`</div>`+"\n")
+	sb.WriteString(`</div>` + "\n")
 
 	// 任务详情表格
 	sb.WriteString(`<table>

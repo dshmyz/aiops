@@ -3237,9 +3237,9 @@ func signedRequest(t *testing.T, path, body, subject string, roles []string) *ht
 	}
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t, map[string]any{
-		"sub":                  subject,
-		"roles":                roles,
-		"permissions":          []string{"*"},
+		"sub":         subject,
+		"roles":       roles,
+		"permissions": []string{"*"},
 	}))
 	req.Header.Set("X-Request-ID", "request-1")
 	return req
@@ -3250,9 +3250,9 @@ func signedRequestWithMethod(t *testing.T, method, path, body, subject string, r
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t, map[string]any{
-		"sub":                  subject,
-		"roles":                roles,
-		"permissions":          []string{"*"},
+		"sub":         subject,
+		"roles":       roles,
+		"permissions": []string{"*"},
 	}))
 	req.Header.Set("X-Request-ID", "request-1")
 	return req
@@ -3265,9 +3265,9 @@ func signedPostRequest(t *testing.T, path, subject string, roles []string) *http
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, nil)
 	req.Header.Set("Authorization", "Bearer "+signedJWT(t, map[string]any{
-		"sub":                  subject,
-		"roles":                roles,
-		"permissions":          []string{"*"},
+		"sub":         subject,
+		"roles":       roles,
+		"permissions": []string{"*"},
 	}))
 	req.Header.Set("X-Request-ID", "request-1")
 	return req
@@ -3318,19 +3318,19 @@ func httpAPIMiddlewareDefinitions() []tools.DynamicToolDefinition {
 		{
 			Tool: tools.Tool{Name: "glusterfs.volume.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "minio.bucket.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "kafka.consumer_lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
@@ -3360,7 +3360,7 @@ func retentionInput() map[string]any {
 
 func admin() identity.CurrentUser {
 	return identity.CurrentUser{
-		Subject:             "admin-1",
+		Subject:   "admin-1",
 		Roles:     []string{"admin"},
 		RequestID: "request-admin",
 	}
@@ -3394,9 +3394,9 @@ func TestJWTExpiredTokenRejected(t *testing.T) {
 	)
 	expired := time.Now().Add(-1 * time.Hour).Unix()
 	token := signedJWT(t, map[string]any{
-		"sub":                  "user-1",
-		"roles":                []string{"viewer"},
-		"exp":                  expired,
+		"sub":   "user-1",
+		"roles": []string{"viewer"},
+		"exp":   expired,
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -3418,9 +3418,9 @@ func TestJWTNotYetValidTokenRejected(t *testing.T) {
 	)
 	future := time.Now().Add(1 * time.Hour).Unix()
 	token := signedJWT(t, map[string]any{
-		"sub":                  "user-1",
-		"roles":                []string{"viewer"},
-		"nbf":                  future,
+		"sub":   "user-1",
+		"roles": []string{"viewer"},
+		"nbf":   future,
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -3455,9 +3455,9 @@ func TestJWTValidExpiryAccepted(t *testing.T) {
 	)
 	expiry := time.Now().Add(1 * time.Hour).Unix()
 	token := signedJWT(t, map[string]any{
-		"sub":                  "user-1",
-		"roles":                []string{"viewer"},
-		"exp":                  expiry,
+		"sub":   "user-1",
+		"roles": []string{"viewer"},
+		"exp":   expiry,
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -3493,8 +3493,8 @@ func TestJWTNoExpiryStillAccepted(t *testing.T) {
 	)
 	// No exp claim — dev token, should still be accepted.
 	token := signedJWT(t, map[string]any{
-		"sub":                  "user-1",
-		"roles":                []string{"viewer"},
+		"sub":   "user-1",
+		"roles": []string{"viewer"},
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

@@ -195,8 +195,8 @@ func TestLLMFormatterParsesDelimitedFormat(t *testing.T) {
 func TestLLMFormatterStreamForwardsSummaryDelta(t *testing.T) {
 	t.Parallel()
 	chat := &mockChatModel{streamChunks: []string{
-		"前置说明 [[SUMMARY_START]]Kafka 集",                 // 标记与 SUMMARY 前缀同块
-		"群健康，3 节点在线[[SUMMARY_END]]",                  // SUMMARY 结尾与结束标记同块
+		"前置说明 [[SUMMARY_START]]Kafka 集", // 标记与 SUMMARY 前缀同块
+		"群健康，3 节点在线[[SUMMARY_END]]",     // SUMMARY 结尾与结束标记同块
 		"[[BLOCKS_START]][{\"type\":\"incident_card\",\"title\":\"诊断\"}][[BLOCKS_END]]",
 	}}
 	f := assistant.NewLLMFormatter(chat)

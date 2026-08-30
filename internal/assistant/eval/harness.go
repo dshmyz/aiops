@@ -135,9 +135,9 @@ func planAdvisory(tool string, input map[string]any) assistant.Intent {
 // planFinal builds a terminal final_answer intent.
 func planFinal(answer string) assistant.Intent {
 	return assistant.Intent{
-		Type:    assistant.IntentGenerative,
-		Done:    true,
-		Answer:  answer,
+		Type:        assistant.IntentGenerative,
+		Done:        true,
+		Answer:      answer,
 		Explanation: "eval final answer",
 	}
 }

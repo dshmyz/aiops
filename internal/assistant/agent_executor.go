@@ -27,19 +27,19 @@ import (
 // 替代原有的 EinoPlanner JSON 解析 + 手动 agent loop。
 // LLM 通过原生 tool calling 选工具，框架自动执行，结果自动回传。
 type AgentExecutor struct {
-	chat          model.BaseChatModel // 执行层：选工具、调参数
-	reasoningChat model.BaseChatModel // 分析层：深度推理、生成报告（可为 nil）
-	tools         []tool.BaseTool
-	toolMap       map[string]tool.BaseTool // name → tool 快速查找
-	audit         *audit.Service
-	modelName     string
-	maxSteps      int
-	knowledge     *KnowledgeStore                        // 知识库（可为 nil）
-	skills        SkillLookup                            // SOP/Skill 查询（可为 nil）
-	cache         *ResponseCache                         // LLM 响应缓存（可为 nil）
-	rateLimiter   *RateLimiter                           // LLM 调用限流（可为 nil）
-	writeGate     agentWriteGate                         // 写工具门：policy/E2 准入门/pending plan 三态（可为 nil）
-	sequenceFor   func(context.Context, string) []string // 声明证据顺序解析器（可为 nil）
+	chat           model.BaseChatModel // 执行层：选工具、调参数
+	reasoningChat  model.BaseChatModel // 分析层：深度推理、生成报告（可为 nil）
+	tools          []tool.BaseTool
+	toolMap        map[string]tool.BaseTool // name → tool 快速查找
+	audit          *audit.Service
+	modelName      string
+	maxSteps       int
+	knowledge      *KnowledgeStore                        // 知识库（可为 nil）
+	skills         SkillLookup                            // SOP/Skill 查询（可为 nil）
+	cache          *ResponseCache                         // LLM 响应缓存（可为 nil）
+	rateLimiter    *RateLimiter                           // LLM 调用限流（可为 nil）
+	writeGate      agentWriteGate                         // 写工具门：policy/E2 准入门/pending plan 三态（可为 nil）
+	sequenceFor    func(context.Context, string) []string // 声明证据顺序解析器（可为 nil）
 	paramProducers producerIndex                          // 参数名 → 可产出该参数的工具（缺参引导，可为 nil）
 }
 

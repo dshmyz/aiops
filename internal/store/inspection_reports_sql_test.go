@@ -117,13 +117,13 @@ func TestSQLInspectionReportStoreIdempotentClaim(t *testing.T) {
 	win := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	mk := func(total int) InspectionReport {
 		return InspectionReport{
-			Period:         InspectionPeriodDaily,
-			WindowStart:    win,
-			WindowEnd:      win.Add(24 * time.Hour),
-			GeneratedAt:    time.Now().UTC(),
-			TotalTasks:     total,
-			HTMLContent:    "<html>r</html>",
-			TaskSummaries:  []InspectionTaskSummary{},
+			Period:        InspectionPeriodDaily,
+			WindowStart:   win,
+			WindowEnd:     win.Add(24 * time.Hour),
+			GeneratedAt:   time.Now().UTC(),
+			TotalTasks:    total,
+			HTMLContent:   "<html>r</html>",
+			TaskSummaries: []InspectionTaskSummary{},
 		}
 	}
 

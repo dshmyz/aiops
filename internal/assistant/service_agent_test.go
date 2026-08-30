@@ -71,9 +71,9 @@ func TestRecordDeniedWritesAuditEvent(t *testing.T) {
 	repo := store.NewMemoryActionPlanStore()
 	s := &Service{audit: audit.NewService(repo), clock: testClock()}
 	user := identity.CurrentUser{
-		Subject:             "admin-1",
-		RequestID:           "req-1",
-		Roles:               []string{"admin"},
+		Subject:   "admin-1",
+		RequestID: "req-1",
+		Roles:     []string{"admin"},
 	}
 	ctx := execution.WithAgentStep(context.Background(), execution.AgentStep{StepIndex: 3, Conversation: "conv-9"})
 	s.recordDenied(ctx, user, "minio.bucket.health.read", policy.RiskDenied)

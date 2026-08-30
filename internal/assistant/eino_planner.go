@@ -278,9 +278,9 @@ func (p *EinoPlanner) parseIntent(ctx context.Context, response *schema.Message)
 				ResourceName: strings.TrimSpace(parsed.Diagnostic.ResourceName),
 				Runbook:      strings.TrimSpace(parsed.Diagnostic.Runbook),
 			},
-			Confidence:      parsed.Confidence,
-			Explanation:     strings.TrimSpace(parsed.Explanation),
-			SuggestedSteps:  parsed.SuggestedSteps,
+			Confidence:     parsed.Confidence,
+			Explanation:    strings.TrimSpace(parsed.Explanation),
+			SuggestedSteps: parsed.SuggestedSteps,
 		}, nil
 	}
 	if strings.TrimSpace(parsed.ToolName) == "" {
@@ -296,11 +296,11 @@ func (p *EinoPlanner) parseIntent(ctx context.Context, response *schema.Message)
 		return Intent{}, NewClarificationWithFields(clarificationMessage, fields)
 	}
 	return Intent{
-		ToolName:        strings.TrimSpace(parsed.ToolName),
-		Input:           parsed.Input,
-		Confidence:      parsed.Confidence,
-		Explanation:     strings.TrimSpace(parsed.Explanation),
-		SuggestedSteps:  parsed.SuggestedSteps,
+		ToolName:       strings.TrimSpace(parsed.ToolName),
+		Input:          parsed.Input,
+		Confidence:     parsed.Confidence,
+		Explanation:    strings.TrimSpace(parsed.Explanation),
+		SuggestedSteps: parsed.SuggestedSteps,
 	}, nil
 }
 

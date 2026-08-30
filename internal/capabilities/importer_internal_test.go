@@ -23,9 +23,8 @@ func registerInternalTestDomains(t *testing.T) {
 			continue
 		}
 		_ = tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
-			Tool: tools.Tool{Name: name, Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
-			InputSchema: map[string]tools.DynamicInputField{
-			},
+			Tool:        tools.Tool{Name: name, Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
+			InputSchema: map[string]tools.DynamicInputField{},
 		}})
 	}
 }

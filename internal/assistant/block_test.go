@@ -47,8 +47,8 @@ func TestBlockJSONRoundTrip(t *testing.T) {
 			Title:   "Kafka 集群延迟告警",
 			Content: "prod 环境 kafka consumer_group 延迟超过阈值",
 			Payload: map[string]any{
-				"severity":    "warning",
-				"service":     "order-center",
+				"severity": "warning",
+				"service":  "order-center",
 			},
 		},
 		{

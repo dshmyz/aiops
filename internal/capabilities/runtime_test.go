@@ -386,9 +386,9 @@ func TestCapabilityWriteRunnerExecutesPublishedWriteThroughHTTPAdapter(t *testin
 		return nil, nil
 	}), []capabilities.Capability{capability}, capabilities.NewHTTPAdapter(http.DefaultClient))
 	result, err := runner.Execute(context.Background(), tool.Name, map[string]any{
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"quota":       100,
+		"cluster": "m1",
+		"bucket":  "archive",
+		"quota":   100,
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -423,9 +423,9 @@ func TestCapabilityWriteRunnerAddsPublishedCapabilityAfterStartup(t *testing.T) 
 	}
 
 	result, err := runner.Execute(context.Background(), capability.Name, map[string]any{
-		"cluster":     "m1",
-		"bucket":      "archive",
-		"quota":       200,
+		"cluster": "m1",
+		"bucket":  "archive",
+		"quota":   200,
 	})
 	if err != nil {
 		t.Fatalf("Execute returned %v", err)
@@ -581,9 +581,9 @@ func TestCapabilityWriteRunnerVerifyReturnsFailedWhenReadCapabilityNotRegistered
 
 	runner := capabilities.NewCapabilityWriteRunnerWithVerifier(nil, []capabilities.Capability{writeCapability}, nil, nil)
 	plan := planRecordForVerify(writeCapability.Name, "operator-1", map[string]any{
-		"cluster":          "k1",
-		"topic":            "orders",
-		"retention_hours":  72,
+		"cluster":         "k1",
+		"topic":           "orders",
+		"retention_hours": 72,
 	})
 
 	result, err := runner.Verify(context.Background(), plan, map[string]any{"cluster": "k1", "topic": "orders"})
@@ -602,14 +602,14 @@ func planRecordForVerify(toolName, subject string, input map[string]any) store.P
 	_, hash, _ := plans.CanonicalInput(input)
 	inputJSON, _ := json.Marshal(input)
 	return store.PlanRecord{
-		ID:            "plan-test",
-		ToolName:      toolName,
-		InputHash:     hash,
-		InputJSON:     inputJSON,
-		Status:        store.PlanConfirmed,
-		CreatedBy:     subject,
-		ConfirmedBy:   subject,
-		ExpiresAt:      time.Now().UTC().Add(10 * time.Minute),
+		ID:          "plan-test",
+		ToolName:    toolName,
+		InputHash:   hash,
+		InputJSON:   inputJSON,
+		Status:      store.PlanConfirmed,
+		CreatedBy:   subject,
+		ConfirmedBy: subject,
+		ExpiresAt:   time.Now().UTC().Add(10 * time.Minute),
 	}
 }
 
@@ -706,9 +706,9 @@ func writeCapabilityForRegister() capabilities.Capability {
 			TimeoutMS: 3000,
 		},
 		InputSchema: map[string]capabilities.InputField{
-			"cluster":     {Type: "string", Required: true},
-			"bucket":      {Type: "string", Required: true},
-			"quota":       {Type: "integer", Required: true},
+			"cluster": {Type: "string", Required: true},
+			"bucket":  {Type: "string", Required: true},
+			"quota":   {Type: "integer", Required: true},
 		},
 		Output: capabilities.OutputSpec{
 			Kind:            "mutation",

@@ -21,8 +21,10 @@ import (
 // noopSpanExporter 丢弃所有 span（OTLP 未配置时的默认行为，避免 stdout 被 span JSON 刷屏）。
 type noopSpanExporter struct{}
 
-func (n *noopSpanExporter) ExportSpans(_ context.Context, _ []sdktrace.ReadOnlySpan) error { return nil }
-func (n *noopSpanExporter) Shutdown(_ context.Context) error                              { return nil }
+func (n *noopSpanExporter) ExportSpans(_ context.Context, _ []sdktrace.ReadOnlySpan) error {
+	return nil
+}
+func (n *noopSpanExporter) Shutdown(_ context.Context) error { return nil }
 
 // tracerName is the single tracer used across the copilot backend so that all
 // spans share a common instrumentation scope.

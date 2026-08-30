@@ -53,14 +53,14 @@ func TestRecordRequestCountSeparatesByMethodAndPath(t *testing.T) {
 
 func TestRecordDurationBuckets(t *testing.T) {
 	m := NewMetrics()
-	m.Record("GET", "/a", 50*time.Millisecond, 200)   // <100ms
-	m.Record("GET", "/b", 200*time.Millisecond, 200)   // 100-500ms
-	m.Record("GET", "/c", 600*time.Millisecond, 200)   // 500ms-1s
-	m.Record("GET", "/d", 2*time.Second, 200)          // >1s
+	m.Record("GET", "/a", 50*time.Millisecond, 200)  // <100ms
+	m.Record("GET", "/b", 200*time.Millisecond, 200) // 100-500ms
+	m.Record("GET", "/c", 600*time.Millisecond, 200) // 500ms-1s
+	m.Record("GET", "/d", 2*time.Second, 200)        // >1s
 	// Exact boundary: 100ms falls into 100-500ms (< 100ms is strictly less).
-	m.Record("GET", "/e", 100*time.Millisecond, 200)   // 100-500ms
-	m.Record("GET", "/f", 500*time.Millisecond, 200)   // 500ms-1s
-	m.Record("GET", "/g", 1*time.Second, 200)           // >1s
+	m.Record("GET", "/e", 100*time.Millisecond, 200) // 100-500ms
+	m.Record("GET", "/f", 500*time.Millisecond, 200) // 500ms-1s
+	m.Record("GET", "/g", 1*time.Second, 200)        // >1s
 
 	snap := m.snapshot()
 	if snap.RequestDuration["<100ms"] != 1 {

@@ -12,14 +12,14 @@ import (
 
 // AlertActionRuleRecord 是告警→动作编排规则的 DB 记录。
 type AlertActionRuleRecord struct {
-	Name             string          `json:"name"`
-	AlertMatch       json.RawMessage `json:"alert_match"`
-	ToolSequence     json.RawMessage `json:"tool_sequence"`
-	ExecuteLastStep  bool            `json:"execute_last_step"`
-	Description      string          `json:"description"`
-	Enabled          bool            `json:"enabled"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	Name            string          `json:"name"`
+	AlertMatch      json.RawMessage `json:"alert_match"`
+	ToolSequence    json.RawMessage `json:"tool_sequence"`
+	ExecuteLastStep bool            `json:"execute_last_step"`
+	Description     string          `json:"description"`
+	Enabled         bool            `json:"enabled"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // AlertActionRuleStore CRUD 操作告警→动作编排规则。

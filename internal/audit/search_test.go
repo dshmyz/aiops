@@ -21,10 +21,10 @@ func TestParseSearchQueryMapsRejectedToDeniedDecision(t *testing.T) {
 	now := time.Date(2026, time.July, 26, 12, 0, 0, 0, time.UTC)
 
 	cases := map[string]string{
-		"上周谁拒绝了 plan":            "denied",
+		"上周谁拒绝了 plan":           "denied",
 		"who rejected the plan": "denied",
 		"拒绝":                    "denied",
-		"denied":                 "denied",
+		"denied":                "denied",
 	}
 	for query, wantDecision := range cases {
 		query, wantDecision := query, wantDecision
@@ -46,7 +46,7 @@ func TestParseSearchQueryMapsPermittedToPermittedDecision(t *testing.T) {
 		"上周谁允许了 plan":            "permitted",
 		"who permitted the plan": "permitted",
 		"允许":                     "permitted",
-		"permitted":               "permitted",
+		"permitted":              "permitted",
 	}
 	for query, wantDecision := range cases {
 		query, wantDecision := query, wantDecision
@@ -88,12 +88,12 @@ func TestParseSearchQueryMapsTimeWordsToCreatedAfter(t *testing.T) {
 	todayMidnight := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 
 	cases := map[string]time.Time{
-		"上周谁拒绝了 plan":     now.Add(-7 * 24 * time.Hour),
+		"上周谁拒绝了 plan":        now.Add(-7 * 24 * time.Hour),
 		"last week rejected": now.Add(-7 * 24 * time.Hour),
-		"昨天":              now.Add(-24 * time.Hour),
-		"yesterday":       now.Add(-24 * time.Hour),
-		"今天":              todayMidnight,
-		"today":            todayMidnight,
+		"昨天":                 now.Add(-24 * time.Hour),
+		"yesterday":          now.Add(-24 * time.Hour),
+		"今天":                 todayMidnight,
+		"today":              todayMidnight,
 	}
 	for query, want := range cases {
 		query, want := query, want
@@ -124,11 +124,11 @@ func TestParseSearchQueryFinalResultKeyword(t *testing.T) {
 	now := time.Date(2026, time.July, 26, 12, 0, 0, 0, time.UTC)
 
 	cases := map[string]bool{
-		"最终结果":              true,
-		"只看最终结果":            true,
+		"最终结果":               true,
+		"只看最终结果":             true,
 		"final result":       true,
 		"final results only": true,
-		"上周的执行记录":           false, // 不含关键词，不触发
+		"上周的执行记录":            false, // 不含关键词，不触发
 		"rejected":           false, // 仅 decision 过滤，不触发 final result
 	}
 	for query, want := range cases {

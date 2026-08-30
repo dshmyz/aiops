@@ -18,19 +18,19 @@ func registerMiddlewareTools(t *testing.T) {
 		{
 			Tool: Tool{Name: "glusterfs.volume.health.read", Operation: Read, Risk: Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]DynamicInputField{
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: Tool{Name: "minio.bucket.health.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]DynamicInputField{
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: Tool{Name: "kafka.consumer_lag.read", Operation: Read, Risk: Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]DynamicInputField{
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
@@ -77,7 +77,7 @@ func TestIsStaticIdentifiesBuiltInTools(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "minio.bucket.capacity.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
 		InputSchema: map[string]DynamicInputField{
-			"bucket":      {Type: "string", Required: true},
+			"bucket": {Type: "string", Required: true},
 		},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools returned %v", err)
@@ -93,8 +93,8 @@ func TestDynamicInputSchemaReturnsCopy(t *testing.T) {
 	err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "minio.bucket.capacity.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
 		InputSchema: map[string]DynamicInputField{
-			"cluster":     {Type: "string", Required: true},
-			"bucket":      {Type: "string", Required: true},
+			"cluster": {Type: "string", Required: true},
+			"bucket":  {Type: "string", Required: true},
 		},
 	}})
 	if err != nil {
@@ -127,7 +127,7 @@ func TestValidateInputRejectsUnknownWriteParameters(t *testing.T) {
 	}
 
 	err := ValidateInput(tool, map[string]any{
-		
+
 		"topic":           "orders",
 		"retention_hours": 72,
 		"delete_all":      true,
@@ -145,8 +145,8 @@ func TestValidateInputUsesCanonicalRegisteredTool(t *testing.T) {
 	}
 	forged := Tool{Name: "topic.retention.set", Operation: Read, Risk: Low}
 	err := ValidateInput(forged, map[string]any{
-		
-		"topic":       "orders",
+
+		"topic": "orders",
 	})
 	if err == nil {
 		t.Fatal("ValidateInput accepted input valid only for a forged tool definition")
@@ -209,7 +209,7 @@ func TestAlertQueryValidateInput(t *testing.T) {
 	if !ok {
 		t.Fatalf("tool %q was not registered", AlertQuery)
 	}
-		if err := ValidateInput(tool, map[string]any{}); err != nil {
+	if err := ValidateInput(tool, map[string]any{}); err != nil {
 		t.Fatalf("ValidateInput(prod) = %v, want nil", err)
 	}
 	// 合法：全部可选过滤
@@ -298,8 +298,8 @@ func TestRegisterDynamicToolsAddsCanonicalLookupAndValidation(t *testing.T) {
 	err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "minio.bucket.capacity.read", Operation: Read, Risk: Low, Domain: "minio", ResourceType: "bucket"},
 		InputSchema: map[string]DynamicInputField{
-			"cluster":     {Type: "string", Required: true},
-			"bucket":      {Type: "string", Required: true},
+			"cluster": {Type: "string", Required: true},
+			"bucket":  {Type: "string", Required: true},
 		},
 	}})
 	if err != nil {
@@ -376,10 +376,10 @@ func TestValidateInputDynamicSupportsSchemaTypesAndRequiredFields(t *testing.T) 
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "runtime.types.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 		InputSchema: map[string]DynamicInputField{
-			"count":       {Type: "integer", Required: true},
-			"ratio":       {Type: "number", Required: true},
-			"enabled":     {Type: "boolean", Required: true},
-			"note":        {Type: "string"},
+			"count":   {Type: "integer", Required: true},
+			"ratio":   {Type: "number", Required: true},
+			"enabled": {Type: "boolean", Required: true},
+			"note":    {Type: "string"},
 		},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools returned %v", err)
@@ -409,7 +409,7 @@ func TestValidateInputDynamicRejectsInvalidNumbers(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "runtime.number.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 		InputSchema: map[string]DynamicInputField{
-			"value":       {Type: "number", Required: true},
+			"value": {Type: "number", Required: true},
 		},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools returned %v", err)
@@ -489,7 +489,7 @@ func TestValidateInputDynamicSkipsBoundsForUnboundedFields(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "runtime.unbounded.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 		InputSchema: map[string]DynamicInputField{
-			"count":       {Type: "integer", Required: true},
+			"count": {Type: "integer", Required: true},
 		},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools returned %v", err)
@@ -516,7 +516,7 @@ func TestRegisterDynamicToolsRejectsUnsatisfiableBounds(t *testing.T) {
 			err := RegisterDynamicTools([]DynamicToolDefinition{{
 				Tool: Tool{Name: "runtime.bounds.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 				InputSchema: map[string]DynamicInputField{
-					"value":       field,
+					"value": field,
 				},
 			}})
 			if err == nil {
@@ -539,7 +539,7 @@ func TestDynamicInputSchemaCopiesBounds(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "runtime.clone.read", Operation: Read, Risk: Low, Domain: "runtime", ResourceType: "item"},
 		InputSchema: map[string]DynamicInputField{
-			"value":       {Type: "integer", Required: true, Min: boundOf(1), Max: boundOf(10)},
+			"value": {Type: "integer", Required: true, Min: boundOf(1), Max: boundOf(10)},
 		},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools returned %v", err)
@@ -568,9 +568,8 @@ func TestUnregisterDynamicToolsRemovesRegistered(t *testing.T) {
 	t.Cleanup(ResetDynamicToolsForTest)
 
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
-		Tool: Tool{Name: "grafana.query.read", Operation: Read, Risk: Low, Domain: "grafana", ResourceType: "mcp"},
-		InputSchema: map[string]DynamicInputField{
-		},
+		Tool:        Tool{Name: "grafana.query.read", Operation: Read, Risk: Low, Domain: "grafana", ResourceType: "mcp"},
+		InputSchema: map[string]DynamicInputField{},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools: %v", err)
 	}
@@ -594,7 +593,7 @@ func TestUnregisterDynamicToolsRemovesInputSchema(t *testing.T) {
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
 		Tool: Tool{Name: "loki.search.read", Operation: Read, Risk: Low, Domain: "loki", ResourceType: "mcp"},
 		InputSchema: map[string]DynamicInputField{
-			"query":       {Type: "string", Required: true},
+			"query": {Type: "string", Required: true},
 		},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools: %v", err)
@@ -634,9 +633,8 @@ func TestUnregisterDynamicToolsAllListUpdated(t *testing.T) {
 	t.Cleanup(ResetDynamicToolsForTest)
 
 	if err := RegisterDynamicTools([]DynamicToolDefinition{{
-		Tool: Tool{Name: "svc.tool1.read", Operation: Read, Risk: Low, Domain: "svc", ResourceType: "mcp"},
-		InputSchema: map[string]DynamicInputField{
-		},
+		Tool:        Tool{Name: "svc.tool1.read", Operation: Read, Risk: Low, Domain: "svc", ResourceType: "mcp"},
+		InputSchema: map[string]DynamicInputField{},
 	}}); err != nil {
 		t.Fatalf("RegisterDynamicTools: %v", err)
 	}

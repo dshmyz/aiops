@@ -86,7 +86,7 @@ func TestHandleMessagePersistsFailedTurn(t *testing.T) {
 		},
 		InputSchema: map[string]tools.DynamicInputField{
 
-			"name":        {Type: "string", Required: true},
+			"name": {Type: "string", Required: true},
 		},
 	}}); err != nil {
 		t.Fatalf("register tool: %v", err)

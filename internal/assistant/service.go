@@ -1933,7 +1933,8 @@ var ErrNotRunning = errors.New("assistant: no in-flight run for conversation")
 // RenameConversation updates a conversation's display title after trimming.
 // Returns store.ErrInvalidTitle for empty titles and store.ErrNotFound for
 // missing or foreign conversations.
-func (s *Service) RenameConversation(ctx context.Context, id, subject, title string) error {	if s.conversations == nil {
+func (s *Service) RenameConversation(ctx context.Context, id, subject, title string) error {
+	if s.conversations == nil {
 		return errors.New("conversation store is not configured")
 	}
 	title = strings.TrimSpace(title)

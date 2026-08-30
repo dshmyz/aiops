@@ -19,10 +19,10 @@ type bucket struct {
 
 // RateLimiterConfig holds the per-key and per-IP rate limit parameters.
 type RateLimiterConfig struct {
-	SubjectCapacity  float64
-	SubjectRefillPS  float64
-	IPCapacity       float64
-	IPRefillPS       float64
+	SubjectCapacity float64
+	SubjectRefillPS float64
+	IPCapacity      float64
+	IPRefillPS      float64
 }
 
 // DefaultRateLimiterConfig returns production-safe defaults:
@@ -33,7 +33,7 @@ func DefaultRateLimiterConfig() RateLimiterConfig {
 		SubjectCapacity: 30,
 		SubjectRefillPS: 0.5,
 		IPCapacity:      60,
-		IPRefillPS:       1.0,
+		IPRefillPS:      1.0,
 	}
 }
 

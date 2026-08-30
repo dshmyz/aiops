@@ -75,10 +75,10 @@ func TestLLMDiagnoser_EmptyPlanFallback(t *testing.T) {
 	d := alert.NewLLMDiagnoser(chat, nil, nil)
 	// fallback 为 nil，应该静默返回
 	d.Diagnose(context.Background(), alert.Alert{
-		ID:       "alert-empty",
-		Title:    "test",
-		Status:   alert.StatusFiring,
-		FiredAt:  time.Now(),
+		ID:      "alert-empty",
+		Title:   "test",
+		Status:  alert.StatusFiring,
+		FiredAt: time.Now(),
 	})
 
 	if chat.callIdx != 1 {
@@ -116,11 +116,11 @@ func TestLLMDiagnoser_PlanThenReportFlow(t *testing.T) {
 	d := alert.NewLLMDiagnoser(chat, nil, nil)
 
 	a := alert.Alert{
-		ID:          "alert-full",
-		Title:       "Kafka consumer lag",
-		Severity:    alert.SeverityCritical,
-		Status:      alert.StatusFiring,
-		FiredAt:     time.Now(),
+		ID:       "alert-full",
+		Title:    "Kafka consumer lag",
+		Severity: alert.SeverityCritical,
+		Status:   alert.StatusFiring,
+		FiredAt:  time.Now(),
 	}
 
 	d.Diagnose(context.Background(), a)

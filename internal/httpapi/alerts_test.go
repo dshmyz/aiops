@@ -219,10 +219,10 @@ func postAlertmanager(router http.Handler, body []byte, signature string) *httpt
 
 func validAlertmanagerBody() []byte {
 	payload := map[string]any{
-		"version":   "4",
-		"groupKey":  "{}/{namespace=prod}:{alertname=HighCPU}",
-		"receiver":  "webhook",
-		"status":    "firing",
+		"version":  "4",
+		"groupKey": "{}/{namespace=prod}:{alertname=HighCPU}",
+		"receiver": "webhook",
+		"status":   "firing",
 		"alerts": []map[string]any{
 			{
 				"status":      "firing",

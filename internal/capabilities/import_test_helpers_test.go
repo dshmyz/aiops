@@ -27,9 +27,8 @@ func ensureImporterTestDomains(t *testing.T) {
 			continue
 		}
 		err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
-			Tool: tools.Tool{Name: name, Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
-			InputSchema: map[string]tools.DynamicInputField{
-			},
+			Tool:        tools.Tool{Name: name, Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
+			InputSchema: map[string]tools.DynamicInputField{},
 		}})
 		if err != nil && !strings.Contains(err.Error(), "already registered") {
 			t.Fatalf("register importer test domain %q: %v", d.domain, err)

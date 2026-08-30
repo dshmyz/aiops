@@ -83,7 +83,7 @@ ai: {description: 读取 MinIO 桶容量}
 	var listResult struct {
 		Result struct {
 			Tools []struct {
-				Name string `json:"name"`
+				Name        string `json:"name"`
 				Description string `json:"description"`
 			} `json:"tools"`
 		} `json:"result"`
@@ -102,10 +102,16 @@ ai: {description: 读取 MinIO 桶容量}
 	fmt.Printf("tools/call raw: %s\n", string(resp))
 	var callResult struct {
 		Result struct {
-			Content []struct{ Type string `json:"type"`; Text string `json:"text"` } `json:"content"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
 			IsError bool `json:"isError"`
 		} `json:"result"`
-		Error *struct{ Code int `json:"code"`; Message string `json:"message"` } `json:"error"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	if err := json.Unmarshal(resp, &callResult); err != nil {
 		t.Fatalf("unmarshal tools/call: %v", err)

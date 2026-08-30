@@ -53,10 +53,10 @@ func TestNewEinoPlannerWithIntent(t *testing.T) {
 // 未独立配置时 intentChat 为 nil（复用主模型）。
 func TestNewPlannerFromEnvWiresIntentChat(t *testing.T) {
 	base := map[string]string{
-		envAssistantProvider:  "eino-openai",
-		envOpenAIModel:        "gpt-4o",
-		envOpenAIAPIKey:       "k-main",
-		envOpenAIBaseURL:      "https://api.example.com/v1",
+		envAssistantProvider: "eino-openai",
+		envOpenAIModel:       "gpt-4o",
+		envOpenAIAPIKey:      "k-main",
+		envOpenAIBaseURL:     "https://api.example.com/v1",
 	}
 
 	// 未配置独立意图模型 → intentChat 为 nil。

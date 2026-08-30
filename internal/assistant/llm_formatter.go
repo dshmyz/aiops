@@ -159,7 +159,7 @@ func extractBetween(content, startMarker, endMarker string) (string, bool) {
 //
 // 每次基于完整累积文本重新定位标记，天然免疫分隔符被 chunk 切分的边界问题。
 // markerSeen 表示累积文本中已出现过 [[SUMMARY_START]]：出现前按纯文本模式转发
-//（LLM 输出散文时整个输出就是最终答复），出现后按分隔符模式只转发 SUMMARY 区间。
+// （LLM 输出散文时整个输出就是最终答复），出现后按分隔符模式只转发 SUMMARY 区间。
 func forwardSummaryDelta(accumulated string, forwarded int, onDelta func(string), markerSeen bool) int {
 	if !markerSeen {
 		// 纯文本模式：未出现分隔符标记，整个输出即最终答复。尾部可能是不完整标记
@@ -251,7 +251,7 @@ func (f *LLMFormatter) Format(ctx context.Context, req FormatRequest) (FormatRes
 // 把 chat.Stream 产出、落在 SUMMARY 区间的 token 实时转发给 onDelta，让前端
 // 能增量渲染最终答案；流结束后解析 BLOCKS 区间得到结构化 block。
 // 任何失败都返回 error，由 ChainedFormatter 回退到 CodeFallbackFormatter
-//（无 delta，最终 response 事件仍权威覆盖前端文本）。
+// （无 delta，最终 response 事件仍权威覆盖前端文本）。
 func (f *LLMFormatter) FormatStream(ctx context.Context, req FormatRequest, onDelta func(string)) (FormatResult, error) {
 	if f == nil || f.chat == nil {
 		return FormatResult{}, errors.New("LLM formatter requires a chat model")

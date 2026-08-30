@@ -33,17 +33,17 @@ func (s *Service) genericDiagnostic(v validatedRequest, request Request) (Packag
 
 	observationID := newID("obs")
 	observation := Observation{
-		ID:          observationID,
-		ResourceID:  resourceID,
-		Kind:        "generic." + runbook,
-		Severity:    SeverityInfo,
-		Summary:     fmt.Sprintf("%s 域未接入精确诊断能力，返回通用检查框架（%d 个检查点，非实测数据）", domain, len(checkpoints)),
+		ID:         observationID,
+		ResourceID: resourceID,
+		Kind:       "generic." + runbook,
+		Severity:   SeverityInfo,
+		Summary:    fmt.Sprintf("%s 域未接入精确诊断能力，返回通用检查框架（%d 个检查点，非实测数据）", domain, len(checkpoints)),
 		Data: map[string]any{
-			"framework":  true,
-			"domain":     domain,
-			"runbook":    runbook,
+			"framework":   true,
+			"domain":      domain,
+			"runbook":     runbook,
 			"checkpoints": checkpoints,
-			"guidance":   "发布该域能力（QuickPublish）后可获得真实指标诊断",
+			"guidance":    "发布该域能力（QuickPublish）后可获得真实指标诊断",
 		},
 		CollectedAt: now,
 	}

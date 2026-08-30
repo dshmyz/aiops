@@ -31,9 +31,9 @@ func TestHTTPProbeToolInternalProbe(t *testing.T) {
 
 func TestLogPrefix(t *testing.T) {
 	tests := []struct {
-		name   string
-		ctx    context.Context
-		want   string
+		name string
+		ctx  context.Context
+		want string
 	}{
 		{
 			name: "no identity and no span",

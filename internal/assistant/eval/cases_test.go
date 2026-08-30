@@ -15,7 +15,7 @@ import (
 
 type testLogger struct{ t *testing.T }
 
-func (l testLogger) Helper()               { l.t.Helper() }
+func (l testLogger) Helper()                 { l.t.Helper() }
 func (l testLogger) Logf(f string, a ...any) { l.t.Logf(f, a...) }
 
 // --- 1. 工具连续报错后换思路 ----------------------------------------------

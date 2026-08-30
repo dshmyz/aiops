@@ -207,10 +207,10 @@ func (s *KnowledgeStore) AnalyzeFeedback(ctx context.Context) (map[string]any, e
 	}
 
 	return map[string]any{
-		"positive_count": posCount,
-		"negative_count": negCount,
-		"total":          posCount + negCount,
-		"approval_rate":  float64(posCount) / float64(max(posCount+negCount, 1)),
+		"positive_count":     posCount,
+		"negative_count":     negCount,
+		"total":              posCount + negCount,
+		"approval_rate":      float64(posCount) / float64(max(posCount+negCount, 1)),
 		"recent_corrections": corrections,
 	}, nil
 }
@@ -285,12 +285,12 @@ func (s *KnowledgeStore) Search(ctx context.Context, query string, limit int) ([
 			continue
 		}
 		results = append(results, map[string]any{
-			"title":       title,
-			"domain":      domain,
-			"tools":       toolsJSON,
-			"findings":    findings,
+			"title":           title,
+			"domain":          domain,
+			"tools":           toolsJSON,
+			"findings":        findings,
 			"recommendations": recs,
-			"created_at":  createdAt,
+			"created_at":      createdAt,
 		})
 	}
 	return results, nil
@@ -355,9 +355,9 @@ func (s *KnowledgeStore) SaveFromToolCallsWithReasoning(ctx context.Context, ale
 
 // ConversationSummary 结构化对话摘要
 type ConversationSummary struct {
-	Intent   string   `json:"intent"`   // 用户意图
-	Tools    []string `json:"tools"`    // 调用的工具
-	Outcome  string   `json:"outcome"`  // 结果（success/error）
+	Intent   string   `json:"intent"`    // 用户意图
+	Tools    []string `json:"tools"`     // 调用的工具
+	Outcome  string   `json:"outcome"`   // 结果（success/error）
 	KeyFacts []string `json:"key_facts"` // 关键发现
 }
 

@@ -12,9 +12,9 @@ import (
 // 诊断意图两条分支都要），供 agent loop 在首个执行意图时上调 exec 预算。
 func TestParseIntentCarriesSuggestedSteps(t *testing.T) {
 	cases := []struct {
-		name    string
-		json    string
-		want    int
+		name     string
+		json     string
+		want     int
 		wantDiag bool
 	}{
 		{
@@ -23,9 +23,9 @@ func TestParseIntentCarriesSuggestedSteps(t *testing.T) {
 			want: 7,
 		},
 		{
-			name: "diagnostic intent with suggested_steps",
-			json: `{"tool_name":null,"input":null,"diagnostic":{"domain":"kafka","runbook":"health"},"confidence":0.9,"suggested_steps":5}`,
-			want:    5,
+			name:     "diagnostic intent with suggested_steps",
+			json:     `{"tool_name":null,"input":null,"diagnostic":{"domain":"kafka","runbook":"health"},"confidence":0.9,"suggested_steps":5}`,
+			want:     5,
 			wantDiag: true,
 		},
 		{

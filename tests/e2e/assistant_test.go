@@ -121,10 +121,10 @@ func TestAssistantFormatterProducesBlocks(t *testing.T) {
 		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
 	}
 	var body struct {
-		Type    string                   `json:"type"`
-		Tool    string                   `json:"tool"`
-		Summary string                   `json:"summary"`
-		Blocks  []assistant.Block        `json:"blocks"`
+		Type    string            `json:"type"`
+		Tool    string            `json:"tool"`
+		Summary string            `json:"summary"`
+		Blocks  []assistant.Block `json:"blocks"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -233,9 +233,9 @@ func ensureMiddlewareTools(t *testing.T) {
 	// policy-level reset elsewhere cannot leave the middleware tools unroutable.
 	policy.RegisterDynamicRolePermissions(map[string][]string{
 		"glusterfs.volume.health.read": {"viewer", "operator", "admin"},
-		"minio.bucket.health.read":   {"viewer", "operator", "admin"},
-		"kafka.consumer_lag.read":    {"viewer", "operator", "admin"},
-		"topic.retention.set":       {"operator", "admin"},
+		"minio.bucket.health.read":     {"viewer", "operator", "admin"},
+		"kafka.consumer_lag.read":      {"viewer", "operator", "admin"},
+		"topic.retention.set":          {"operator", "admin"},
 	})
 }
 
@@ -244,19 +244,19 @@ func e2eMiddlewareDefinitions() []tools.DynamicToolDefinition {
 		{
 			Tool: tools.Tool{Name: "glusterfs.volume.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "glusterfs", ResourceType: "volume"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "minio.bucket.health.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
 			Tool: tools.Tool{Name: "kafka.consumer_lag.read", Operation: tools.Read, Risk: tools.Low, Domain: "kafka", ResourceType: "consumer_group"},
 			InputSchema: map[string]tools.DynamicInputField{
-				"name":        {Type: "string", Required: true},
+				"name": {Type: "string", Required: true},
 			},
 		},
 		{
@@ -487,10 +487,10 @@ func TestEinoSSEStreamEndToEnd(t *testing.T) {
 
 	// Parse SSE frames from the response body.
 	var (
-		deltaCount    int
-		hasResponse   bool
-		hasDone       bool
-		responseBody  string
+		deltaCount   int
+		hasResponse  bool
+		hasDone      bool
+		responseBody string
 	)
 	scanner := bufio.NewScanner(res.Body)
 	for scanner.Scan() {
@@ -530,8 +530,8 @@ func TestEinoSSEStreamEndToEnd(t *testing.T) {
 	}
 	// Verify the response payload contains the expected answer.
 	var resp struct {
-		Type string         `json:"type"`
-		Tool string         `json:"tool"`
+		Type   string         `json:"type"`
+		Tool   string         `json:"tool"`
 		Answer map[string]any `json:"answer"`
 	}
 	if err := json.Unmarshal([]byte(responseBody), &resp); err != nil {

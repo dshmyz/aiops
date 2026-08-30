@@ -47,7 +47,9 @@ func (f *fakeMarketplaceService) GetVersion(_ context.Context, _, versionID stri
 	return &marketplace.Version{ID: versionID, Version: "1.0.0", YAMLContent: "schema_version: 1\n", YAMLHash: "abc"}, nil
 }
 
-func (f *fakeMarketplaceService) Rate(_ context.Context, _, _ string, _ int, _, _ *string) error { return nil }
+func (f *fakeMarketplaceService) Rate(_ context.Context, _, _ string, _ int, _, _ *string) error {
+	return nil
+}
 
 func (f *fakeMarketplaceService) ListRatings(_ context.Context, _ string, _, _ int) ([]marketplace.Rating, int, error) {
 	return nil, 0, nil

@@ -91,7 +91,12 @@ func TestRecordRetriesOnTransientStoreError(t *testing.T) {
 	transient := errors.New("transient db error")
 	flaky := &flakyAuditStore{
 		ActionPlanStore: repo,
-		failFn:          func(n int) error { if n == 1 { return transient }; return nil },
+		failFn: func(n int) error {
+			if n == 1 {
+				return transient
+			}
+			return nil
+		},
 	}
 	svc := audit.NewService(flaky).WithFallback(audit.FallbackConfig{
 		Dir:            dir,

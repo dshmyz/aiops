@@ -15,8 +15,8 @@ const casBaseURL = "http://localhost:8443"
 
 type ServiceResponse struct {
 	XMLName               xml.Name               `xml:"serviceResponse"`
-	AuthenticationSuccess *AuthenticationSuccess  `xml:"authenticationSuccess"`
-	AuthenticationFailure *AuthenticationFailure  `xml:"authenticationFailure"`
+	AuthenticationSuccess *AuthenticationSuccess `xml:"authenticationSuccess"`
+	AuthenticationFailure *AuthenticationFailure `xml:"authenticationFailure"`
 }
 
 type AuthenticationSuccess struct {

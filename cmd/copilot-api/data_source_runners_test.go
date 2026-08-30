@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/alert"
-	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/assistant"
+	"github.com/gracegaoya/ai-operations-copilot/internal/audit"
 	"github.com/gracegaoya/ai-operations-copilot/internal/capabilities"
 	"github.com/gracegaoya/ai-operations-copilot/internal/identity"
 	"github.com/gracegaoya/ai-operations-copilot/internal/mcp"

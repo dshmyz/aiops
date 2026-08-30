@@ -287,7 +287,6 @@ func EnsurePackageSize(pkg *Package) error {
 	return fmt.Errorf("诊断包超过 %d 字节限制（截断全部观察数据后仍超限）", maxDiagnosticPackageBytesReservedForAssistantResponse)
 }
 
-
 func sanitizeObservationData(result map[string]any) map[string]any {
 	encoded, err := json.Marshal(result)
 	if err == nil && len(encoded) <= maxDiagnosticDataBytes {

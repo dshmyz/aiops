@@ -12,10 +12,8 @@ import (
 // 不再硬编码，因此从 OpenAPI 推断 minio 域前需先注册该域。
 func TestMain(m *testing.M) {
 	if err := tools.RegisterDynamicTools([]tools.DynamicToolDefinition{{
-		Tool: tools.Tool{Name: "minio.importer.test.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
-		InputSchema: map[string]tools.DynamicInputField{
-
-		},
+		Tool:        tools.Tool{Name: "minio.importer.test.read", Operation: tools.Read, Risk: tools.Low, Domain: "minio", ResourceType: "bucket"},
+		InputSchema: map[string]tools.DynamicInputField{},
 	}}); err != nil {
 		panic("register importer test domain: " + err.Error())
 	}

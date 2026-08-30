@@ -36,7 +36,7 @@ func testDomainDefs() []tools.DynamicToolDefinition {
 		{"glusterfs", "volume"},
 	} {
 		defs = append(defs, tools.DynamicToolDefinition{
-			Tool: tools.Tool{Name: d.domain + ".test.read", Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
+			Tool:        tools.Tool{Name: d.domain + ".test.read", Operation: tools.Read, Risk: tools.Low, Domain: d.domain, ResourceType: d.kind},
 			InputSchema: map[string]tools.DynamicInputField{},
 		})
 	}
@@ -71,9 +71,9 @@ func (f *fakeRunner) Run(_ context.Context, _ identity.CurrentUser, request diag
 
 func samplePackage(domain string) diagnostics.Package {
 	return diagnostics.Package{
-		ID:          "diag-" + domain,
-		Domains:     []string{domain},
-		Resources:   []diagnostics.ResourceRef{{Domain: domain, Type: "resource", ID: domain + ":resource:" + domain, Name: domain}},
+		ID:        "diag-" + domain,
+		Domains:   []string{domain},
+		Resources: []diagnostics.ResourceRef{{Domain: domain, Type: "resource", ID: domain + ":resource:" + domain, Name: domain}},
 		Observations: []diagnostics.Observation{
 			{ID: "obs-" + domain, ResourceID: domain + ":resource:" + domain, Kind: domain + ".read", Severity: diagnostics.SeverityOK, Summary: domain + " healthy"},
 		},

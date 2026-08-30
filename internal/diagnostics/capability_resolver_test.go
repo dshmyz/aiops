@@ -125,4 +125,3 @@ func TestNewMiddlewareDomainDiagnosableViaYamlOnly(t *testing.T) {
 		t.Fatalf("resource type = %q, want cluster (sourced from capability, not switch)", pkg.Resources[0].Type)
 	}
 }
-

@@ -53,11 +53,11 @@ type LabelMatch struct {
 // 可选的 OR 组：非空时任一子条件匹配即整体匹配。向后兼容：原有三个字符串字段保留，
 // 空字段不参与匹配；新增字段为空时行为与旧版完全一致。
 type AlertMatch struct {
-	AlertName string        `json:"alertname,omitempty"`
-	Severity  string        `json:"severity,omitempty"`
-	Domain    string        `json:"domain,omitempty"`
-	Labels    []LabelMatch  `json:"labels,omitempty"`
-	AnyOf     []AlertMatch  `json:"any_of,omitempty"`
+	AlertName string       `json:"alertname,omitempty"`
+	Severity  string       `json:"severity,omitempty"`
+	Domain    string       `json:"domain,omitempty"`
+	Labels    []LabelMatch `json:"labels,omitempty"`
+	AnyOf     []AlertMatch `json:"any_of,omitempty"`
 	// IgnoreMissingLabels 控制标签缺失时的语义。false（默认）保持严格：
 	// 任一标签条件缺失即整体不匹配；true 放宽：缺失的标签跳过，不因缺失
 	// 而整条规则失效（存在的标签仍按 operator 匹配）。线上告警格式不标准、

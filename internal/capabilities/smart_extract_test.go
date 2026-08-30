@@ -195,8 +195,8 @@ func TestSmartExtractSampleFiltersNestedSensitive(t *testing.T) {
 	raw := map[string]any{
 		"topics": []any{
 			map[string]any{
-				"name": "orders",
-				"lag":  5,
+				"name":  "orders",
+				"lag":   5,
 				"creds": map[string]any{"secret_token": "x", "zone": "a"},
 			},
 		},

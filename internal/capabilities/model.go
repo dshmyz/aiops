@@ -39,9 +39,9 @@ type Capability struct {
 	// DryRun 声明写操作的 dry-run 预览（摘要/命令/风险警告模板）。它把"这个
 	// 操作具体会做什么、有什么风险"作为数据写在能力 YAML 里，Go 侧的 dry-run
 	// handler 只按模板渲染，不再为每个组件写死专属 handler。
-	DryRun      DryRunSpec            `yaml:"dry_run,omitempty" json:"dry_run,omitempty"`
-	Verify      *VerifySpec           `yaml:"verify,omitempty" json:"verify,omitempty"`
-	DependsOn   []DependencySpec      `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+	DryRun    DryRunSpec       `yaml:"dry_run,omitempty" json:"dry_run,omitempty"`
+	Verify    *VerifySpec      `yaml:"verify,omitempty" json:"verify,omitempty"`
+	DependsOn []DependencySpec `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
 }
 
 // DryRunSpec 是写操作 dry-run 预览的模板。所有字段的 {field} 占位符在执行
@@ -87,11 +87,11 @@ type VerifySpec struct {
 }
 
 type BackendSpec struct {
-	Adapter   string           `yaml:"adapter" json:"adapter"`
-	Method    string           `yaml:"method" json:"method"`
-	Path      string           `yaml:"path" json:"path"`
-	TimeoutMS int              `yaml:"timeout_ms" json:"timeout_ms"`
-	BaseURL   string           `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+	Adapter   string            `yaml:"adapter" json:"adapter"`
+	Method    string            `yaml:"method" json:"method"`
+	Path      string            `yaml:"path" json:"path"`
+	TimeoutMS int               `yaml:"timeout_ms" json:"timeout_ms"`
+	BaseURL   string            `yaml:"base_url,omitempty" json:"base_url,omitempty"`
 	Auth      BackendAuthConfig `yaml:"auth_config,omitempty" json:"auth_config,omitempty"`
 }
 

@@ -37,9 +37,9 @@ func TestValidatePackageAcceptsStructuredDiagnostic(t *testing.T) {
 func TestValidatePackageRejectsUnknownEvidenceReference(t *testing.T) {
 	t.Parallel()
 	pkg := diagnostics.Package{
-		ID:      "diag-1",
-		Domains: []string{"glusterfs"},
-		Resources:   []diagnostics.ResourceRef{{Domain: "glusterfs", Type: "volume", ID: "vol-prod-data", Name: "prod-data"}},
+		ID:        "diag-1",
+		Domains:   []string{"glusterfs"},
+		Resources: []diagnostics.ResourceRef{{Domain: "glusterfs", Type: "volume", ID: "vol-prod-data", Name: "prod-data"}},
 		Observations: []diagnostics.Observation{{
 			ID: "obs-1", ResourceID: "vol-prod-data", Kind: "glusterfs.volume.health", Severity: diagnostics.SeverityOK, Summary: "healthy", CollectedAt: time.Now().UTC(),
 		}},

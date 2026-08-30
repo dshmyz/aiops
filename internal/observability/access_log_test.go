@@ -199,7 +199,7 @@ func TestAccessLogJSONFields(t *testing.T) {
 	expected := map[string]interface{}{
 		"method":      "POST",
 		"path":        "/v1/action-plans",
-		"status":     float64(http.StatusCreated),
+		"status":      float64(http.StatusCreated),
 		"duration_ms": raw["duration_ms"], // just check presence
 		"request_id":  "trace-xyz",
 		"remote_addr": "10.0.0.1:9999",

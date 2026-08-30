@@ -307,7 +307,7 @@ func newWriteGateTestService(t *testing.T) (*Service, store.ActionPlanStore) {
 		},
 		InputSchema: map[string]tools.DynamicInputField{
 
-			"name":        {Type: "string", Required: true},
+			"name": {Type: "string", Required: true},
 		},
 	}})
 	if err != nil {
