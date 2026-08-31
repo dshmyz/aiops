@@ -19,6 +19,7 @@ const AuditView = defineAsyncComponent(() => import('./views/AuditView.vue'));
 const ExecutionsView = defineAsyncComponent(() => import('./views/ExecutionsView.vue'));
 const InspectionReportsView = defineAsyncComponent(() => import('./views/InspectionReportsView.vue'));
 const IncidentView = defineAsyncComponent(() => import('./views/IncidentView.vue'));
+const IncidentsView = defineAsyncComponent(() => import('./views/IncidentsView.vue'));
 const PlansView = defineAsyncComponent(() => import('./views/PlansView.vue'));
 const ScheduledTasksView = defineAsyncComponent(() => import('./views/ScheduledTasksView.vue'));
 const McpServersView = defineAsyncComponent(() => import('./views/McpServersView.vue'));
@@ -53,7 +54,7 @@ import type {
   ExecutionResult,
 } from './types';
 
-type ActiveView = 'assistant' | 'management' | 'dashboard' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'marketplace' | 'prompts' | 'knowledge' | 'skills' | 'feedback' | 'mcp-servers' | 'docs' | 'alert-actions';
+type ActiveView = 'assistant' | 'management' | 'dashboard' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'incidents' | 'marketplace' | 'prompts' | 'knowledge' | 'skills' | 'feedback' | 'mcp-servers' | 'docs' | 'alert-actions';
 
 const activeView = ref<ActiveView>('assistant');
 
@@ -71,7 +72,7 @@ async function loadCurrentUser() {
 }
 
 // 视图顺序与快捷键映射（Cmd/Ctrl+1..9），顺序与侧栏视觉分组一致
-const viewOrder: ActiveView[] = ['assistant', 'management', 'dashboard', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'alert-actions', 'knowledge', 'skills', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'marketplace', 'docs'];
+const viewOrder: ActiveView[] = ['assistant', 'management', 'dashboard', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'alert-actions', 'knowledge', 'skills', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'incidents', 'marketplace', 'docs'];
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   // Cmd/Ctrl + 数字 切换视图
@@ -908,6 +909,17 @@ onUnmounted(() => {
           <span v-if="!sidebarCollapsed">告警全景</span>
         </button>
         <button
+          data-test="nav-incidents"
+          data-view="incidents"
+          class="nav-item"
+          :class="{ active: activeView === 'incidents' }"
+          :title="'告警关联：同资源重复告警归并为 incident'"
+          @click="activeView = 'incidents'"
+        >
+          <NavIcon name="incident" />
+          <span v-if="!sidebarCollapsed">告警关联</span>
+        </button>
+        <button
           data-test="nav-marketplace"
           data-view="marketplace"
           class="nav-item"
@@ -1291,6 +1303,8 @@ onUnmounted(() => {
       <ExecutionsView v-if="activeView === 'executions'" @jump-to-audit="jumpToAuditFromExecution" />
 
       <IncidentView v-if="activeView === 'incident'" @jump-to-audit="jumpToAuditFromIncident" />
+
+      <IncidentsView v-if="activeView === 'incidents'" />
 
       <InspectionReportsView v-if="activeView === 'inspection-reports'" />
 

@@ -1044,6 +1044,39 @@ export interface IncidentViewResult {
 }
 
 // ---------------------------------------------------------------------------
+// 告警关联 incident（AlertIncidents）
+// ---------------------------------------------------------------------------
+
+// 对 GET /v1/incidents 及 /{id} 的字面映射。任意登录用户可读。
+
+export interface AlertIncident {
+  id: string;
+  status: 'firing' | 'resolved';
+  domain?: string;
+  resource_type?: string;
+  resource_name?: string;
+  severity: string;
+  title: string;
+  alert_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  updated_at: string;
+}
+
+export interface IncidentMemberAlert {
+  id: string;
+  external_id: string;
+  source: string;
+  title: string;
+  description?: string;
+  severity: string;
+  status: string;
+  domain?: string;
+  fired_at?: string;
+  resolved_at?: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // 告警→动作编排（AlertActions）
 // ---------------------------------------------------------------------------
 

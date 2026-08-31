@@ -55,6 +55,8 @@ import type {
   AdminTool,
   AlertAction,
   AlertActionRunOverview,
+  AlertIncident,
+  IncidentMemberAlert,
 } from './types';
 import { normalizeCapability } from './capability';
 import { ref } from 'vue';
@@ -533,6 +535,28 @@ export async function listInspectionReports(limit = 50): Promise<InspectionRepor
 
 export async function getInspectionReport(id: string): Promise<InspectionReport> {
   return request<InspectionReport>(`/v1/inspection-reports/${encodeURIComponent(id)}`);
+}
+
+// ===== Alert Incidents 告警关联 =====
+// 对应 GET /v1/incidents（列表，status/domain/limit 筛选，按 last_seen_at 降序）
+// 与 GET /v1/incidents/{id}（详情，含成员告警全文）。
+
+export async function listIncidents(
+  filter: { status?: string; domain?: string; limit?: number } = {},
+): Promise<{ incidents: AlertIncident[] }> {
+  const params = new URLSearchParams();
+  if (filter.status) params.set('status', filter.status);
+  if (filter.domain) params.set('domain', filter.domain);
+  if (filter.limit && filter.limit > 0) params.set('limit', String(filter.limit));
+  return request<{ incidents: AlertIncident[] }>(`/v1/incidents?${params.toString()}`);
+}
+
+export async function getIncident(
+  id: string,
+): Promise<{ incident: AlertIncident; alerts: IncidentMemberAlert[] }> {
+  return request<{ incident: AlertIncident; alerts: IncidentMemberAlert[] }>(
+    `/v1/incidents/${encodeURIComponent(id)}`,
+  );
 }
 
 // ===== Capability Marketplace 能力市场 =====
