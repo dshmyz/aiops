@@ -122,6 +122,53 @@ func TestSQLIncidentStoreLifecycle(t *testing.T) {
 	}
 }
 
+// TestSQLAlertStoreGetAlertsByIDs 批量取告警：保持传入顺序、缺失 ID 跳过。
+func TestSQLAlertStoreGetAlertsByIDs(t *testing.T) {
+	t.Parallel()
+	db := testSQLite(t)
+	if err := ApplySQLiteMigrations(db); err != nil {
+		t.Fatalf("apply sqlite migrations: %v", err)
+	}
+	ctx := context.Background()
+	s := NewSQLAlertStore(db)
+
+	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	idA, idB := "", ""
+	for _, ext := range []string{"batch-a", "batch-b"} {
+		saved, _, err := s.Upsert(ctx, Alert{
+			ExternalID: ext, Source: "grafana", Title: ext,
+			Severity: "warning", Status: "firing", Domain: "kafka",
+			ReceivedAt: now, UpdatedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("upsert %s: %v", ext, err)
+		}
+		if ext == "batch-a" {
+			idA = saved.ID
+		} else {
+			idB = saved.ID
+		}
+	}
+
+	// 顺序保持 + 缺失 ID 静默跳过
+	got, err := s.GetAlertsByIDs(ctx, []string{idB, "missing-id", idA})
+	if err != nil {
+		t.Fatalf("GetAlertsByIDs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d alerts, want 2 (missing skipped)", len(got))
+	}
+	if got[0].ExternalID != "batch-b" || got[1].ExternalID != "batch-a" {
+		t.Errorf("order = [%s, %s], want [batch-b, batch-a] (input order)", got[0].ExternalID, got[1].ExternalID)
+	}
+
+	// 空入参
+	empty, err := s.GetAlertsByIDs(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty input: %v (%d)", err, len(empty))
+	}
+}
+
 // TestSQLiteMigrationsCreateAlertIncidents 锁定 024 迁移与 SQLite bootstrap。
 func TestSQLiteMigrationsCreateAlertIncidents(t *testing.T) {
 	t.Parallel()

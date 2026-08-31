@@ -83,7 +83,9 @@ func (s *SQLIncidentStore) UpsertIncident(ctx context.Context, inc AlertIncident
 	if err != nil {
 		return AlertIncident{}, fmt.Errorf("upsert incident: %w", err)
 	}
-	return s.GetIncident(ctx, inc.ID)
+	// 所有列值均来自 Go 侧归一化后的入参（默认值已在上方补齐），DB 不做
+	// 额外变换，直接返回入参，省去热路径上的一次读回往返。
+	return inc, nil
 }
 
 func (s *SQLIncidentStore) GetIncident(ctx context.Context, id string) (AlertIncident, error) {

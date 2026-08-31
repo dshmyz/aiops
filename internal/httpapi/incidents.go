@@ -19,21 +19,17 @@ type IncidentQueryService interface {
 	ListIncidents(ctx context.Context, f store.IncidentFilter) ([]store.AlertIncident, error)
 	GetIncident(ctx context.Context, id string) (store.AlertIncident, error)
 	MemberAlertIDs(ctx context.Context, incidentID string) ([]string, error)
-	GetAlert(ctx context.Context, id string) (store.Alert, error)
+	GetAlertsByIDs(ctx context.Context, ids []string) ([]store.Alert, error)
 }
 
 // NewIncidentQueryService 用 incident store 与告警 store 组装查询服务。
-func NewIncidentQueryService(incidents store.IncidentStore, alerts interface {
-	Get(ctx context.Context, id string) (store.Alert, error)
-}) IncidentQueryService {
+func NewIncidentQueryService(incidents store.IncidentStore, alerts store.AlertStore) IncidentQueryService {
 	return &incidentQueryService{incidents: incidents, alerts: alerts}
 }
 
 type incidentQueryService struct {
 	incidents store.IncidentStore
-	alerts    interface {
-		Get(ctx context.Context, id string) (store.Alert, error)
-	}
+	alerts    store.AlertStore
 }
 
 func (s *incidentQueryService) ListIncidents(ctx context.Context, f store.IncidentFilter) ([]store.AlertIncident, error) {
@@ -48,8 +44,8 @@ func (s *incidentQueryService) MemberAlertIDs(ctx context.Context, incidentID st
 	return s.incidents.MemberAlertIDs(ctx, incidentID)
 }
 
-func (s *incidentQueryService) GetAlert(ctx context.Context, id string) (store.Alert, error) {
-	return s.alerts.Get(ctx, id)
+func (s *incidentQueryService) GetAlertsByIDs(ctx context.Context, ids []string) ([]store.Alert, error) {
+	return s.alerts.GetAlertsByIDs(ctx, ids)
 }
 
 // WithIncidentQuery 注入 incident 查询服务。未注入时 /v1/incidents 返回 503。
@@ -120,13 +116,13 @@ func (r *Router) serveGetIncident(writer http.ResponseWriter, request *http.Requ
 		writeError(writer, http.StatusBadGateway, err.Error())
 		return
 	}
-	alerts := make([]store.Alert, 0, len(memberIDs))
-	for _, memberID := range memberIDs {
-		alert, err := r.incidentQuery.GetAlert(request.Context(), memberID)
-		if err != nil {
-			continue // 成员告警可能已被清理；详情不因单条缺失失败
-		}
-		alerts = append(alerts, alert)
+	alerts, err := r.incidentQuery.GetAlertsByIDs(request.Context(), memberIDs)
+	if err != nil {
+		writeError(writer, http.StatusBadGateway, err.Error())
+		return
+	}
+	if alerts == nil {
+		alerts = []store.Alert{}
 	}
 	writeCappedJSON(writer, map[string]any{"incident": incident, "alerts": alerts})
 }

@@ -43,6 +43,7 @@ type IncidentKey struct {
 // IncidentStore 持久化 incident 聚合与成员映射。
 type IncidentStore interface {
 	// UpsertIncident 按 ID 全量写入（新建与成员归并后的计数/级别更新共用）。
+	// 返回归一化后的入参（时间/计数/状态默认值已补齐），不回读 DB。
 	UpsertIncident(ctx context.Context, inc AlertIncident) (AlertIncident, error)
 	GetIncident(ctx context.Context, id string) (AlertIncident, error)
 	ListIncidents(ctx context.Context, f IncidentFilter) ([]AlertIncident, error)

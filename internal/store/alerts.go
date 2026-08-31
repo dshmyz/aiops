@@ -50,6 +50,9 @@ const maxAlertLimit = 200
 type AlertStore interface {
 	Upsert(ctx context.Context, a Alert) (Alert, bool, error)
 	Get(ctx context.Context, id string) (Alert, error)
+	// GetAlertsByIDs 批量按 ID 取告警；缺失的 ID 静默跳过（不报错）。
+	// incident 详情组装成员用，避免逐条 Get 的 N+1。
+	GetAlertsByIDs(ctx context.Context, ids []string) ([]Alert, error)
 	UpdateDescription(ctx context.Context, id, description string) error
 	Query(ctx context.Context, f AlertFilter) ([]Alert, error)
 	ListActive(ctx context.Context, limit int) ([]Alert, error)
@@ -81,6 +84,19 @@ func (s *MemoryAlertStore) WithClock(clock func() time.Time) *MemoryAlertStore {
 
 func alertKey(source, externalID string) string {
 	return source + ":" + externalID
+}
+
+// GetAlertsByIDs 批量取告警，缺失 ID 跳过，返回顺序与传入一致。
+func (s *MemoryAlertStore) GetAlertsByIDs(_ context.Context, ids []string) ([]Alert, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Alert, 0, len(ids))
+	for _, id := range ids {
+		if a, ok := s.byID[id]; ok {
+			out = append(out, cloneStoreAlert(a))
+		}
+	}
+	return out, nil
 }
 
 // Upsert 幂等写入告警：身份（source+external_id）已存在则更新并返回

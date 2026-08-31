@@ -148,6 +148,58 @@ func (s *SQLAlertStore) Get(ctx context.Context, id string) (Alert, error) {
 	return a, nil
 }
 
+// alertBatchSize 是 GetAlertsByIDs 单次 IN 查询的最大参数数，
+// 避免 ID 过多时生成超长 SQL。
+const alertBatchSize = 200
+
+// GetAlertsByIDs 批量取告警：分块 IN 查询，缺失 ID 跳过，返回顺序与传入一致。
+func (s *SQLAlertStore) GetAlertsByIDs(ctx context.Context, ids []string) ([]Alert, error) {
+	if len(ids) == 0 {
+		return []Alert{}, nil
+	}
+	byID := make(map[string]Alert, len(ids))
+	for start := 0; start < len(ids); start += alertBatchSize {
+		end := start + alertBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		query := `SELECT id, external_id, source, title, description,
+			severity, status, domain, resource_type, resource_name,
+			labels, raw, fired_at, resolved_at, received_at, updated_at
+			FROM copilot_alerts WHERE id IN (` + placeholders + `)`
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			args[i] = id
+		}
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("get alerts by ids: %w", err)
+		}
+		for rows.Next() {
+			a, err := scanAlert(rows)
+			if err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan alert: %w", err)
+			}
+			byID[a.ID] = a
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate alerts: %w", err)
+		}
+		_ = rows.Close()
+	}
+	out := make([]Alert, 0, len(ids))
+	for _, id := range ids {
+		if a, ok := byID[id]; ok {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
 func (s *SQLAlertStore) UpdateDescription(ctx context.Context, id, description string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE copilot_alerts SET description = ?, updated_at = ? WHERE id = ?`,
