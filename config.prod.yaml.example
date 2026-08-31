@@ -145,6 +145,11 @@ COPILOT_KNOWLEDGE_EMBEDDER_MODEL: "text-embedding-3-small"
 # Generate with `openssl rand -hex 32`
 COPILOT_ALERT_WEBHOOK_SECRET: "REPLACE_WITH_WEBHOOK_SECRET"
 
+# Alert correlation window: same-key (domain + resource) alerts merge into one
+# incident within this duration; only the first alert triggers auto-diagnosis.
+# Use a Go duration (30m / 1h), or "off" to disable correlation entirely.
+COPILOT_ALERT_CORRELATION_WINDOW: "30m"
+
 # ============================================================================
 # Notifications
 # ============================================================================
