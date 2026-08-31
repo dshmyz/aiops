@@ -73,6 +73,12 @@ func (s *SQLAlertStore) Upsert(ctx context.Context, a Alert) (Alert, bool, error
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Alert{}, false, fmt.Errorf("probe alert identity: %w", err)
 	}
+	// 冲突路径上 INSERT 的 id 不落库（ON CONFLICT/ON DUPLICATE 只更新其余列），
+	// DB 行保留原始 id。这里回填，否则调用方拿到的是 Normalize 新生成、
+	// 未持久化的幽灵 UUID（incident 成员归并/反查都依赖它）。
+	if existed {
+		a.ID = existingID
+	}
 
 	if s.sqlite {
 		_, err = s.db.ExecContext(ctx, `INSERT INTO copilot_alerts

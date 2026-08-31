@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/store"
@@ -11,6 +12,13 @@ import (
 type IngestResult struct {
 	Alert   Alert
 	Created bool // false 表示幂等 upsert 命中已有告警（update）
+	// Incident 非空表示关联器启用且本条告警已归并进该 incident；
+	// IncidentCreated=true 表示本条告警是新 incident 的首条；
+	// SeverityEscalated=true 表示本条告警把归并 incident 的级别抬高了
+	// （调用方可据此对升级后的告警重新研判）。
+	Incident          *store.AlertIncident
+	IncidentCreated   bool
+	SeverityEscalated bool
 }
 
 // Service 是告警接入的应用层服务。它不知道 HTTP、HMAC 或审计——那些由
@@ -18,11 +26,40 @@ type IngestResult struct {
 type Service struct {
 	store store.AlertStore
 	now   func() time.Time
+	// incidents 非空时启用告警关联降噪：同键告警在时间窗内归并进同一
+	// incident，归并告警不再逐条触发自动研判。
+	incidents         store.IncidentStore
+	correlationWindow time.Duration
+	// correlateMu 串行化 incident 归并：FindOpenIncident→UpsertIncident 是
+	// check-then-act，并发同键告警不加锁会各自新建 firing incident、互相
+	// 丢失 AlertCount 自增。告警接入频率低，单锁开销可忽略。
+	correlateMu sync.Mutex
 }
+
+// DefaultCorrelationWindow 是未显式配置时的关联时间窗。
+const DefaultCorrelationWindow = 30 * time.Minute
 
 // NewService 创建一个告警服务。
 func NewService(st store.AlertStore) *Service {
 	return &Service{store: st, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// CorrelationWindow 返回当前关联时间窗（未启用关联时返回 0）。
+func (s *Service) CorrelationWindow() time.Duration {
+	if s.incidents == nil {
+		return 0
+	}
+	return s.correlationWindow
+}
+
+// WithCorrelation 启用告警关联。store 为 nil 表示禁用；window <=0 用默认窗。
+func (s *Service) WithCorrelation(store_ store.IncidentStore, window time.Duration) *Service {
+	s.incidents = store_
+	if window <= 0 {
+		window = DefaultCorrelationWindow
+	}
+	s.correlationWindow = window
+	return s
 }
 
 // WithClock 注入自定义时钟，用于测试。
@@ -43,7 +80,26 @@ func (s *Service) Ingest(ctx context.Context, p WebhookPayload) (IngestResult, e
 	if err != nil {
 		return IngestResult{}, err
 	}
-	return IngestResult{Alert: fromStoreAlert(saved), Created: created}, nil
+	result := IngestResult{Alert: fromStoreAlert(saved), Created: created}
+	if s.incidents != nil {
+		if saved.Status == string(StatusResolved) {
+			// 恢复告警：不参与归并（会虚增 firing incident 的计数/级别），
+			// 直接走恢复传播，让全部成员恢复时关闭 incident。
+			s.propagateResolve(ctx, saved)
+			return result, nil
+		}
+		// 关联失败 fail-open：归并不了就按未关联处理（研判照常触发），
+		// 不因降噪组件故障阻断告警接入。
+		s.correlateMu.Lock()
+		inc, incidentCreated, escalated, cerr := s.correlate(ctx, saved)
+		s.correlateMu.Unlock()
+		if cerr == nil && inc.ID != "" {
+			result.Incident = &inc
+			result.IncidentCreated = incidentCreated
+			result.SeverityEscalated = escalated
+		}
+	}
+	return result, nil
 }
 
 // UpdateDescription 更新告警的 description 字段（自动研判结果回写）。
@@ -82,6 +138,9 @@ func (s *Service) Resolve(ctx context.Context, externalID, source string) (Alert
 	record, err := s.store.Resolve(ctx, externalID, source)
 	if err != nil {
 		return Alert{}, err
+	}
+	if s.incidents != nil {
+		s.propagateResolve(ctx, record)
 	}
 	return fromStoreAlert(record), nil
 }

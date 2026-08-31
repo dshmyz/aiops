@@ -197,16 +197,29 @@ func (s *alertWebhookService) Ingest(ctx context.Context, p alert.WebhookPayload
 
 	// 异步触发研判（不阻塞 webhook 响应）。优先级：LLM 智能 > 链式 > 单步。
 	a := result.Alert
+	// 关联降噪门控：告警归并进已有 incident 时跳过逐条研判（该 incident 的
+	// 首条告警已研判过；severity 升级时重新研判）。未启用关联（Incident==nil）
+	// 或新建 incident 时照常研判；关联组件故障 fail-open（见 alert.Service.Ingest）。
+	// 三条研判路径（LLM/链式/单步）共用同一门控，链式分支整链抑制。
+	shouldDiagnose := result.Incident == nil || result.IncidentCreated || result.SeverityEscalated
 	if s.llmDiagnoser != nil {
-		go s.llmDiagnoser.Diagnose(context.Background(), a)
+		if shouldDiagnose {
+			go s.llmDiagnoser.Diagnose(context.Background(), a)
+		}
 	} else if s.chainDiagnoser != nil && s.actionMatcher != nil {
-		// 按匹配的规则逐条执行完整序列
-		matched := s.actionMatcher.Match(a)
+		// 按匹配的规则逐条执行完整序列（链内可能含通知/修复动作，
+		// 归并告警整链抑制，避免重复副作用）
+		matched := []alert.AlertAction(nil)
+		if shouldDiagnose {
+			matched = s.actionMatcher.Match(a)
+		}
 		for _, action := range matched {
 			go s.chainDiagnoser.ExecuteChain(context.Background(), a, action)
 		}
 	} else if s.diagnoser != nil {
-		go s.diagnoser.Diagnose(context.Background(), a)
+		if shouldDiagnose {
+			go s.diagnoser.Diagnose(context.Background(), a)
+		}
 	}
 	// 注意：当有 chainDiagnoser 时，plan 由序列的最后一步驱动（CreatePlanForStep），
 	// 不再需要单独的 CreatePlansForAlert 回退。

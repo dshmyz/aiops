@@ -12,7 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "015_capability_marketplace.sql", "016_scheduled_tasks_run_kind.sql", "017_autonomy_daily_limit.sql", "018_capabilities.sql", "019_alert_actions.sql", "020_diagnosis_history.sql", "021_inspection_reports.sql", "022_alert_action_runs.sql", "023_drop_environment_aliases.sql"}
+var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "015_capability_marketplace.sql", "016_scheduled_tasks_run_kind.sql", "017_autonomy_daily_limit.sql", "018_capabilities.sql", "019_alert_actions.sql", "020_diagnosis_history.sql", "021_inspection_reports.sql", "022_alert_action_runs.sql", "023_drop_environment_aliases.sql", "024_alert_incidents.sql"}
 
 const defaultSQLiteDSN = "file:copilot-local.db?cache=shared&_foreign_keys=on&_busy_timeout=15000&_journal_mode=WAL"
 
@@ -433,6 +433,28 @@ var sqliteMigrations = []string{
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS copilot_alerts_identity_idx ON copilot_alerts (source, external_id)`,
+	`CREATE TABLE IF NOT EXISTS copilot_alert_incidents (
+		id TEXT NOT NULL PRIMARY KEY,
+		status TEXT NOT NULL DEFAULT 'firing',
+		domain TEXT NOT NULL DEFAULT '',
+		resource_type TEXT NOT NULL DEFAULT '',
+		resource_name TEXT NOT NULL DEFAULT '',
+		severity TEXT NOT NULL DEFAULT 'info',
+		title TEXT NOT NULL DEFAULT '',
+		alert_count INTEGER NOT NULL DEFAULT 1,
+		first_seen_at DATETIME NOT NULL,
+		last_seen_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE INDEX IF NOT EXISTS copilot_alert_incidents_open_idx ON copilot_alert_incidents (status, domain, last_seen_at)`,
+	`CREATE INDEX IF NOT EXISTS copilot_alert_incidents_key_idx ON copilot_alert_incidents (domain, resource_type, resource_name, last_seen_at)`,
+	`CREATE TABLE IF NOT EXISTS copilot_alert_incident_members (
+		incident_id TEXT NOT NULL,
+		alert_id TEXT NOT NULL,
+		attached_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (incident_id, alert_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS copilot_alert_incident_members_alert_idx ON copilot_alert_incident_members (alert_id)`,
 	`CREATE INDEX IF NOT EXISTS copilot_alerts_status_severity_idx ON copilot_alerts (status, severity)`,
 	`CREATE INDEX IF NOT EXISTS copilot_alerts_updated_at_idx ON copilot_alerts (updated_at)`,
 	`CREATE TABLE IF NOT EXISTS copilot_runbooks (

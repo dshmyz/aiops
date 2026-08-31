@@ -194,6 +194,26 @@ func main() {
 	// 告警数据源接入层（告警准专项）：webhook 接入 + alert.query 查询工具。
 	alertStore := store.NewSQLAlertStore(db)
 	alertSvc := alert.NewService(alertStore)
+	// 关联降噪：同（域+资源）键的告警在时间窗内归并为 incident，只有首条
+	// 触发自动研判。窗口可配（COPILOT_ALERT_CORRELATION_WINDOW，如 "30m"，
+	// 设 "off" 关闭关联回到逐条研判）。incident 查询经 /v1/incidents 暴露。
+	incidentStore := store.NewSQLIncidentStore(db)
+	if window := os.Getenv("COPILOT_ALERT_CORRELATION_WINDOW"); window == "off" {
+		alertSvc = alertSvc.WithCorrelation(nil, 0)
+		logger.Info("alert correlation disabled", zap.String("reason", "COPILOT_ALERT_CORRELATION_WINDOW=off"))
+	} else {
+		var windowDuration time.Duration
+		if window != "" {
+			parsed, perr := time.ParseDuration(window)
+			if perr != nil || parsed <= 0 {
+				logger.Warn("invalid COPILOT_ALERT_CORRELATION_WINDOW, using default", zap.String("value", window))
+			} else {
+				windowDuration = parsed
+			}
+		}
+		alertSvc = alertSvc.WithCorrelation(incidentStore, windowDuration)
+		logger.Info("alert correlation enabled", zap.Duration("window", alertSvc.CorrelationWindow()))
+	}
 	alertRunner := alertReadRunner{svc: alertSvc}
 	// 知识库：存储诊断经验，支持历史案例检索。在 readRunner 链之前创建——
 	// posture 聚合（system.posture.read）要读巡检历史。
@@ -555,6 +575,7 @@ func main() {
 			alertWebhook = alertWebhook.WithActions(alert.NewStaticActionMatcher(alertActions))
 		}
 	}
+	options = append(options, httpapi.WithIncidentQuery(httpapi.NewIncidentQueryService(incidentStore, alertStore)))
 	options = append(options, httpapi.WithAlertWebhook(alertWebhook))
 	options = append(options, httpapi.WithAlertWebhookSecret(os.Getenv("COPILOT_ALERT_WEBHOOK_SECRET")))
 	// 告警查询：供 /v1/overview 统计活动告警数（*alert.Service 满足 AlertQueryService）。

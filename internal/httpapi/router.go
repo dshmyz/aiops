@@ -176,6 +176,7 @@ type Router struct {
 	inspectionReports  store.InspectionReportStore
 	mcpService         MCPService
 	alertWebhook       AlertWebhookService
+	incidentQuery      IncidentQueryService
 	alertQuery         AlertQueryService
 	alertWebhookSecret string
 	marketplace        MarketplaceService
@@ -274,6 +275,9 @@ func (r *Router) registerMuxRoutes() {
 	r.mux.HandleFunc("/v1/inspection-reports", r.serveInspectionReports)
 	r.mux.HandleFunc("/v1/inspection-reports/", r.serveInspectionReports)
 	r.mux.HandleFunc("GET /v1/runbooks", r.serveRunbooks)
+	// 告警关联降噪的运营侧出口：incident 列表与详情（含成员告警）。
+	r.mux.HandleFunc("GET /v1/incidents", r.serveListIncidents)
+	r.mux.HandleFunc("GET /v1/incidents/{id}", r.serveGetIncident)
 
 	// --- admin 区 ---
 	r.mux.HandleFunc("/v1/admin/prompts", r.serveAdminPrompts)
