@@ -62,6 +62,27 @@ const activeView = ref<ActiveView>('assistant');
 // 侧栏折叠状态
 const sidebarCollapsed = ref(false);
 
+// 管理配置区子菜单分组（默认折叠；激活视图所在组自动展开）。
+const NAV_GROUPS: Record<string, { label: string; views: string[] }> = {
+  alerts: { label: '告警', views: ['incident', 'incidents', 'alert-actions', 'notification-channels'] },
+  content: { label: '助手内容', views: ['knowledge', 'skills', 'feedback'] },
+  system: { label: '系统', views: ['audit', 'executions', 'marketplace', 'prompts', 'mcp-servers', 'docs'] },
+};
+const collapsedGroups = ref<Record<string, boolean>>({ alerts: true, content: true, system: true });
+function toggleNavGroup(group: string) {
+  collapsedGroups.value = { ...collapsedGroups.value, [group]: !collapsedGroups.value[group] };
+}
+function groupHasActive(group: string): boolean {
+  return !!NAV_GROUPS[group]?.views.includes(activeView.value);
+}
+watch(activeView, (view) => {
+  for (const [key, g] of Object.entries(NAV_GROUPS)) {
+    if (g.views.includes(view) && collapsedGroups.value[key]) {
+      collapsedGroups.value = { ...collapsedGroups.value, [key]: false };
+    }
+  }
+});
+
 // 当前登录用户（顶栏展示"我是谁"）。失败/未配置时不阻塞界面，仅留空。
 const currentUser = ref<CurrentUser | null>(null);
 async function loadCurrentUser() {
@@ -876,149 +897,191 @@ onUnmounted(() => {
 
       <div data-test="nav-section" class="nav-section">
         <p data-test="nav-section-label" class="nav-section-label" v-if="!sidebarCollapsed">管理配置</p>
-        <button
-          data-test="nav-audit"
-          data-view="audit"
-          class="nav-item"
-          :class="{ active: activeView === 'audit' }"
-          :title="'审计记录 (Cmd+6)'"
-          @click="activeView = 'audit'"
-        >
-          <NavIcon name="audit" />
-          <span v-if="!sidebarCollapsed">审计记录</span>
-        </button>
-        <button
-          data-test="nav-executions"
-          data-view="executions"
-          class="nav-item"
-          :class="{ active: activeView === 'executions' }"
-          :title="'执行历史（仅管理员）'"
-          @click="activeView = 'executions'"
-        >
-          <NavIcon name="executions" />
-          <span v-if="!sidebarCollapsed">执行历史</span>
-        </button>
-        <button
-          data-test="nav-incident"
-          data-view="incident"
-          class="nav-item"
-          :class="{ active: activeView === 'incident' }"
-          :title="'告警全景：按资源身份串起告警证据'"
-          @click="activeView = 'incident'"
-        >
-          <NavIcon name="incident" />
-          <span v-if="!sidebarCollapsed">告警全景</span>
-        </button>
-        <button
-          data-test="nav-incidents"
-          data-view="incidents"
-          class="nav-item"
-          :class="{ active: activeView === 'incidents' }"
-          :title="'告警关联：同资源重复告警归并为 incident'"
-          @click="activeView = 'incidents'"
-        >
-          <NavIcon name="incident" />
-          <span v-if="!sidebarCollapsed">告警关联</span>
-        </button>
-        <button
-          data-test="nav-marketplace"
-          data-view="marketplace"
-          class="nav-item"
-          :class="{ active: activeView === 'marketplace' }"
-          :title="'能力市场：浏览/搜索/发布能力'"
-          @click="activeView = 'marketplace'"
-        >
-          <NavIcon name="marketplace" />
-          <span v-if="!sidebarCollapsed">能力市场</span>
-        </button>
-        <button
-          data-test="nav-prompts"
-          data-view="prompts"
-          class="nav-item"
-          :class="{ active: activeView === 'prompts' }"
-          :title="'Prompt 管理 (Cmd+7)'"
-          @click="activeView = 'prompts'"
-        >
-          <NavIcon name="prompts" />
-          <span v-if="!sidebarCollapsed">Prompt 管理</span>
-        </button>
-        <button
-          data-test="nav-alert-actions"
-          data-view="alert-actions"
-          class="nav-item"
-          :class="{ active: activeView === 'alert-actions' }"
-          title="告警响应编排"
-          @click="activeView = 'alert-actions'"
-        >
-          <NavIcon name="prompts" />
-          <span v-if="!sidebarCollapsed">告警编排</span>
-        </button>
-        <button
-          data-test="nav-notification-channels"
-          data-view="notification-channels"
-          class="nav-item"
-          :class="{ active: activeView === 'notification-channels' }"
-          title="通知通道"
-          @click="activeView = 'notification-channels'"
-        >
-          <NavIcon name="notification" />
-          <span v-if="!sidebarCollapsed">通知通道</span>
-        </button>
-        <button
-          data-test="nav-knowledge"
-          data-view="knowledge"
-          class="nav-item"
-          :class="{ active: activeView === 'knowledge' }"
-          :title="'知识库 (Cmd+8)'"
-          @click="activeView = 'knowledge'"
-        >
-          <NavIcon name="knowledge" />
-          <span v-if="!sidebarCollapsed">知识库</span>
-        </button>
-        <button
-          data-test="nav-skills"
-          data-view="skills"
-          class="nav-item"
-          :class="{ active: activeView === 'skills' }"
-          title="技能 / 运维手册管理"
-          @click="activeView = 'skills'"
-        >
-          <NavIcon name="skills" />
-          <span v-if="!sidebarCollapsed">技能</span>
-        </button>
-        <button
-          data-test="nav-feedback"
-          data-view="feedback"
-          class="nav-item"
-          :class="{ active: activeView === 'feedback' }"
-          :title="'用户反馈 (Cmd+9)'"
-          @click="activeView = 'feedback'"
-        >
-          <NavIcon name="feedback" />
-          <span v-if="!sidebarCollapsed">用户反馈</span>
-        </button>
-        <button
-          data-test="nav-mcp-servers"
-          data-view="mcp-servers"
-          class="nav-item"
-          :class="{ active: activeView === 'mcp-servers' }"
-          :title="'MCP 服务器管理'"
-          @click="activeView = 'mcp-servers'"
-        >
-          <NavIcon name="mcp-servers" />
-          <span v-if="!sidebarCollapsed">MCP 服务器</span>
-        </button>
-        <button
-          data-test="nav-docs"
-          data-view="docs"
-          class="nav-item"
-          :class="{ active: activeView === 'docs' }"
-          title="使用手册"
-          @click="activeView = 'docs'"
-        >
-          <NavIcon name="docs" />
-          <span v-if="!sidebarCollapsed">使用手册</span>
-        </button>
+        <div class="nav-group" data-test="nav-group-alerts">
+          <button
+            class="nav-group-header"
+            :class="{ active: groupHasActive('alerts') }"
+            data-test="nav-group-alerts-toggle"
+            title="告警"
+            @click="toggleNavGroup('alerts')"
+          >
+            <span class="nav-group-caret" :class="{ open: !collapsedGroups.alerts }">▸</span>
+            <span v-if="!sidebarCollapsed">告警</span>
+          </button>
+          <div v-show="!collapsedGroups.alerts" class="nav-group-items">
+            <button
+              data-test="nav-incident"
+              data-view="incident"
+              class="nav-item"
+              :class="{ active: activeView === 'incident' }"
+              :title="'告警全景：按资源身份串起告警证据'"
+              @click="activeView = 'incident'"
+            >
+              <NavIcon name="incident" />
+              <span v-if="!sidebarCollapsed">告警全景</span>
+            </button>
+            <button
+              data-test="nav-incidents"
+              data-view="incidents"
+              class="nav-item"
+              :class="{ active: activeView === 'incidents' }"
+              :title="'告警关联：同资源重复告警归并为 incident'"
+              @click="activeView = 'incidents'"
+            >
+              <NavIcon name="incident" />
+              <span v-if="!sidebarCollapsed">告警关联</span>
+            </button>
+            <button
+              data-test="nav-alert-actions"
+              data-view="alert-actions"
+              class="nav-item"
+              :class="{ active: activeView === 'alert-actions' }"
+              title="告警响应编排"
+              @click="activeView = 'alert-actions'"
+            >
+              <NavIcon name="prompts" />
+              <span v-if="!sidebarCollapsed">告警编排</span>
+            </button>
+            <button
+              data-test="nav-notification-channels"
+              data-view="notification-channels"
+              class="nav-item"
+              :class="{ active: activeView === 'notification-channels' }"
+              title="通知通道"
+              @click="activeView = 'notification-channels'"
+            >
+              <NavIcon name="notification" />
+              <span v-if="!sidebarCollapsed">通知通道</span>
+            </button>
+          </div>
+        </div>
+        <div class="nav-group" data-test="nav-group-content">
+          <button
+            class="nav-group-header"
+            :class="{ active: groupHasActive('content') }"
+            data-test="nav-group-content-toggle"
+            title="助手内容"
+            @click="toggleNavGroup('content')"
+          >
+            <span class="nav-group-caret" :class="{ open: !collapsedGroups.content }">▸</span>
+            <span v-if="!sidebarCollapsed">助手内容</span>
+          </button>
+          <div v-show="!collapsedGroups.content" class="nav-group-items">
+            <button
+              data-test="nav-knowledge"
+              data-view="knowledge"
+              class="nav-item"
+              :class="{ active: activeView === 'knowledge' }"
+              :title="'知识库 (Cmd+8)'"
+              @click="activeView = 'knowledge'"
+            >
+              <NavIcon name="knowledge" />
+              <span v-if="!sidebarCollapsed">知识库</span>
+            </button>
+            <button
+              data-test="nav-skills"
+              data-view="skills"
+              class="nav-item"
+              :class="{ active: activeView === 'skills' }"
+              title="技能 / 运维手册管理"
+              @click="activeView = 'skills'"
+            >
+              <NavIcon name="skills" />
+              <span v-if="!sidebarCollapsed">技能</span>
+            </button>
+            <button
+              data-test="nav-feedback"
+              data-view="feedback"
+              class="nav-item"
+              :class="{ active: activeView === 'feedback' }"
+              :title="'用户反馈 (Cmd+9)'"
+              @click="activeView = 'feedback'"
+            >
+              <NavIcon name="feedback" />
+              <span v-if="!sidebarCollapsed">用户反馈</span>
+            </button>
+          </div>
+        </div>
+        <div class="nav-group" data-test="nav-group-system">
+          <button
+            class="nav-group-header"
+            :class="{ active: groupHasActive('system') }"
+            data-test="nav-group-system-toggle"
+            title="系统"
+            @click="toggleNavGroup('system')"
+          >
+            <span class="nav-group-caret" :class="{ open: !collapsedGroups.system }">▸</span>
+            <span v-if="!sidebarCollapsed">系统</span>
+          </button>
+          <div v-show="!collapsedGroups.system" class="nav-group-items">
+            <button
+              data-test="nav-audit"
+              data-view="audit"
+              class="nav-item"
+              :class="{ active: activeView === 'audit' }"
+              :title="'审计记录 (Cmd+6)'"
+              @click="activeView = 'audit'"
+            >
+              <NavIcon name="audit" />
+              <span v-if="!sidebarCollapsed">审计记录</span>
+            </button>
+            <button
+              data-test="nav-executions"
+              data-view="executions"
+              class="nav-item"
+              :class="{ active: activeView === 'executions' }"
+              :title="'执行历史（仅管理员）'"
+              @click="activeView = 'executions'"
+            >
+              <NavIcon name="executions" />
+              <span v-if="!sidebarCollapsed">执行历史</span>
+            </button>
+            <button
+              data-test="nav-marketplace"
+              data-view="marketplace"
+              class="nav-item"
+              :class="{ active: activeView === 'marketplace' }"
+              :title="'能力市场：浏览/搜索/发布能力'"
+              @click="activeView = 'marketplace'"
+            >
+              <NavIcon name="marketplace" />
+              <span v-if="!sidebarCollapsed">能力市场</span>
+            </button>
+            <button
+              data-test="nav-prompts"
+              data-view="prompts"
+              class="nav-item"
+              :class="{ active: activeView === 'prompts' }"
+              :title="'Prompt 管理 (Cmd+7)'"
+              @click="activeView = 'prompts'"
+            >
+              <NavIcon name="prompts" />
+              <span v-if="!sidebarCollapsed">Prompt 管理</span>
+            </button>
+            <button
+              data-test="nav-mcp-servers"
+              data-view="mcp-servers"
+              class="nav-item"
+              :class="{ active: activeView === 'mcp-servers' }"
+              :title="'MCP 服务器管理'"
+              @click="activeView = 'mcp-servers'"
+            >
+              <NavIcon name="mcp-servers" />
+              <span v-if="!sidebarCollapsed">MCP 服务器</span>
+            </button>
+            <button
+              data-test="nav-docs"
+              data-view="docs"
+              class="nav-item"
+              :class="{ active: activeView === 'docs' }"
+              title="使用手册"
+              @click="activeView = 'docs'"
+            >
+              <NavIcon name="docs" />
+              <span v-if="!sidebarCollapsed">使用手册</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <div style="flex: 1"></div>

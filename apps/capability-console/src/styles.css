@@ -345,6 +345,56 @@ code {
   margin-bottom: var(--space-1);
 }
 
+.nav-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm, 12px);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  letter-spacing: 0.03em;
+}
+
+.nav-group-header:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.nav-group-header.active {
+  color: var(--view-accent);
+}
+
+.nav-group-caret {
+  display: inline-block;
+  width: 0.7em;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  transform: rotate(0deg);
+}
+
+.nav-group-caret.open {
+  transform: rotate(90deg);
+}
+
+.nav-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: var(--space-2);
+}
+
 .app-brand strong {
   font-size: var(--font-lg);
   font-weight: 600;
