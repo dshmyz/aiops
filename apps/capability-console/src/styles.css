@@ -377,10 +377,16 @@ code {
 }
 
 .nav-group-caret {
-  display: inline-block;
-  width: 0.7em;
-  font-size: 11px;
-  transition: transform 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  transition: background-color 0.15s ease, transform 0.15s ease;
   transform: rotate(0deg);
 }
 
@@ -388,11 +394,18 @@ code {
   transform: rotate(90deg);
 }
 
+.nav-group-header:hover .nav-group-caret {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
 .nav-group-items {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding-left: var(--space-2);
+  /* 对齐到组头文字列（组头 padding 12 + caret 20 + gap 8 = 40），
+     子项文字 = 容器 32 + 项 padding 12 = 44，略深于组名表嵌套 */
+  padding-left: 32px;
 }
 
 .app-brand strong {
