@@ -27,6 +27,7 @@ const MarketplaceView = defineAsyncComponent(() => import('./views/MarketplaceVi
 import ManagementView from './views/ManagementView.vue';
 const AdminPromptsView = defineAsyncComponent(() => import('./views/AdminPromptsView.vue'));
 const AlertActionsView = defineAsyncComponent(() => import('./views/AlertActionsView.vue'));
+const NotificationChannelsView = defineAsyncComponent(() => import('./views/NotificationChannelsView.vue'));
 const AdminKnowledgeView = defineAsyncComponent(() => import('./views/AdminKnowledgeView.vue'));
 const FeedbackView = defineAsyncComponent(() => import('./views/FeedbackView.vue'));
 const SkillsView = defineAsyncComponent(() => import('./views/SkillsView.vue'));
@@ -54,7 +55,7 @@ import type {
   ExecutionResult,
 } from './types';
 
-type ActiveView = 'assistant' | 'management' | 'dashboard' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'incidents' | 'marketplace' | 'prompts' | 'knowledge' | 'skills' | 'feedback' | 'mcp-servers' | 'docs' | 'alert-actions';
+type ActiveView = 'assistant' | 'management' | 'dashboard' | 'plans' | 'scheduled-tasks' | 'inspection-reports' | 'audit' | 'executions' | 'incident' | 'incidents' | 'marketplace' | 'prompts' | 'knowledge' | 'skills' | 'feedback' | 'mcp-servers' | 'docs' | 'alert-actions' | 'notification-channels';
 
 const activeView = ref<ActiveView>('assistant');
 
@@ -72,7 +73,7 @@ async function loadCurrentUser() {
 }
 
 // 视图顺序与快捷键映射（Cmd/Ctrl+1..9），顺序与侧栏视觉分组一致
-const viewOrder: ActiveView[] = ['assistant', 'management', 'dashboard', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'alert-actions', 'knowledge', 'skills', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'incidents', 'marketplace', 'docs'];
+const viewOrder: ActiveView[] = ['assistant', 'management', 'dashboard', 'plans', 'scheduled-tasks', 'audit', 'prompts', 'alert-actions', 'notification-channels', 'knowledge', 'skills', 'feedback', 'mcp-servers', 'executions', 'inspection-reports', 'incident', 'incidents', 'marketplace', 'docs'];
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   // Cmd/Ctrl + 数字 切换视图
@@ -953,6 +954,17 @@ onUnmounted(() => {
           <span v-if="!sidebarCollapsed">告警编排</span>
         </button>
         <button
+          data-test="nav-notification-channels"
+          data-view="notification-channels"
+          class="nav-item"
+          :class="{ active: activeView === 'notification-channels' }"
+          title="通知通道"
+          @click="activeView = 'notification-channels'"
+        >
+          <NavIcon name="notification" />
+          <span v-if="!sidebarCollapsed">通知通道</span>
+        </button>
+        <button
           data-test="nav-knowledge"
           data-view="knowledge"
           class="nav-item"
@@ -1318,6 +1330,7 @@ onUnmounted(() => {
       <AdminPromptsView v-if="activeView === 'prompts'" />
       <SkillsView v-if="activeView === 'skills'" />
       <AlertActionsView v-if="activeView === 'alert-actions'" />
+      <NotificationChannelsView v-if="activeView === 'notification-channels'" />
 
       <AdminKnowledgeView v-if="activeView === 'knowledge'" />
 

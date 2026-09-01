@@ -12,7 +12,7 @@
  * Icons are simplified from Lucide (ISC/Ishikawa Masashi, MIT-style license).
  * Each path uses stroke="currentColor" so it tints with the parent color.
  */
-type IconName = 'assistant' | 'management' | 'dashboard' | 'plans' | 'audit' | 'executions' | 'incident' | 'scheduled-tasks' | 'inspection-reports' | 'marketplace' | 'prompts' | 'knowledge' | 'skills' | 'feedback' | 'mcp-servers' | 'docs';
+type IconName = 'assistant' | 'management' | 'dashboard' | 'plans' | 'audit' | 'executions' | 'incident' | 'scheduled-tasks' | 'inspection-reports' | 'marketplace' | 'prompts' | 'knowledge' | 'skills' | 'feedback' | 'mcp-servers' | 'docs' | 'notification';
 
 defineProps<{ name: IconName }>();
 </script>
@@ -208,6 +208,18 @@ defineProps<{ name: IconName }>();
       <rect x="14" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
       <rect x="3" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
       <rect x="14" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
+    </template>
+    <!-- notification: bell -->
+    <template v-else-if="name === 'notification'">
+      <path
+        d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
     </template>
     <!-- unknown: placeholder dot -->
     <template v-else>

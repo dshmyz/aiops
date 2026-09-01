@@ -35,6 +35,8 @@ import type {
   MarketplaceVersion,
   MCPServer,
   NormalizedResult,
+  NotificationChannel,
+  NotificationChannelsListResponse,
   OpenAPIURLCommitPayload,
   OpenAPIURLCommitResult,
   OverviewData,
@@ -999,6 +1001,29 @@ export async function setAlertActionEnabled(
 export async function deleteAlertAction(name: string): Promise<{ status: string; name: string }> {
   const data = await request<{ status: string; name: string }>(
     `/v1/admin/alert-actions/${encodeURIComponent(name)}`,
+    { method: 'DELETE' },
+  );
+  return data;
+}
+
+export async function listNotificationChannels(): Promise<NotificationChannelsListResponse> {
+  const data = await request<NotificationChannelsListResponse>('/v1/admin/notification-channels', {});
+  return data;
+}
+
+export async function saveNotificationChannel(
+  channel: NotificationChannel,
+): Promise<{ status: string; id: string; name: string }> {
+  const data = await request<{ status: string; id: string; name: string }>(
+    '/v1/admin/notification-channels',
+    { method: 'POST', body: JSON.stringify(channel) },
+  );
+  return data;
+}
+
+export async function deleteNotificationChannel(id: string): Promise<{ status: string; id: string }> {
+  const data = await request<{ status: string; id: string }>(
+    `/v1/admin/notification-channels/${encodeURIComponent(id)}`,
     { method: 'DELETE' },
   );
   return data;

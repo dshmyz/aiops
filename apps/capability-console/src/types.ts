@@ -1115,6 +1115,24 @@ export interface AlertAction {
   enabled?: boolean;
 }
 
+/** 通知外发通道（GET /v1/admin/notification-channels，secret 只写不回）。 */
+export interface NotificationChannel {
+  id: string;
+  type: 'feishu' | 'webhook';
+  name: string;
+  url: string;
+  secret?: string;
+  enabled: boolean;
+}
+
+/** 通知通道列表响应。 */
+export interface NotificationChannelsListResponse {
+  channels?: NotificationChannel[];
+  count?: number;
+  configured?: boolean;
+  hint?: string;
+}
+
 /** 工具 input schema 字段（后端 tools.DynamicInputField 的前端投影）。 */
 export interface AdminToolField {
   type?: string;
