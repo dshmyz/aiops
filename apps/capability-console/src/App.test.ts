@@ -1589,6 +1589,11 @@ describe('Capability Console', () => {
           headers: { 'Content-Type': 'application/json' },
         });
       }
+      if (url === '/v1/capabilities/validate') {
+        // 选中后自动校验（debounce）会调后端校验；这里返回通过，
+        // 否则 publishReady 变 false，publishSelected 会提前返回。
+        return ok({ validation: { valid: true } });
+      }
       return ok({});
     }));
     const wrapper = mountApp();
