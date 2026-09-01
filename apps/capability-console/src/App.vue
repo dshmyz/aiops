@@ -813,7 +813,7 @@ onUnmounted(() => {
           :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
           @click="sidebarCollapsed = !sidebarCollapsed"
         >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
             <path fill="currentColor" d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z" />
           </svg>
         </button>
