@@ -19,7 +19,9 @@ func TestSQLNotificationChannelStoreLifecycle(t *testing.T) {
 
 	rec := NotificationChannelRecord{
 		Type: "webhook", Name: "内网网关",
-		URL: "https://ops.local/hook", Secret: "s3cret", Enabled: true,
+		URL: "https://ops.local/hook", Secret: "s3cret",
+		Template: `{"plan":"{{.PlanID}}"}`,
+		Enabled:  true,
 	}
 	if err := s.Upsert(ctx, rec); err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -35,6 +37,9 @@ func TestSQLNotificationChannelStoreLifecycle(t *testing.T) {
 	}
 	if got.Name != "内网网关" || got.Secret != "s3cret" || !got.Enabled {
 		t.Fatalf("got = %+v", got)
+	}
+	if got.Template != `{"plan":"{{.PlanID}}"}` {
+		t.Errorf("template = %q, want custom template", got.Template)
 	}
 
 	fetched, err := s.Get(ctx, got.ID)

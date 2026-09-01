@@ -129,7 +129,7 @@ func TestNotificationChannelsCRUDAndSecretMasked(t *testing.T) {
 
 	// 创建
 	rec = channelRequest(t, router, http.MethodPost, "/v1/admin/notification-channels",
-		map[string]any{"type": "webhook", "name": "内网网关", "url": "https://ops.local/hook", "secret": "s3cret"}, "admin")
+		map[string]any{"type": "webhook", "name": "内网网关", "url": "https://ops.local/hook", "secret": "s3cret", "template": `{"plan":"{{.PlanID}}"}`}, "admin")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
@@ -156,6 +156,9 @@ func TestNotificationChannelsCRUDAndSecretMasked(t *testing.T) {
 	}
 	if url, _ := ch["url"].(string); url == "" {
 		t.Errorf("channel url missing: %v", ch)
+	}
+	if tmpl, _ := ch["template"].(string); tmpl != `{"plan":"{{.PlanID}}"}` {
+		t.Errorf("template not returned for editor prefill: %v", ch)
 	}
 
 	// 删除

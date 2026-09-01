@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,7 @@ func TestWebhookNotifierDeliversSignedPayload(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	notifier := NewWebhookNotifier(srv.URL, secret)
+	notifier := NewWebhookNotifier(srv.URL, secret, "")
 	err := notifier.NotifyConfirmation(context.Background(), ConfirmationRequest{
 		PlanID:            "plan-1",
 		ConfirmationToken: "tok-1",
@@ -67,7 +68,7 @@ func TestWebhookNotifierNoSecretNoHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
-	notifier := NewWebhookNotifier(srv.URL, "")
+	notifier := NewWebhookNotifier(srv.URL, "", "")
 	if err := notifier.NotifyConfirmation(context.Background(), ConfirmationRequest{PlanID: "p"}); err != nil {
 		t.Fatalf("NotifyConfirmation: %v", err)
 	}
@@ -83,9 +84,78 @@ func TestWebhookNotifierNon2xxIsError(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	notifier := NewWebhookNotifier(srv.URL, "")
+	notifier := NewWebhookNotifier(srv.URL, "", "")
 	if err := notifier.NotifyConfirmation(context.Background(), ConfirmationRequest{PlanID: "p"}); err == nil {
 		t.Fatal("HTTP 500 must surface as error")
+	}
+}
+
+// TestWebhookNotifierCustomTemplate 验证自定义请求体模板渲染：请求体按模板
+// 输出，签名针对渲染后的 body 计算。
+func TestWebhookNotifierCustomTemplate(t *testing.T) {
+	const secret = "tmpl-secret"
+	var gotBody []byte
+	var gotSig, gotType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		gotSig = r.Header.Get("X-Signature")
+		gotType = r.Header.Get("X-Notification-Type")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	tmpl := `{"action":"approve","plan":"{{.PlanID}}","token":"{{.ConfirmationToken}}","tool":"{{.ToolName}}","input":{{.InputJSON}},"at":"{{.SentAt}}"}`
+	notifier := NewWebhookNotifier(srv.URL, secret, tmpl)
+	err := notifier.NotifyConfirmation(context.Background(), ConfirmationRequest{
+		PlanID:            "plan-9",
+		ConfirmationToken: "tok-9",
+		ToolName:          "topic.retention.set",
+		Input:             map[string]any{"topic": "orders"},
+	})
+	if err != nil {
+		t.Fatalf("NotifyConfirmation: %v", err)
+	}
+
+	// 渲染后的 body 是按模板结构，而非默认信封。
+	var decoded map[string]any
+	if err := json.Unmarshal(gotBody, &decoded); err != nil {
+		t.Fatalf("rendered body not JSON: %s (%v)", gotBody, err)
+	}
+	if decoded["plan"] != "plan-9" || decoded["token"] != "tok-9" || decoded["tool"] != "topic.retention.set" {
+		t.Fatalf("rendered body = %s", gotBody)
+	}
+	if decoded["input"].(map[string]any)["topic"] != "orders" {
+		t.Fatalf("input not embedded: %s", gotBody)
+	}
+	if _, hasEnvelope := decoded["type"]; hasEnvelope {
+		t.Fatalf("custom template should replace default envelope, got %s", gotBody)
+	}
+	// 签名针对渲染后 body 计算。
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(gotBody)
+	if !hmac.Equal([]byte(gotSig), []byte(hex.EncodeToString(mac.Sum(nil)))) {
+		t.Fatalf("X-Signature mismatch over rendered body: got %q", gotSig)
+	}
+	if gotType != "confirmation_required" {
+		t.Fatalf("X-Notification-Type = %q", gotType)
+	}
+}
+
+// TestWebhookNotifierInvalidTemplateFallsBackToEnvelope 验证模板解析失败时
+// 回退默认信封（不阻塞投递）。
+func TestWebhookNotifierInvalidTemplateFallsBackToEnvelope(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	notifier := NewWebhookNotifier(srv.URL, "", "{{.Broken")
+	if err := notifier.NotifyConfirmation(context.Background(), ConfirmationRequest{PlanID: "p"}); err != nil {
+		t.Fatalf("NotifyConfirmation: %v", err)
+	}
+	if !contains(string(gotBody), `"type":"confirmation_required"`) {
+		t.Fatalf("invalid template should fall back to envelope, got %s", gotBody)
 	}
 }
 

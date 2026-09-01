@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -168,6 +169,34 @@ func TestDisabledChannelNotFanOut(t *testing.T) {
 	}
 	if *calls != 0 {
 		t.Errorf("disabled sink calls = %d, want 0", *calls)
+	}
+}
+
+// TestChannelManagerCustomTemplate 验证模板从通道配置穿透到请求体。
+func TestChannelManagerCustomTemplate(t *testing.T) {
+	t.Parallel()
+	var gotBody []byte
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
+
+	m := NewChannelManager(newFakeChannelStore())
+	if err := m.Load(context.Background()); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := m.Upsert(context.Background(), store.NotificationChannelRecord{
+		Type: "webhook", Name: "tmpl", URL: ts.URL, Enabled: true,
+		Template: `{"plan":"{{.PlanID}}","who":"{{.Subject}}"}`,
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := m.NotifyConfirmation(context.Background(), ConfirmationRequest{PlanID: "p1", Subject: "ops"}); err != nil {
+		t.Fatalf("NotifyConfirmation: %v", err)
+	}
+	if string(gotBody) != `{"plan":"p1","who":"ops"}` {
+		t.Fatalf("rendered body = %s", gotBody)
 	}
 }
 

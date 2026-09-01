@@ -12,12 +12,13 @@ import (
 
 // Channel 是一条通知外发通道的运行态配置（DB 记录去时间戳）。
 type Channel struct {
-	ID      string
-	Type    string // feishu | webhook
-	Name    string
-	URL     string
-	Secret  string
-	Enabled bool
+	ID       string
+	Type     string // feishu | webhook
+	Name     string
+	URL      string
+	Secret   string
+	Template string // 自定义请求体模板，空为默认信封
+	Enabled  bool
 }
 
 // ChannelManager 是通知通道的热更新 holder：实现 Notifier，通道来自 DB
@@ -50,7 +51,7 @@ func (m *ChannelManager) Load(ctx context.Context) error {
 	for _, r := range records {
 		chs = append(chs, Channel{
 			ID: r.ID, Type: r.Type, Name: r.Name,
-			URL: r.URL, Secret: r.Secret, Enabled: r.Enabled,
+			URL: r.URL, Secret: r.Secret, Template: r.Template, Enabled: r.Enabled,
 		})
 	}
 	if len(chs) == 0 {
@@ -111,7 +112,7 @@ func buildNotifiers(channels []Channel) []Notifier {
 		case "feishu":
 			notifiers = append(notifiers, NewFeishuNotifier(ch.URL))
 		case "webhook":
-			notifiers = append(notifiers, NewWebhookNotifier(ch.URL, ch.Secret))
+			notifiers = append(notifiers, NewWebhookNotifier(ch.URL, ch.Secret, ch.Template))
 		}
 	}
 	notifiers = append(notifiers, NewLogNotifier())

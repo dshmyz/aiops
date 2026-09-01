@@ -12,7 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "015_capability_marketplace.sql", "016_scheduled_tasks_run_kind.sql", "017_autonomy_daily_limit.sql", "018_capabilities.sql", "019_alert_actions.sql", "020_diagnosis_history.sql", "021_inspection_reports.sql", "022_alert_action_runs.sql", "023_drop_environment_aliases.sql", "024_alert_incidents.sql", "025_notification_channels.sql"}
+var migrations = []string{"001_copilot.sql", "002_action_plan_audit_execution.sql", "003_audit_events_created_at_index.sql", "004_assistant_conversations.sql", "005_scheduled_tasks.sql", "006_audit_events_trace_id.sql", "007_assistant_feedback.sql", "008_knowledge_documents.sql", "009_environment_aliases.sql", "010_aiops_skills.sql", "011_mcp_servers.sql", "012_alerts.sql", "013_execution_verification.sql", "014_runbooks.sql", "015_capability_marketplace.sql", "016_scheduled_tasks_run_kind.sql", "017_autonomy_daily_limit.sql", "018_capabilities.sql", "019_alert_actions.sql", "020_diagnosis_history.sql", "021_inspection_reports.sql", "022_alert_action_runs.sql", "023_drop_environment_aliases.sql", "024_alert_incidents.sql", "025_notification_channels.sql", "026_notification_channels_template.sql"}
 
 const defaultSQLiteDSN = "file:copilot-local.db?cache=shared&_foreign_keys=on&_busy_timeout=15000&_journal_mode=WAL"
 
@@ -128,6 +128,8 @@ var sqliteColumnBackfills = []struct {
 	// E2 Phase 3: 定时任务 run_kind（read/runbook）+ runbook_slug。
 	{"copilot_scheduled_tasks", "run_kind", "TEXT NOT NULL DEFAULT 'read'"},
 	{"copilot_scheduled_tasks", "runbook_slug", "TEXT NULL"},
+	// 通知通道自定义请求体模板（mirrors migrations/026）。
+	{"notification_channels", "template", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // sqliteColumnExistsInDB reports whether a column exists on a SQLite table.
@@ -639,6 +641,7 @@ var sqliteMigrations = []string{
 		name TEXT NOT NULL,
 		url TEXT NOT NULL,
 		secret TEXT NOT NULL DEFAULT '',
+		template TEXT NOT NULL DEFAULT '',
 		enabled INTEGER NOT NULL DEFAULT 1,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

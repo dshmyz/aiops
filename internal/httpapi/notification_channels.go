@@ -12,19 +12,21 @@ import (
 	"github.com/gracegaoya/ai-operations-copilot/internal/store"
 )
 
-// notificationChannelAPI 是管理界面可见的通道视图：secret 只写不回，一律不返回。
+// notificationChannelAPI 是管理界面可见的通道视图：secret 只写不回，一律不返回；
+// template 非空时返回（编辑器回填用）。
 type notificationChannelAPI struct {
-	ID      string `json:"id"`
-	Type    string `json:"type"`
-	Name    string `json:"name"`
-	URL     string `json:"url"`
-	Enabled bool   `json:"enabled"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Template string `json:"template,omitempty"`
+	Enabled  bool   `json:"enabled"`
 }
 
 func toChannelAPI(c notification.Channel) notificationChannelAPI {
 	return notificationChannelAPI{
 		ID: c.ID, Type: c.Type, Name: c.Name,
-		URL: c.URL, Enabled: c.Enabled,
+		URL: c.URL, Template: c.Template, Enabled: c.Enabled,
 	}
 }
 
@@ -73,12 +75,13 @@ func (r *Router) serveAdminNotificationChannels(writer http.ResponseWriter, requ
 
 	case request.Method == http.MethodPost:
 		var body struct {
-			ID      string `json:"id"`
-			Type    string `json:"type"`
-			Name    string `json:"name"`
-			URL     string `json:"url"`
-			Secret  string `json:"secret"`
-			Enabled *bool  `json:"enabled"`
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Name     string `json:"name"`
+			URL      string `json:"url"`
+			Secret   string `json:"secret"`
+			Template string `json:"template"`
+			Enabled  *bool  `json:"enabled"`
 		}
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			writeError(writer, http.StatusBadRequest, "invalid JSON body")
@@ -97,12 +100,13 @@ func (r *Router) serveAdminNotificationChannels(writer http.ResponseWriter, requ
 			enabled = *body.Enabled
 		}
 		rec := store.NotificationChannelRecord{
-			ID:      strings.TrimSpace(body.ID),
-			Type:    body.Type,
-			Name:    strings.TrimSpace(body.Name),
-			URL:     strings.TrimSpace(body.URL),
-			Secret:  strings.TrimSpace(body.Secret),
-			Enabled: enabled,
+			ID:       strings.TrimSpace(body.ID),
+			Type:     body.Type,
+			Name:     strings.TrimSpace(body.Name),
+			URL:      strings.TrimSpace(body.URL),
+			Secret:   strings.TrimSpace(body.Secret),
+			Template: strings.TrimSpace(body.Template),
+			Enabled:  enabled,
 		}
 		stored, err := r.notifChannels.Upsert(ctx, rec)
 		if err != nil {
