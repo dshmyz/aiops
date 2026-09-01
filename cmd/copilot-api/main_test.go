@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -632,4 +633,40 @@ func TestCasJSONListFromEnv(t *testing.T) {
 			t.Fatalf("casJSONList = %v, want nil", got)
 		}
 	})
+}
+
+func TestParseRateLimit(t *testing.T) {
+	cases := []struct {
+		name       string
+		value      string
+		wantCap    float64
+		wantRefill float64
+		wantOK     bool
+	}{
+		{"bare per minute", "1000", 1000, 1000 / 60.0, true},
+		{"documented pair", "1000,1m", 1000, 1000 / 60.0, true},
+		{"pair different window", "200,30s", 200, 200 / 30.0, true},
+		{"with spaces", " 500, 2m ", 500, 500 / 120.0, true},
+		{"empty", "", 0, 0, false},
+		{"non-numeric", "abc", 0, 0, false},
+		{"negative", "-10", 0, 0, false},
+		{"bad duration", "1000,xyz", 0, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cap, refill, ok := parseRateLimit(tc.value)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if cap != tc.wantCap {
+				t.Errorf("capacity = %v, want %v", cap, tc.wantCap)
+			}
+			if math.Abs(refill-tc.wantRefill) > 1e-9 {
+				t.Errorf("refill = %v, want %v", refill, tc.wantRefill)
+			}
+		})
+	}
 }

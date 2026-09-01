@@ -656,18 +656,23 @@ func main() {
 
 	// Rate limiting: per-subject (30 req/min) for authenticated requests,
 	// per-IP (60 req/min) for unauthenticated fallback. Configurable via
-	// COPILOT_RATE_LIMIT_SUBJECT and COPILOT_RATE_LIMIT_IP env vars.
+	// COPILOT_RATE_LIMIT_SUBJECT and COPILOT_RATE_LIMIT_IP env vars, in either
+	// "N" (per minute) or "N,<duration>" ("1000,1m") form.
 	rateLimitCfg := httpapi.DefaultRateLimiterConfig()
 	if v := os.Getenv("COPILOT_RATE_LIMIT_SUBJECT"); v != "" {
-		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
-			rateLimitCfg.SubjectCapacity = n
-			rateLimitCfg.SubjectRefillPS = n / 60.0
+		if cap, refill, ok := parseRateLimit(v); ok {
+			rateLimitCfg.SubjectCapacity = cap
+			rateLimitCfg.SubjectRefillPS = refill
+		} else {
+			logger.Warn("invalid COPILOT_RATE_LIMIT_SUBJECT, using default", zap.String("value", v))
 		}
 	}
 	if v := os.Getenv("COPILOT_RATE_LIMIT_IP"); v != "" {
-		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
-			rateLimitCfg.IPCapacity = n
-			rateLimitCfg.IPRefillPS = n / 60.0
+		if cap, refill, ok := parseRateLimit(v); ok {
+			rateLimitCfg.IPCapacity = cap
+			rateLimitCfg.IPRefillPS = refill
+		} else {
+			logger.Warn("invalid COPILOT_RATE_LIMIT_IP, using default", zap.String("value", v))
 		}
 	}
 	rateLimiter := httpapi.NewRateLimiter(rateLimitCfg)
@@ -705,6 +710,24 @@ func main() {
 	if err := auditService.Close(); err != nil {
 		logger.Warn("close audit service", zap.Error(err))
 	}
+}
+
+// parseRateLimit 解析限流 env 值：接受 "N"（每分钟 N 次）或文档化的
+// "N,<duration>"（如 "1000,1m"）。返回 (容量, 每秒补充速率)；非法输入 ok=false。
+func parseRateLimit(v string) (capacity, refillPS float64, ok bool) {
+	capStr, durStr, hasDur := strings.Cut(strings.TrimSpace(v), ",")
+	capacity, err := strconv.ParseFloat(strings.TrimSpace(capStr), 64)
+	if err != nil || capacity <= 0 {
+		return 0, 0, false
+	}
+	if !hasDur {
+		return capacity, capacity / 60.0, true
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(durStr))
+	if err != nil || d <= 0 {
+		return 0, 0, false
+	}
+	return capacity, capacity / d.Seconds(), true
 }
 
 func publishedCapabilitiesFromEnv() ([]capabilities.Capability, error) {
