@@ -25,6 +25,7 @@ const typeLabel = props.channel.type === 'feishu' ? '飞书' : 'Webhook';
         <el-tag size="small" effect="plain" :type="channel.type === 'feishu' ? 'primary' : 'success'" data-test="channel-type-tag">
           {{ typeLabel }}
         </el-tag>
+        <el-tag v-if="channel.template" size="small" effect="plain" type="warning" data-test="channel-template-tag">自定义模板</el-tag>
         <el-tag v-if="channel.enabled === false" type="info" size="small" effect="plain" data-test="channel-disabled-tag">已停用</el-tag>
       </div>
       <div class="channel-actions">

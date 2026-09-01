@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { NotificationChannel } from '../../types';
 
 const props = defineProps<{
@@ -24,8 +24,33 @@ const title = computed(() => {
 
 const isWebhook = computed(() => props.form.type === 'webhook');
 
+// 自定义请求体开关：template 非空即视为开启。
+const customBody = ref(!!props.form.template);
+watch(
+  () => props.editing,
+  () => {
+    customBody.value = !!props.form.template;
+  },
+);
+
+const TEMPLATE_HINTS = [
+  '{{.PlanID}}', '{{.ConfirmationToken}}', '{{.ToolName}}', '{{.Risk}}',
+  '{{.Subject}}', '{{.InputJSON}}', '{{.SentAt}}', '{{.ExpiresAt}}',
+];
+
 function emitUpdate(patch: Partial<NotificationChannel>) {
   Object.assign(props.form, patch);
+}
+
+function onCustomBodyChange(on: boolean) {
+  customBody.value = on;
+  if (!on) {
+    emitUpdate({ template: '' });
+  } else if (!props.form.template) {
+    emitUpdate({
+      template: '{\n  "action": "approve",\n  "plan": "{{.PlanID}}",\n  "token": "{{.ConfirmationToken}}"\n}',
+    });
+  }
 }
 </script>
 
@@ -85,6 +110,32 @@ function emitUpdate(patch: Partial<NotificationChannel>) {
         <p class="field-hint">设置后出站请求附带 X-Signature（body 的 HMAC-SHA256），接收方可验签。</p>
       </div>
 
+      <div v-if="isWebhook" class="template-section">
+        <div class="enabled-row">
+          <el-switch
+            :model-value="customBody"
+            data-test="channel-template-switch"
+            @update:model-value="onCustomBodyChange"
+          />
+          <span>自定义请求体模板（默认发送固定 JSON 信封）</span>
+        </div>
+        <template v-if="customBody">
+          <el-input
+            :model-value="form.template ?? ''"
+            type="textarea"
+            :rows="6"
+            class="template-editor"
+            placeholder='{"action":"approve","plan":"{{.PlanID}}","token":"{{.ConfirmationToken}}"}'
+            data-test="channel-template-input"
+            @update:model-value="(v: string) => emitUpdate({ template: v })"
+          />
+          <div class="hints">
+            <span>可用变量：</span>
+            <code v-for="h in TEMPLATE_HINTS" :key="h">{{ h }}</code>
+          </div>
+        </template>
+      </div>
+
       <div class="enabled-row">
         <el-switch
           :model-value="form.enabled"
@@ -111,5 +162,9 @@ function emitUpdate(patch: Partial<NotificationChannel>) {
 .req { color: var(--color-danger); }
 .field-hint { font-size: var(--font-xs); color: var(--color-text-tertiary); margin: 4px 0 0; }
 .enabled-row { display: flex; align-items: center; gap: 10px; font-size: var(--font-sm); color: var(--color-text-secondary); }
+.template-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.template-editor { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: var(--font-xs); }
+.hints { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: var(--font-xs); color: var(--color-text-tertiary); }
+.hints code { padding: 1px 6px; border-radius: var(--radius-sm, 4px); background: var(--color-bg); border: 1px solid var(--color-border); color: var(--color-text-secondary); }
 .editor-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 </style>

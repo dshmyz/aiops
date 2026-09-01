@@ -1122,6 +1122,8 @@ export interface NotificationChannel {
   name: string;
   url: string;
   secret?: string;
+  /** 自定义请求体模板（Go text/template），空 = 默认信封 */
+  template?: string;
   enabled: boolean;
 }
 
