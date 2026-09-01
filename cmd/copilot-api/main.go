@@ -469,7 +469,11 @@ func main() {
 		diagService = diagService.WithRecommendationGenerator(diagnostics.NewHybridRecommendationGenerator(chatModel))
 	}
 	assistantService = assistantService.WithDiagnostics(orchestrator.New(diagService, 3, nil))
-	notifier := buildNotifier()
+	// 通知通道：DB 为源（admin 界面热更新），DB 无通道时回退 env 保持旧部署。
+	notifMgr := notification.NewChannelManager(store.NewSQLNotificationChannelStore(db))
+	if err := notifMgr.Load(serviceContext); err != nil {
+		logger.Warn("load notification channels", zap.Error(err))
+	}
 	// 构造能力存储：DB 可用时用 SQLCapabilityStore（多节点一致），否则退化为
 	// FileCapabilityStore（单机文件模式，现有行为）。SeedFromYAML 仅在 DB 模式
 	// 首次启动时执行（幂等，跳过已存在）。
@@ -492,7 +496,8 @@ func main() {
 	options = append(options, httpapi.WithConversations(assistantService))
 	options = append(options, httpapi.WithScheduledTasks(scheduledTaskService))
 	options = append(options, httpapi.WithInspectionReports(inspectionReportStore))
-	options = append(options, httpapi.WithNotifier(notifier))
+	options = append(options, httpapi.WithNotifier(notifMgr))
+	options = append(options, httpapi.WithNotificationChannels(notifMgr))
 	feedbackStore := store.NewSQLFeedbackStore(db)
 	options = append(options, httpapi.WithFeedback(feedbackStore))
 	// 反馈学习：用户 👍/👎 后自动存入知识库，下次类似问题注入经验
@@ -539,7 +544,7 @@ func main() {
 	// 内置 fallback 到确定性 Diagnoser，LLM 失败不影响告警接入。
 	// planCreator 为两条研判路径共用：诊断产出的可执行推荐 → 待确认 plan。
 	var fallbackDiag *alert.Diagnoser
-	planCreator := alert.NewPlanCreator(planService, alertSvc).WithNotifier(notifier)
+	planCreator := alert.NewPlanCreator(planService, alertSvc).WithNotifier(notifMgr)
 	if os.Getenv("COPILOT_ALERT_AUTO_DIAGNOSE") == "1" {
 		chainDiag := alert.NewChainDiagnoser(diagService, alertSvc, planCreator, readService.ExecuteRead).
 			WithRunStore(store.NewSQLAlertActionRunStore(db))
@@ -1573,30 +1578,6 @@ func (r taskReadRunner) Read(ctx context.Context, tool tools.Tool, input map[str
 		"tasks": views,
 		"count": len(views),
 	}, nil
-}
-
-// buildNotifier constructs the notification chain from runtime configuration.
-// When COPILOT_FEISHU_WEBHOOK_URL is set, a FeishuNotifier is layered on top of
-// the LogNotifier so confirmation requests reach a real IM channel. Otherwise
-// the LogNotifier is used alone (local development default).
-func buildNotifier() notification.Notifier {
-	// 通知通道按配置叠加：飞书（外网）与通用 webhook（内网自建端点）可并存，
-	// 日志通知始终兜底（确认 token 的最低可见渠道）。
-	var notifiers []notification.Notifier
-	if feishuURL := strings.TrimSpace(os.Getenv("COPILOT_FEISHU_WEBHOOK_URL")); feishuURL != "" {
-		notifiers = append(notifiers, notification.NewFeishuNotifier(feishuURL))
-	}
-	if webhookURL := strings.TrimSpace(os.Getenv("COPILOT_WEBHOOK_URL")); webhookURL != "" {
-		// 内网通用 webhook：POST JSON 信封到自建端点；可选 HMAC 签名让接收方
-		// 验签（与告警入站 webhook 同一模型）。
-		notifiers = append(notifiers, notification.NewWebhookNotifier(webhookURL,
-			strings.TrimSpace(os.Getenv("COPILOT_WEBHOOK_SECRET"))))
-	}
-	notifiers = append(notifiers, notification.NewLogNotifier())
-	if len(notifiers) == 1 {
-		return notifiers[0]
-	}
-	return notification.NewMultiNotifier(notifiers...)
 }
 
 type staticWriteExecutor struct{}

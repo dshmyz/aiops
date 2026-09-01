@@ -166,6 +166,7 @@ type Router struct {
 	notifier           notification.Notifier
 	prompts            *prompt.Registry
 	alertActions       *alert.AlertActionRegistry
+	notifChannels      *notification.ChannelManager
 	feedback           FeedbackService
 	feedbackCallback   func(ctx context.Context, conversationID, turnID, correction string, rating int) // 可选：反馈后回调（用于知识学习）
 	skills             store.SkillStore
@@ -285,6 +286,8 @@ func (r *Router) registerMuxRoutes() {
 	r.mux.HandleFunc("GET /v1/admin/tools", r.serveAdminTools)
 	r.mux.HandleFunc("/v1/admin/alert-actions", r.serveAdminAlertActions)
 	r.mux.HandleFunc("/v1/admin/alert-actions/", r.serveAdminAlertActions)
+	r.mux.HandleFunc("/v1/admin/notification-channels", r.serveAdminNotificationChannels)
+	r.mux.HandleFunc("/v1/admin/notification-channels/", r.serveAdminNotificationChannels)
 	r.mux.HandleFunc("/v1/admin/runbook-drafts", r.serveRunbookDrafts)
 	r.mux.HandleFunc("/v1/admin/runbook-drafts/", r.serveRunbookDrafts)
 	r.mux.HandleFunc("/v1/admin/knowledge/status", r.serveKnowledgeStatus)
@@ -517,6 +520,13 @@ func WithPromptRegistry(reg *prompt.Registry) Option {
 func WithAlertActions(reg *alert.AlertActionRegistry) Option {
 	return func(router *Router) {
 		router.alertActions = reg
+	}
+}
+
+// WithNotificationChannels 注入通知外发通道管理器（admin 界面 CRUD 入口）。
+func WithNotificationChannels(m *notification.ChannelManager) Option {
+	return func(router *Router) {
+		router.notifChannels = m
 	}
 }
 
