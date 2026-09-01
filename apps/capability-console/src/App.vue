@@ -905,7 +905,7 @@ onUnmounted(() => {
             title="告警"
             @click="toggleNavGroup('alerts')"
           >
-            <span class="nav-group-caret" :class="{ open: !collapsedGroups.alerts }">▸</span>
+            <SfSymbol name="chevron-right" :size="16" class="nav-group-caret" :class="{ open: !collapsedGroups.alerts }" />
             <span v-if="!sidebarCollapsed">告警</span>
           </button>
           <div v-show="!collapsedGroups.alerts" class="nav-group-items">
@@ -963,7 +963,7 @@ onUnmounted(() => {
             title="助手内容"
             @click="toggleNavGroup('content')"
           >
-            <span class="nav-group-caret" :class="{ open: !collapsedGroups.content }">▸</span>
+            <SfSymbol name="chevron-right" :size="16" class="nav-group-caret" :class="{ open: !collapsedGroups.content }" />
             <span v-if="!sidebarCollapsed">助手内容</span>
           </button>
           <div v-show="!collapsedGroups.content" class="nav-group-items">
@@ -1010,7 +1010,7 @@ onUnmounted(() => {
             title="系统"
             @click="toggleNavGroup('system')"
           >
-            <span class="nav-group-caret" :class="{ open: !collapsedGroups.system }">▸</span>
+            <SfSymbol name="chevron-right" :size="16" class="nav-group-caret" :class="{ open: !collapsedGroups.system }" />
             <span v-if="!sidebarCollapsed">系统</span>
           </button>
           <div v-show="!collapsedGroups.system" class="nav-group-items">

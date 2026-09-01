@@ -353,15 +353,14 @@ code {
 .nav-group-header {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: var(--font-base);
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   text-align: left;
   letter-spacing: 0.01em;
@@ -369,7 +368,6 @@ code {
 
 .nav-group-header:hover {
   color: var(--color-text-primary);
-  background: var(--color-bg-hover);
 }
 
 .nav-group-header.active {
@@ -377,26 +375,14 @@ code {
 }
 
 .nav-group-caret {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
   flex-shrink: 0;
-  border-radius: var(--radius-sm, 4px);
-  font-size: 12px;
   color: var(--color-text-tertiary);
-  transition: background-color 0.15s ease, transform 0.15s ease;
+  transition: transform 0.15s ease;
   transform: rotate(0deg);
 }
 
 .nav-group-caret.open {
   transform: rotate(90deg);
-}
-
-.nav-group-header:hover .nav-group-caret {
-  background: var(--color-bg-hover);
-  color: var(--color-text-secondary);
 }
 
 .nav-group-items {

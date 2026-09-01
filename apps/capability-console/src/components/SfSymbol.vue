@@ -6,7 +6,7 @@
  */
 withDefaults(defineProps<{
   /** 图标名称，对应内置 SF Symbol 风格图形 */
-  name: 'bubble-left' | 'sparkles' | 'waveform' | 'exclamationmark-triangle' | 'checkmark-circle' | 'arrow-up-circle' | 'person' | 'sun' | 'moon' | 'play' | 'stop' | 'thumbs-up' | 'thumbs-down' | 'doc-text'
+  name: 'bubble-left' | 'sparkles' | 'waveform' | 'exclamationmark-triangle' | 'checkmark-circle' | 'arrow-up-circle' | 'chevron-right' | 'person' | 'sun' | 'moon' | 'play' | 'stop' | 'thumbs-up' | 'thumbs-down' | 'doc-text'
   /** 尺寸 px */
   size?: number
 }>(), {
@@ -64,6 +64,11 @@ withDefaults(defineProps<{
       <circle cx="12" cy="12" r="9" />
       <line x1="12" y1="16" x2="12" y2="8" />
       <polyline points="8,12 12,8 16,12" />
+    </template>
+
+    <!-- 折叠箭头（侧栏分组） -->
+    <template v-else-if="name === 'chevron-right'">
+      <path d="M9.5 6.5l6 5.5-6 5.5" />
     </template>
 
     <!-- 用户（头+肩） -->
