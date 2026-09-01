@@ -26,6 +26,7 @@ func NewMultiNotifier(notifiers ...Notifier) *MultiNotifier {
 func (n *MultiNotifier) NotifyConfirmation(ctx context.Context, req ConfirmationRequest) error {
 	logger := observability.LoggerFromContext(ctx)
 	var firstErr error
+	anySuccess := false
 	for _, notif := range n.notifiers {
 		if err := notif.NotifyConfirmation(ctx, req); err != nil {
 			logger.Warn("notifier dispatch failed",
@@ -36,7 +37,12 @@ func (n *MultiNotifier) NotifyConfirmation(ctx context.Context, req Confirmation
 			if firstErr == nil {
 				firstErr = err
 			}
+			continue
 		}
+		anySuccess = true
+	}
+	if anySuccess {
+		return nil
 	}
 	return firstErr
 }
