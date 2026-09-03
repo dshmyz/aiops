@@ -1,8 +1,10 @@
 # AIOps Copilot - Production Configuration Template
 #
-# This file documents all available environment variables with production-ready defaults.
-# Copy this to your deployment manifests (K8s ConfigMap/Secret, docker-compose env, etc.)
-# and adjust values for your environment.
+# This file is a reference checklist of all environment variables with
+# production-ready defaults, in dotenv (KEY=VALUE) format.
+# It can be used directly as a docker-compose env_file, a systemd
+# EnvironmentFile, or copied to .env next to the binary (replace all
+# REPLACE_WITH_* / YOUR_* / sk-* placeholders first).
 #
 # SECURITY: Never commit actual secrets. Use a secret management system (Vault, K8s Secrets, etc.)
 
@@ -11,15 +13,18 @@
 # ============================================================================
 
 # HTTP server listen address
-COPILOT_HTTP_ADDR: "0.0.0.0:18080"
+COPILOT_HTTP_ADDR=0.0.0.0:18080
 
 # Log level: debug | info | warn | error
 # Production: info or warn
-COPILOT_LOG_LEVEL: "info"
+COPILOT_LOG_LEVEL=info
+
+# Log format: json (default, production) | console (dev, human-readable)
+COPILOT_LOG_FORMAT=json
 
 # CORS allowed origins (comma-separated)
 # Example: "https://console.example.com,https://admin.example.com"
-COPILOT_CORS_ALLOWED_ORIGINS: "https://your-console-domain.com"
+COPILOT_CORS_ALLOWED_ORIGINS=https://your-console-domain.com
 
 # ============================================================================
 # Database
@@ -27,7 +32,7 @@ COPILOT_CORS_ALLOWED_ORIGINS: "https://your-console-domain.com"
 
 # Database driver: sqlite | mysql
 # Production: mysql (SQLite is for dev/demo only)
-COPILOT_DATABASE_DRIVER: "mysql"
+COPILOT_DATABASE_DRIVER=mysql
 
 # MySQL connection string
 # Format: user:password@tcp(host:port)/dbname?parseTime=true&...
@@ -36,7 +41,7 @@ COPILOT_DATABASE_DRIVER: "mysql"
 #   - timeout=10s                (connection timeout)
 #   - readTimeout=30s            (query read timeout)
 #   - writeTimeout=30s           (query write timeout)
-COPILOT_DATABASE_DSN: "copilot:YOUR_DB_PASSWORD@tcp(mysql-service:3306)/copilot?parseTime=true&maxAllowedPacket=67108864&timeout=10s&readTimeout=30s&writeTimeout=30s"
+COPILOT_DATABASE_DSN=copilot:YOUR_DB_PASSWORD@tcp(mysql-service:3306)/copilot?parseTime=true&maxAllowedPacket=67108864&timeout=10s&readTimeout=30s&writeTimeout=30s
 
 # Connection pool settings (set via DSN or Go sql.DB after opening)
 # Recommended for production:
@@ -50,15 +55,15 @@ COPILOT_DATABASE_DSN: "copilot:YOUR_DB_PASSWORD@tcp(mysql-service:3306)/copilot?
 
 # JWT HMAC secret for signing auth tokens
 # CRITICAL: Generate with `openssl rand -base64 32`, never use "dev-secret"
-COPILOT_JWT_HMAC_SECRET: "REPLACE_WITH_STRONG_RANDOM_SECRET_32_BYTES"
+COPILOT_JWT_HMAC_SECRET=REPLACE_WITH_STRONG_RANDOM_SECRET_32_BYTES
 
 # Auth mode: jwt | cas | dev
 # Production: jwt or cas
-COPILOT_AUTH_MODE: "jwt"
+COPILOT_AUTH_MODE=jwt
 
 # CAS (Central Authentication Service) settings (if COPILOT_AUTH_MODE=cas)
-COPILOT_CAS_SERVER_URL: "https://cas.example.com"
-COPILOT_CAS_SERVICE_URL: "https://copilot-api.example.com"
+COPILOT_CAS_SERVER_URL=https://cas.example.com
+COPILOT_CAS_SERVICE_URL=https://copilot-api.example.com
 
 # ============================================================================
 # Rate Limiting
@@ -67,11 +72,11 @@ COPILOT_CAS_SERVICE_URL: "https://copilot-api.example.com"
 # Rate limit per authenticated subject (user/service account)
 # Format: "requests,window"
 # Example: "100,1m" = 100 requests per minute per user
-COPILOT_RATE_LIMIT_SUBJECT: "1000,1m"
+COPILOT_RATE_LIMIT_SUBJECT=1000,1m
 
 # Rate limit per IP address (fallback for unauthenticated requests)
 # Example: "50,1m" = 50 requests per minute per IP
-COPILOT_RATE_LIMIT_IP: "200,1m"
+COPILOT_RATE_LIMIT_IP=200,1m
 
 # ============================================================================
 # Capabilities (Tool Execution)
@@ -79,11 +84,11 @@ COPILOT_RATE_LIMIT_IP: "200,1m"
 
 # Directory containing capability YAML definitions
 # Production: mount this as a ConfigMap or persistent volume
-COPILOT_CAPABILITIES_DIR: "/etc/copilot/capabilities"
+COPILOT_CAPABILITIES_DIR=/etc/copilot/capabilities
 
 # Mock middleware URL (for testing capabilities against a stub backend)
 # Production: leave empty or point to staging middleware
-COPILOT_MOCK_MIDDLEWARE_URL: ""
+COPILOT_MOCK_MIDDLEWARE_URL=
 
 # ============================================================================
 # MCP (Model Context Protocol) Servers
@@ -92,7 +97,7 @@ COPILOT_MOCK_MIDDLEWARE_URL: ""
 # JSON array of MCP server configurations
 # Example: [{"name":"k8s","command":"mcp-kubernetes","args":["--kubeconfig=/root/.kube/config"],"env":{"NAMESPACE":"prod"}}]
 # Production: Configure actual MCP servers for your infrastructure
-COPILOT_MCP_SERVERS: '[]'
+COPILOT_MCP_SERVERS=[]
 
 # ============================================================================
 # Observability (OpenTelemetry)
@@ -100,11 +105,11 @@ COPILOT_MCP_SERVERS: '[]'
 
 # OTEL exporter: otlp | stdout | none
 # Production: otlp
-COPILOT_OTEL_EXPORTER: "otlp"
+COPILOT_OTEL_EXPORTER=otlp
 
 # OTLP collector endpoint
 # Example: otel-collector:4318 (HTTP) or otel-collector:4317 (gRPC)
-COPILOT_OTEL_OTLP_ENDPOINT: "http://otel-collector:4318"
+COPILOT_OTEL_OTLP_ENDPOINT=http://otel-collector:4318
 
 # Trace sampling rate: 0.0 (none) to 1.0 (all)
 # Production: 0.1 (10%) to reduce overhead, increase for debugging
@@ -118,8 +123,8 @@ COPILOT_OTEL_OTLP_ENDPOINT: "http://otel-collector:4318"
 
 # Fallback audit log directory (if DB write fails)
 # Production: enable and mount persistent storage
-COPILOT_AUDIT_FALLBACK_ENABLED: "1"
-COPILOT_AUDIT_FALLBACK_DIR: "/var/log/copilot/audit"
+COPILOT_AUDIT_FALLBACK_ENABLED=1
+COPILOT_AUDIT_FALLBACK_DIR=/var/log/copilot/audit
 
 # ============================================================================
 # Knowledge Base (RAG / Embeddings)
@@ -127,15 +132,15 @@ COPILOT_AUDIT_FALLBACK_DIR: "/var/log/copilot/audit"
 
 # Embedder API base URL (OpenAI-compatible)
 # Example: https://api.openai.com/v1 or https://your-embedding-service/v1
-COPILOT_KNOWLEDGE_EMBEDDER_BASE_URL: "https://api.openai.com/v1"
+COPILOT_KNOWLEDGE_EMBEDDER_BASE_URL=https://api.openai.com/v1
 
 # Embedder API key
 # CRITICAL: Use secret management, never commit
-COPILOT_KNOWLEDGE_EMBEDDER_API_KEY: "sk-YOUR_OPENAI_OR_CUSTOM_KEY"
+COPILOT_KNOWLEDGE_EMBEDDER_API_KEY=sk-YOUR_OPENAI_OR_CUSTOM_KEY
 
 # Embedder model name
 # OpenAI: text-embedding-3-small | text-embedding-3-large
-COPILOT_KNOWLEDGE_EMBEDDER_MODEL: "text-embedding-3-small"
+COPILOT_KNOWLEDGE_EMBEDDER_MODEL=text-embedding-3-small
 
 # ============================================================================
 # Alert Ingestion
@@ -143,12 +148,12 @@ COPILOT_KNOWLEDGE_EMBEDDER_MODEL: "text-embedding-3-small"
 
 # Webhook secret for incoming alerts (Prometheus Alertmanager, etc.)
 # Generate with `openssl rand -hex 32`
-COPILOT_ALERT_WEBHOOK_SECRET: "REPLACE_WITH_WEBHOOK_SECRET"
+COPILOT_ALERT_WEBHOOK_SECRET=REPLACE_WITH_WEBHOOK_SECRET
 
 # Alert correlation window: same-key (domain + resource) alerts merge into one
 # incident within this duration; only the first alert triggers auto-diagnosis.
 # Use a Go duration (30m / 1h), or "off" to disable correlation entirely.
-COPILOT_ALERT_CORRELATION_WINDOW: "30m"
+COPILOT_ALERT_CORRELATION_WINDOW=30m
 
 # ============================================================================
 # Notifications
@@ -156,7 +161,7 @@ COPILOT_ALERT_CORRELATION_WINDOW: "30m"
 
 # Feishu (Lark) webhook URL for sending notifications
 # Leave empty to disable
-COPILOT_FEISHU_WEBHOOK_URL: ""
+COPILOT_FEISHU_WEBHOOK_URL=
 
 # ============================================================================
 # Development / Debugging Flags (DISABLE IN PRODUCTION)
