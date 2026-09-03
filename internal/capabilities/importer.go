@@ -341,10 +341,32 @@ func ImportOpenAPI(body []byte) ([]Capability, error) {
 	return drafts, nil
 }
 
+// wrapOpenAPIParseError 把 yaml 解码错误包装成可自诊断的提示：yaml.v3 的错误
+// 自带行号与类型信息（如 "line 42: cannot unmarshal !!bool `true` into []string"），
+// 这里补一段排查方向，避免用户面对干巴巴的 "yaml: unmarshal error"。
+func wrapOpenAPIParseError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	where := ""
+	if i := strings.Index(msg, "line "); i >= 0 {
+		if j := strings.IndexAny(msg[i:], "\n,"); j > 0 {
+			where = msg[i : i+j]
+		} else {
+			where = msg[i:]
+		}
+	}
+	if where != "" {
+		return fmt.Errorf("OpenAPI 解析失败（%s 附近字段类型异常）：%v\n排查：通常是规格中字段类型不符合 OpenAPI 规范——required/enum/tags 写成布尔或数字、type 写成数组等。required/enum/tags 的布尔写法已自动容忍；若仍报错请定位并修正该字段，仍有问题请把完整报错反馈给开发。", where, err)
+	}
+	return fmt.Errorf("OpenAPI 解析失败：%v\n排查：通常是规格中字段类型不符合 OpenAPI 规范——required/enum/tags 写成布尔或数字、type 写成数组等。请修正后重试，仍有问题请把完整报错反馈给开发。", err)
+}
+
 func parseOpenAPIOperations(body []byte) ([]importedOpenAPIOperation, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(body, &root); err != nil {
-		return nil, err
+		return nil, wrapOpenAPIParseError(err)
 	}
 	if len(root.Content) == 0 {
 		return nil, fmt.Errorf("empty OpenAPI document")
@@ -353,7 +375,7 @@ func parseOpenAPIOperations(body []byte) ([]importedOpenAPIOperation, error) {
 	normalizeSwagger2(root.Content[0])
 	var doc openAPIDoc
 	if err := root.Content[0].Decode(&doc); err != nil {
-		return nil, err
+		return nil, wrapOpenAPIParseError(err)
 	}
 	// 构建组件注册表，供 $ref 解析使用
 	components := &openAPIComponents{
@@ -375,7 +397,7 @@ func parseOpenAPIOperations(body []byte) ([]importedOpenAPIOperation, error) {
 		var pathParameters []openAPIParameter
 		if node, ok := doc.Paths[path]["parameters"]; ok {
 			if err := node.Decode(&pathParameters); err != nil {
-				return nil, err
+				return nil, wrapOpenAPIParseError(err)
 			}
 		}
 		operationNodes := make(map[string]yaml.Node, len(doc.Paths[path]))
@@ -394,7 +416,7 @@ func parseOpenAPIOperations(body []byte) ([]importedOpenAPIOperation, error) {
 			var operation openAPIOperation
 			node := operationNodes[method]
 			if err := node.Decode(&operation); err != nil {
-				return nil, err
+				return nil, wrapOpenAPIParseError(err)
 			}
 			operation.Parameters = mergeOpenAPIParameters(pathParameters, operation.Parameters)
 			// 解析成功响应的 schema（200/201/202/default）

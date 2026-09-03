@@ -1022,3 +1022,50 @@ func TestImportOpenAPIToleratesBoolInStringListFields(t *testing.T) {
 		t.Fatalf("candidates = %d, want 1", len(preview.Candidates))
 	}
 }
+
+// TestOpenAPIParseErrorIsSelfDiagnosable 验证解码失败的错误信息可自诊断：
+// 带行号定位 + 排查方向提示，而不是干巴巴的 "yaml: unmarshal error"。
+func TestOpenAPIParseErrorIsSelfDiagnosable(t *testing.T) {
+	t.Parallel()
+	// type 写成数组（flexStrings 不覆盖的场景）仍会失败，但错误应说明如何排查。
+	body := []byte(`{
+  "openapi": "3.0.0",
+  "info": {"title": "T", "version": "1.0"},
+  "paths": {
+    "/things": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {"type": ["string", "null"]}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`)
+	_, err := capabilities.ImportOpenAPICandidates(body, nil)
+	if err == nil {
+		t.Fatal("type-as-array should still fail (not yet tolerated)")
+	}
+	for _, want := range []string{"OpenAPI 解析失败", "排查", "line "} {
+		if !containsStr(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+}
+
+func containsStr(s, sub string) bool {
+	return len(s) >= len(sub) && (func() bool {
+		for i := 0; i+len(sub) <= len(s); i++ {
+			if s[i:i+len(sub)] == sub {
+				return true
+			}
+		}
+		return false
+	})()
+}
