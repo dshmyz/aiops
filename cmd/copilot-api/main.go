@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/alert"
 	"github.com/gracegaoya/ai-operations-copilot/internal/assistant"
@@ -78,14 +78,16 @@ func buildCapabilityRuntimes(loaded []capabilities.Capability, adapter *capabili
 }
 
 func main() {
+	// 启动时优先加载 .env 文件（如存在），已存在的真实环境变量优先级更高。
+	// 必须在 InitLogger 之前：日志级别/格式也来自环境变量，可能写在 .env 里，
+	// 加载太晚会退回默认 JSON。
+	if err := loadDotEnv(".env"); err != nil {
+		fmt.Fprintf(os.Stderr, "load .env failed: %v\n", err)
+	}
+
 	// Initialize structured logger first so all subsequent log calls are JSON.
 	logger := observability.InitLogger(os.Getenv("COPILOT_LOG_LEVEL"))
 	defer func() { _ = logger.Sync() }()
-
-	// 启动时优先加载 .env 文件（如存在），已存在的真实环境变量优先级更高
-	if err := loadDotEnv(".env"); err != nil {
-		logger.Warn("load .env failed", zap.Error(err))
-	}
 
 	driver := os.Getenv("COPILOT_DATABASE_DRIVER")
 	dsn := os.Getenv("COPILOT_DATABASE_DSN")
@@ -1618,44 +1620,25 @@ func (staticWriteExecutor) Execute(_ context.Context, toolName string, _ map[str
 // 文件不存在时静默返回 nil（开发环境可选）。
 // 支持：# 注释、空行、值的单/双引号包裹（引号会被剥离）。
 // 格式错误的行（无 =、key 为空）会被跳过，不报错。
+// loadDotEnv 读取 .env（若存在）并注入环境变量：
+//   - 解析用成熟的 godotenv（处理引号/注释/转义）
+//   - 覆盖策略保持原契约：已存在且非空的环境变量优先（不覆盖），
+//     空值视为未设置，允许 .env 填充
+//   - 个别畸形行不中断：已解析出的变量照常生效，错误返回由调用方告警
+//   - 文件不存在视为无 .env，返回 nil
 func loadDotEnv(path string) error {
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return err
 	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	envMap, perr := godotenv.Unmarshal(string(data))
+	for k, v := range envMap {
+		if os.Getenv(k) == "" {
+			os.Setenv(k, v)
 		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		// 剥离包裹引号："..." 或 '...'
-		if len(value) >= 2 {
-			if (value[0] == '"' && value[len(value)-1] == '"') ||
-				(value[0] == '\'' && value[len(value)-1] == '\'') {
-				value = value[1 : len(value)-1]
-			}
-		}
-		// 已存在且非空的环境变量优先级更高，不覆盖
-		// （空字符串视为未设置，允许 .env 文件填充）
-		if current := os.Getenv(key); current != "" {
-			continue
-		}
-		os.Setenv(key, value)
 	}
-	return scanner.Err()
+	return perr
 }

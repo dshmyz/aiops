@@ -502,22 +502,18 @@ func TestLoadDotEnvReturnsNilWhenFileMissing(t *testing.T) {
 	}
 }
 
-func TestLoadDotEnvIgnoresMalformedLines(t *testing.T) {
+func TestLoadDotEnvSurfacesMalformedLines(t *testing.T) {
 	// 不并行：操作 os.Environ
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")
-	// 行 1 没有等号；行 2 key 为空；行 3 合法；行 4 只有等号无 value
-	content := "THIS_HAS_NO_EQUALS\n=missing_key\nCOPILOT_OTEL_EXPORTER=otel\n=\n"
+	content := "THIS_HAS_NO_EQUALS\nCOPILOT_OTEL_EXPORTER=otel\n"
 	if err := os.WriteFile(envPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write .env: %v", err)
 	}
 
-	t.Setenv("COPILOT_OTEL_EXPORTER", "")
-	if err := loadDotEnv(envPath); err != nil {
-		t.Fatalf("loadDotEnv returned %v", err)
-	}
-	if got := os.Getenv("COPILOT_OTEL_EXPORTER"); got != "otel" {
-		t.Errorf("COPILOT_OTEL_EXPORTER = %q, want %q (合法行应被正常加载)", got, "otel")
+	// godotenv 对畸形行中止并返回错误：调用方（main）会告警，而不是静默吞掉。
+	if err := loadDotEnv(envPath); err == nil {
+		t.Fatal("loadDotEnv should surface malformed-line error (no silent skip)")
 	}
 }
 
