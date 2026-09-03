@@ -979,3 +979,46 @@ func NewManagerForTest(t *testing.T) *capabilities.Manager {
 	t.Helper()
 	return capabilities.NewManager(t.TempDir(), nil)
 }
+
+// TestImportOpenAPIToleratesBoolInStringListFields 验证 JSON 规格里
+// `required: true` / `enum: true`（布尔写进期望字符串数组的位置）不再导致
+// "yaml: unmarshal errors: cannot unmarshal !!bool ... into []string"。
+func TestImportOpenAPIToleratesBoolInStringListFields(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{
+  "openapi": "3.0.0",
+  "info": {"title": "Tolerant API", "version": "1.0"},
+  "paths": {
+    "/things": {
+      "get": {
+        "operationId": "listThings",
+        "summary": "list things",
+        "tags": true,
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": true,
+                  "properties": {
+                    "id": {"type": "integer", "enum": true}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`)
+	preview, err := capabilities.ImportOpenAPICandidates(body, nil)
+	if err != nil {
+		t.Fatalf("ImportOpenAPICandidates with bool-in-[]string fields returned %v", err)
+	}
+	if len(preview.Candidates) != 1 {
+		t.Fatalf("candidates = %d, want 1", len(preview.Candidates))
+	}
+}

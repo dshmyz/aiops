@@ -239,7 +239,7 @@ func (c *openAPIComponents) takeUnresolvedRefs() []string {
 
 type openAPIOperation struct {
 	OperationID string                     `yaml:"operationId"`
-	Tags        []string                   `yaml:"tags"`
+	Tags        flexStrings                `yaml:"tags"`
 	Summary     string                     `yaml:"summary"`
 	Parameters  []openAPIParameter         `yaml:"parameters"`
 	RequestBody *openAPIRequestBody        `yaml:"requestBody"`
@@ -277,7 +277,7 @@ type openAPIMediaType struct {
 // 用于 components/schemas 中的命名 schema 和 requestBody/response 的 schema。
 type openAPIObjectSchema struct {
 	Type        string                   `yaml:"type"`
-	Required    []string                 `yaml:"required"`
+	Required    flexStrings              `yaml:"required"`
 	Properties  map[string]openAPISchema `yaml:"properties"`
 	Ref         string                   `yaml:"$ref"`
 	Description string                   `yaml:"description"`
@@ -292,15 +292,41 @@ type importedOpenAPIOperation struct {
 	Warnings       []string             // 导入警告（$ref 解析失败等），透出到预览候选
 }
 
+// flexStrings 容忍 YAML/JSON 中把标量（bool/int/null/映射）写进期望字符串
+// 数组的位置：真实 OpenAPI 规格常见 `"required": true`、`"enum": true` 等
+// 非标准写法，不应让整个导入崩掉——只保留字符串标量，其余静默忽略。
+type flexStrings []string
+
+func (s *flexStrings) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil {
+		return nil
+	}
+	switch value.Kind {
+	case yaml.SequenceNode:
+		for _, item := range value.Content {
+			if item.Kind == yaml.ScalarNode && item.Tag == "!!str" {
+				*s = append(*s, item.Value)
+			}
+		}
+	case yaml.ScalarNode:
+		if value.Tag == "!!str" {
+			*s = append(*s, value.Value)
+		}
+	default:
+		// 映射/别名等复杂值忽略。
+	}
+	return nil
+}
+
 // openAPISchema 是属性级别的 schema，支持 $ref 引用和嵌套对象/数组。
 type openAPISchema struct {
 	Type        string                   `yaml:"type"`
 	Description string                   `yaml:"description"`
-	Enum        []string                 `yaml:"enum"`
+	Enum        flexStrings              `yaml:"enum"`
 	Ref         string                   `yaml:"$ref"`
 	Items       *openAPISchema           `yaml:"items"`      // 数组元素类型
 	Properties  map[string]openAPISchema `yaml:"properties"` // 嵌套对象属性
-	Required    []string                 `yaml:"required"`   // 嵌套对象的必填字段
+	Required    flexStrings              `yaml:"required"`   // 嵌套对象的必填字段
 }
 
 func ImportOpenAPI(body []byte) ([]Capability, error) {
@@ -469,7 +495,7 @@ func validateDraftName(name string) error {
 }
 
 func inferCapability(method, path string, operation openAPIOperation, respSchema *openAPIObjectSchema, components *openAPIComponents) Capability {
-	text := strings.ToLower(path + " " + strings.Join(operation.Tags, " ") + " " + operation.Summary)
+	text := strings.ToLower(path + " " + strings.Join([]string(operation.Tags), " ") + " " + operation.Summary)
 	domain := inferDomain(text)
 	resourceType := inferResourceType(text)
 	toolOperation := inferOperation(method)
@@ -487,12 +513,12 @@ func inferCapability(method, path string, operation openAPIOperation, respSchema
 		}
 		switch parameter.In {
 		case "path":
-			input[parameter.Name] = InputField{Type: normalizeSchemaType(fieldType), Required: parameter.Required, Description: firstNonEmpty(parameter.Description, schema.Description), Enum: schema.Enum}
+			input[parameter.Name] = InputField{Type: normalizeSchemaType(fieldType), Required: parameter.Required, Description: firstNonEmpty(parameter.Description, schema.Description), Enum: []string(schema.Enum)}
 		case "query":
 			// GET 读能力的查询参数进 query string；POST/PUT 等带 body 的方法，
 			// query 参数仍保留 in:query（buildWriteBody 会跳过它们，适配器拼到
 			// URL 上），body 之外的过滤/分页参数不丢。
-			input[parameter.Name] = InputField{Type: normalizeSchemaType(fieldType), Required: parameter.Required, In: "query", Description: firstNonEmpty(parameter.Description, schema.Description), Enum: schema.Enum}
+			input[parameter.Name] = InputField{Type: normalizeSchemaType(fieldType), Required: parameter.Required, In: "query", Description: firstNonEmpty(parameter.Description, schema.Description), Enum: []string(schema.Enum)}
 		case "header":
 			// Header 参数不导入：HTTPAdapter 不从 input_schema 设置自定义 header，
 			// 允许用户可控的 header 注入有安全风险。
@@ -528,7 +554,7 @@ func inferCapability(method, path string, operation openAPIOperation, respSchema
 					Type:        normalizeSchemaType(fieldType),
 					Required:    required[name],
 					Description: resolvedField.Description,
-					Enum:        resolvedField.Enum,
+					Enum:        []string(resolvedField.Enum),
 				}
 			}
 		}
