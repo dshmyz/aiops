@@ -1023,11 +1023,10 @@ func TestImportOpenAPIToleratesBoolInStringListFields(t *testing.T) {
 	}
 }
 
-// TestOpenAPIParseErrorIsSelfDiagnosable 验证解码失败的错误信息可自诊断：
-// 带行号定位 + 排查方向提示，而不是干巴巴的 "yaml: unmarshal error"。
-func TestOpenAPIParseErrorIsSelfDiagnosable(t *testing.T) {
+// TestImportOpenAPIToleratesTypeArray 验证 OpenAPI 3.0 的 nullable 写法
+// type: ["string","null"] 被接受（规格来自 URL 用户无法修改，应容忍而非报错）。
+func TestImportOpenAPIToleratesTypeArray(t *testing.T) {
 	t.Parallel()
-	// type 写成数组（flexStrings 不覆盖的场景）仍会失败，但错误应说明如何排查。
 	body := []byte(`{
   "openapi": "3.0.0",
   "info": {"title": "T", "version": "1.0"},
@@ -1048,9 +1047,34 @@ func TestOpenAPIParseErrorIsSelfDiagnosable(t *testing.T) {
     }
   }
 }`)
+	preview, err := capabilities.ImportOpenAPICandidates(body, nil)
+	if err != nil {
+		t.Fatalf("type-as-array (valid nullable) should import, got: %v", err)
+	}
+	if len(preview.Candidates) != 1 {
+		t.Fatalf("candidates = %d, want 1", len(preview.Candidates))
+	}
+}
+
+// TestOpenAPIParseErrorIsSelfDiagnosable 验证解码失败的错误信息可自诊断：
+// 带行号定位 + 排查方向提示，而不是干巴巴的 "yaml: unmarshal error"。
+func TestOpenAPIParseErrorIsSelfDiagnosable(t *testing.T) {
+	t.Parallel()
+	// responses 写成字符串（结构非法，非容忍范围）仍会失败，但错误应说明如何排查。
+	body := []byte(`{
+  "openapi": "3.0.0",
+  "info": {"title": "T", "version": "1.0"},
+  "paths": {
+    "/things": {
+      "get": {
+        "responses": "oops"
+      }
+    }
+  }
+}`)
 	_, err := capabilities.ImportOpenAPICandidates(body, nil)
 	if err == nil {
-		t.Fatal("type-as-array should still fail (not yet tolerated)")
+		t.Fatal("malformed responses should fail")
 	}
 	for _, want := range []string{"OpenAPI 解析失败", "排查", "line "} {
 		if !containsStr(err.Error(), want) {

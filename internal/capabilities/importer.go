@@ -84,6 +84,37 @@ func normalizeSwagger2(root *yaml.Node) {
 	}
 }
 
+// normalizeTypeArrays 递归折叠 OpenAPI 3.0 的 nullable 写法 type: ["string","null"]
+// 为单个标量（取第一个非 null 类型）。这种写法合法且常见于自动生成规格，用户
+// 无法修改，导入器应接受而不是让严格解码报错。
+func normalizeTypeArrays(node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	switch node.Kind {
+	case yaml.DocumentNode, yaml.SequenceNode:
+		for _, child := range node.Content {
+			normalizeTypeArrays(child)
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key, val := node.Content[i], node.Content[i+1]
+			if key.Kind == yaml.ScalarNode && key.Value == "type" && val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					if item.Kind == yaml.ScalarNode && item.Tag == "!!str" && item.Value != "null" {
+						val.Kind = yaml.ScalarNode
+						val.Tag = "!!str"
+						val.Value = item.Value
+						val.Content = nil
+						break
+					}
+				}
+			}
+			normalizeTypeArrays(val)
+		}
+	}
+}
+
 // normalizeSwagger2PathItem 归一化单个 path 下的所有 operation 节点。
 func normalizeSwagger2PathItem(pathItem *yaml.Node) {
 	if pathItem == nil || pathItem.Kind != yaml.MappingNode {
@@ -373,6 +404,10 @@ func parseOpenAPIOperations(body []byte) ([]importedOpenAPIOperation, error) {
 	}
 	// 先归一化（Swagger 2.0 → 3.x），再 Decode：decode 产物来自改写后的树。
 	normalizeSwagger2(root.Content[0])
+	// 兼容 OpenAPI 3.0 的 nullable 写法 type: ["string","null"]：折叠成单个类型，
+	// 否则严格解码报 "cannot unmarshal !!seq into string"——这种规格由 URL 拉取，
+	// 用户无法修改，应接受而非报错。
+	normalizeTypeArrays(root.Content[0])
 	var doc openAPIDoc
 	if err := root.Content[0].Decode(&doc); err != nil {
 		return nil, wrapOpenAPIParseError(err)
