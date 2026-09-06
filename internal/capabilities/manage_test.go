@@ -764,8 +764,8 @@ func TestManagerQuickPublishRejectsNameConflict(t *testing.T) {
 	}
 }
 
-// staticEnricher 是把所有草稿字段加上中文说明/示例的测试富化器，验证 Manager 装配
-// WithEnricher 后预览候选被富化。
+// staticEnricher 是把所有草稿字段加上中文说明/示例的测试富化器，验证 Manager
+// 装配 WithEnricher 后，手动 EnrichDraft 会回填字段。
 type staticEnricher struct{}
 
 func (staticEnricher) Enrich(_ context.Context, drafts []capabilities.Capability) ([]capabilities.Capability, error) {
@@ -783,7 +783,7 @@ func (staticEnricher) Enrich(_ context.Context, drafts []capabilities.Capability
 	return out, nil
 }
 
-func TestManagerPreviewEnrichCandidates(t *testing.T) {
+func TestManagerEnrichDraftManualTrigger(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
@@ -819,23 +819,133 @@ paths:
 	manager := capabilities.NewManager(dir, capabilities.NewHTTPAdapter(server.Client())).
 		WithEnricher(staticEnricher{})
 
-	preview, err := manager.PreviewOpenAPIFromURL(context.Background(), capabilities.OpenAPIURLPreviewRequest{
+	imported, err := manager.ImportOpenAPIFromURL(context.Background(), capabilities.OpenAPIURLImportRequest{
 		OpenAPIURL:     server.URL,
 		BackendBaseURL: "https://middleware.example.com",
 	})
 	if err != nil {
-		t.Fatalf("PreviewOpenAPIFromURL returned %v", err)
+		t.Fatalf("ImportOpenAPIFromURL returned %v", err)
 	}
-	if len(preview.Candidates) != 1 {
-		t.Fatalf("candidates = %d, want 1", len(preview.Candidates))
+	if len(imported) != 1 {
+		t.Fatalf("imported = %d, want 1", len(imported))
 	}
-	// 富化器把每个字段加上中文说明与示例，验证装配生效。
-	cap := preview.Candidates[0].Capability
-	if cap.InputSchema["cluster"].Description != "参数 cluster" || cap.InputSchema["cluster"].Examples[0] != "ex-cluster" {
-		t.Fatalf("cluster input not enriched: %+v", cap.InputSchema["cluster"])
+	// 导入路径不碰 LLM 富化：草稿是规则推断的原始输入字段。
+	if imported[0].Capability.InputSchema["cluster"].Description != "" {
+		t.Fatalf("import should not enrich: %+v", imported[0].Capability.InputSchema)
 	}
-	if cap.InputSchema["retention_hours"].Description != "参数 retention_hours" {
-		t.Fatalf("retention_hours input not enriched: %+v", cap.InputSchema["retention_hours"])
+	// 手动触发富化后回填。
+	enriched, err := manager.EnrichDraft(context.Background(), imported[0].Name)
+	if err != nil {
+		t.Fatalf("EnrichDraft returned %v", err)
+	}
+	if enriched.Capability.InputSchema["cluster"].Description != "参数 cluster" || enriched.Capability.InputSchema["cluster"].Examples[0] != "ex-cluster" {
+		t.Fatalf("cluster input not enriched: %+v", enriched.Capability.InputSchema["cluster"])
+	}
+	if enriched.Capability.InputSchema["retention_hours"].Description != "参数 retention_hours" {
+		t.Fatalf("retention_hours input not enriched: %+v", enriched.Capability.InputSchema["retention_hours"])
+	}
+}
+
+// staticRenameEnricher 批量富化时给每个草稿建议更名 + 重写描述，验证改名持久化。
+type staticRenameEnricher struct{}
+
+func (staticRenameEnricher) Enrich(_ context.Context, drafts []capabilities.Capability) ([]capabilities.Capability, error) {
+	out := make([]capabilities.Capability, len(drafts))
+	for i, d := range drafts {
+		d.Name = "refined." + d.Name
+		d.AI.Description = "精修描述 " + d.Name
+		out[i] = d
+	}
+	return out, nil
+}
+
+func TestManagerEnrichDraftsBatchRenamesAndPersists(t *testing.T) {
+	dir := t.TempDir()
+	manager := capabilities.NewManager(dir, nil).WithEnricher(staticRenameEnricher{})
+	ctx := context.Background()
+	base := func(name string) capabilities.Capability {
+		return capabilities.Capability{
+			Name:         name,
+			Status:       capabilities.StatusNeedsReview,
+			Domain:       "unknown",
+			ResourceType: "resource",
+			Operation:    tools.Read,
+			Risk:         tools.Low,
+			Backend:      capabilities.BackendSpec{Adapter: "http", Method: "GET", Path: "/api/weather/" + name, BaseURL: "https://w.example.com", TimeoutMS: 3000},
+			InputSchema:  map[string]capabilities.InputField{"city": {Type: "string", Required: true}},
+			Output:       capabilities.OutputSpec{Kind: "observation", SummaryTemplate: "ok", Fields: map[string]string{"status": "$.status"}},
+			Auth:         capabilities.AuthSpec{Roles: []string{"viewer", "operator", "admin"}},
+			AI:           capabilities.AISpec{Description: "old " + name},
+		}
+	}
+	if _, err := manager.SaveDraft(ctx, base("unknown.a.read")); err != nil {
+		t.Fatalf("save draft a: %v", err)
+	}
+	if _, err := manager.SaveDraft(ctx, base("unknown.b.read")); err != nil {
+		t.Fatalf("save draft b: %v", err)
+	}
+
+	out, err := manager.EnrichDraftsBatch(ctx, []string{"unknown.a.read", "unknown.b.read"})
+	if err != nil {
+		t.Fatalf("EnrichDraftsBatch: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("out = %d, want 2", len(out))
+	}
+	if out[0].Name != "refined.unknown.a.read" || out[1].Name != "refined.unknown.b.read" {
+		t.Fatalf("names = %s %s, want refined names", out[0].Name, out[1].Name)
+	}
+	if !strings.Contains(out[0].Capability.AI.Description, "精修描述") {
+		t.Fatalf("description not enriched: %q", out[0].Capability.AI.Description)
+	}
+	// 旧名草稿应已被删除（改名持久化）
+	if _, err := manager.Get(ctx, "unknown.a.read"); !errors.Is(err, capabilities.ErrCapabilityNotFound) {
+		t.Fatalf("old draft a still exists: %v", err)
+	}
+	if _, err := manager.Get(ctx, "unknown.b.read"); !errors.Is(err, capabilities.ErrCapabilityNotFound) {
+		t.Fatalf("old draft b still exists: %v", err)
+	}
+	// 新名可查
+	if _, err := manager.Get(ctx, "refined.unknown.a.read"); err != nil {
+		t.Fatalf("new draft a not found: %v", err)
+	}
+}
+
+func TestManagerEnrichDraftsBatchConflictKeepsOriginal(t *testing.T) {
+	dir := t.TempDir()
+	manager := capabilities.NewManager(dir, nil).WithEnricher(staticRenameEnricher{})
+	ctx := context.Background()
+	base := func(name string) capabilities.Capability {
+		return capabilities.Capability{
+			Name: name, Status: capabilities.StatusNeedsReview, Domain: "unknown", ResourceType: "resource",
+			Operation: tools.Read, Risk: tools.Low,
+			Backend:      capabilities.BackendSpec{Adapter: "http", Method: "GET", Path: "/api/weather/" + name, BaseURL: "https://w.example.com", TimeoutMS: 3000},
+			InputSchema:  map[string]capabilities.InputField{"city": {Type: "string", Required: true}},
+			Output:       capabilities.OutputSpec{Kind: "observation", SummaryTemplate: "ok", Fields: map[string]string{"status": "$.status"}},
+			Auth:         capabilities.AuthSpec{Roles: []string{"viewer", "operator", "admin"}},
+			AI:           capabilities.AISpec{Description: "old " + name},
+		}
+	}
+	// 预先存在一个草稿 refined.unknown.a.read，会与新名冲突
+	if _, err := manager.SaveDraft(ctx, base("refined.unknown.a.read")); err != nil {
+		t.Fatalf("save conflict draft: %v", err)
+	}
+	if _, err := manager.SaveDraft(ctx, base("unknown.a.read")); err != nil {
+		t.Fatalf("save draft a: %v", err)
+	}
+	out, err := manager.EnrichDraftsBatch(ctx, []string{"unknown.a.read"})
+	if err != nil {
+		t.Fatalf("EnrichDraftsBatch: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("out = %d, want 1", len(out))
+	}
+	// 冲突时回退原名，不覆盖已有草稿
+	if out[0].Name != "unknown.a.read" {
+		t.Fatalf("name = %q, want original kept on conflict", out[0].Name)
+	}
+	if _, err := manager.Get(ctx, "refined.unknown.a.read"); err != nil {
+		t.Fatalf("pre-existing draft clobbered: %v", err)
 	}
 }
 

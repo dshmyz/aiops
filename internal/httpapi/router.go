@@ -45,6 +45,16 @@ const (
 	// round-trip an external reasoning model (e.g. mimo), so the one-shot
 	// assistant path gets a longer budget.
 	assistantRequestTimeout = 60 * time.Second
+	// capabilityImportTimeout bounds capability import/preview/commit routes.
+	// These run LLM enrichment (one call per operation, concurrent), which the
+	// generic readTimeout (5s) is far too short for — with it the enrichment
+	// never completes and imported tools ship with empty descriptions.
+	capabilityImportTimeout = 120 * time.Second
+	// capabilityEnrichTimeout bounds the manual enrich-batch route. Each batch of
+	// drafts is one LLM call; a 100-draft refine spans many calls. It's an explicit
+	// user-triggered action (waiting is intended), so it gets a long budget instead
+	// of the fast-fail import timeout.
+	capabilityEnrichTimeout = 10 * time.Minute
 	// assistantBodyLimit bounds the assistant request body: the JSON envelope
 	// plus up to maxAttachmentsPerMessage log/text attachments. 5 × 400KB
 	// raw + JSON escaping overhead ≈ 2.6MB worst case; validated precisely
@@ -126,6 +136,10 @@ type CapabilityManagementService interface {
 	Unpublish(context.Context, string) (capabilities.ManagedCapability, error)
 	DeleteDraft(context.Context, string) error
 	QuickPublish(context.Context, capabilities.QuickPublishRequest) (capabilities.ManagedCapability, error)
+	// EnrichDraft 手动触发单个能力的 LLM 富化（补描述/参数/示例），用户显式点击。
+	EnrichDraft(context.Context, string) (capabilities.ManagedCapability, error)
+	// EnrichDraftsBatch 批量精修多个能力（一次 LLM 调用优化名称+描述+参数）。
+	EnrichDraftsBatch(context.Context, []string) ([]capabilities.ManagedCapability, error)
 }
 
 // ScheduledTaskService 是定时巡检任务的应用层接口。scheduler.Service 实现此接口；
@@ -680,7 +694,7 @@ func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Req
 		r.writeForbidden(writer, request, user, string(policy.PermissionDenied), request.URL.Path)
 		return
 	}
-	ctx, cancel := context.WithTimeout(request.Context(), readTimeout)
+	ctx, cancel := context.WithTimeout(request.Context(), capabilityImportTimeout)
 	defer cancel()
 	switch {
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/capabilities/import/openapi-url/preview":
@@ -744,6 +758,25 @@ func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Req
 			return
 		}
 		writeCapabilityJSON(writer, item)
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/capabilities/enrich-batch":
+		var body struct {
+			Names []string `json:"names"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 256*1024))
+		if err := decoder.Decode(&body); err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid JSON input")
+			return
+		}
+		// 批量精修是显式用户操作，一次可能覆盖几十个草稿（多次 LLM 调用），
+		// 用独立的长超时，不受 120s 导入超时约束。
+		enrichCtx, enrichCancel := context.WithTimeout(request.Context(), capabilityEnrichTimeout)
+		defer enrichCancel()
+		result, err := r.capability.EnrichDraftsBatch(enrichCtx, body.Names)
+		if err != nil {
+			writeCapabilityError(writer, err)
+			return
+		}
+		writeCapabilityJSON(writer, map[string]any{"capabilities": result})
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/capabilities/drafts":
 		capability, ok := decodeCapability(writer, request)
 		if !ok {
@@ -825,6 +858,14 @@ func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Req
 	case request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/capabilities/") && strings.HasSuffix(request.URL.Path, "/publish"):
 		name := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/capabilities/"), "/publish")
 		item, err := r.capability.Publish(ctx, name)
+		if err != nil {
+			writeCapabilityError(writer, err)
+			return
+		}
+		writeCapabilityJSON(writer, item)
+	case request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/capabilities/") && strings.HasSuffix(request.URL.Path, "/enrich"):
+		name := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/capabilities/"), "/enrich")
+		item, err := r.capability.EnrichDraft(ctx, name)
 		if err != nil {
 			writeCapabilityError(writer, err)
 			return

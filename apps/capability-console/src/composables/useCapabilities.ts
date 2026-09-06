@@ -152,6 +152,10 @@ export interface UseCapabilities {
   deleteSelectedDraft: (capability: ManagedCapability) => Promise<void>;
   handleQuickPublished: (capability: ManagedCapability) => void;
   handleQuickPublishError: (message: string) => void;
+  enrichSelected: (capability: ManagedCapability) => Promise<void>;
+  enrichLoading: Ref<boolean>;
+  enrichAllDrafts: () => Promise<number | undefined>;
+  enrichAllLoading: Ref<boolean>;
   runAIPreflight: () => Promise<void>;
   addInputField: () => void;
   removeInputField: (name: string) => void;
@@ -430,6 +434,10 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     deleteSelectedDraft: publish.deleteSelectedDraft,
     handleQuickPublished: publish.handleQuickPublished,
     handleQuickPublishError: publish.handleQuickPublishError,
+    enrichSelected: publish.enrichSelected,
+    enrichLoading: publish.enrichLoading,
+    enrichAllDrafts: publish.enrichAllDrafts,
+    enrichAllLoading: publish.enrichAllLoading,
     runAIPreflight: editor.runAIPreflight,
     addInputField: editor.addInputField,
     removeInputField: editor.removeInputField,

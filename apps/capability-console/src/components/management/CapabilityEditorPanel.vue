@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { ElInput, ElInputNumber, ElSelect, ElOption, ElTag } from 'element-plus';
+import { ElButton, ElInput, ElInputNumber, ElSelect, ElOption, ElTag } from 'element-plus';
 import type { UseCapabilities } from '../../composables/useCapabilities';
 import type { InputField } from '../../types';
 
@@ -58,7 +58,12 @@ const authHeaderName = computed({
         <label>资源类型<el-input v-model="capabilities.selected.value.resource_type" placeholder="bucket" /></label>
         <label>操作类型<el-select v-model="capabilities.selected.value.operation"><el-option label="读取" value="read" /><el-option label="写入" value="write" /></el-select></label>
         <label>风险等级<el-select v-model="capabilities.selected.value.risk"><el-option label="低" value="low" /><el-option label="中" value="medium" /><el-option label="高" value="high" /></el-select></label>
-        <label class="wide">AI 描述<el-input data-test="ai-description" v-model="capabilities.selected.value.ai.description" type="textarea" :rows="2" placeholder="描述该能力的作用，供 AI 判断何时调用" /></label>
+        <label class="wide">AI 描述
+          <div class="ai-desc-row">
+            <el-input data-test="ai-description" v-model="capabilities.selected.value.ai.description" type="textarea" :rows="2" placeholder="描述该能力的作用，供 AI 判断何时调用" />
+            <el-button data-test="ai-enrich" size="small" type="primary" :loading="capabilities.enrichLoading.value" @click="capabilities.enrichSelected(capabilities.selected.value)">AI 补全</el-button>
+          </div>
+        </label>
       </div>
     </section>
     <section class="editor-group">

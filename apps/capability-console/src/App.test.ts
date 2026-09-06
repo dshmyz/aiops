@@ -1304,6 +1304,8 @@ describe('Capability Console', () => {
           resource_type: 'bucket',
           operation: 'read',
           risk: 'low',
+          description: '',
+          summary: '',
         },
       }],
     });

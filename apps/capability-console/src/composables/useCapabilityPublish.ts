@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue';
 import type { Ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { deleteDraftCapability, publishCapability, unpublishCapability } from '../api';
+import { deleteDraftCapability, enrichCapabilities, enrichCapability, publishCapability, unpublishCapability } from '../api';
 import { capabilityKey, upsert } from '../capabilityFormat';
 import type { ManagedCapability } from '../types';
 import type { ManagementPhase } from './useCapabilities';
@@ -144,6 +144,53 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
     await publishSelected(selected.value);
   }
 
+  const enrichLoading = ref(false);
+  /** 手动触发 LLM 富化当前能力（补中文描述/参数/示例），成功后刷新列表与选中项。 */
+  async function enrichSelected(capability: ManagedCapability) {
+    error.value = '';
+    enrichLoading.value = true;
+    try {
+      const enriched = await enrichCapability(capability.name);
+      capabilities.value = capabilities.value.map((item) =>
+        item.name === enriched.name && item.source === enriched.source ? enriched : item,
+      );
+      onSelect(enriched);
+      ElMessage.success(`AI 已补全 ${enriched.name} 的描述与参数说明`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'AI 补全失败';
+      error.value = msg;
+      ElMessage.error(msg);
+    } finally {
+      enrichLoading.value = false;
+    }
+  }
+
+  const enrichAllLoading = ref(false);
+  /** 批量精修所有草稿：一次 LLM 调用优化名称+描述+参数，成功后从服务端刷新列表。 */
+  async function enrichAllDrafts(): Promise<number | undefined> {
+    const drafts = capabilities.value.filter((item) => item.source !== 'published');
+    if (drafts.length === 0) {
+      return undefined;
+    }
+    error.value = '';
+    enrichAllLoading.value = true;
+    try {
+      const refined = await enrichCapabilities(drafts.map((item) => item.name));
+      await onRefresh();
+      if (refined.length > 0) {
+        const fresh = capabilities.value.find((item) => item.name === refined[0].name) ?? refined[0];
+        onSelect(fresh);
+      }
+      return refined.length;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'AI 精修失败';
+      error.value = msg;
+      throw err; // 由调用方决定是否弹窗提示
+    } finally {
+      enrichAllLoading.value = false;
+    }
+  }
+
   async function unpublishSelected(capability: ManagedCapability) {
     error.value = '';
     try {
@@ -233,6 +280,10 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
     handleQuickPublished,
     handleQuickPublishError,
     publishAll,
+    enrichSelected,
+    enrichLoading,
+    enrichAllDrafts,
+    enrichAllLoading,
   };
 }
 

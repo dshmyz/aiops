@@ -388,6 +388,24 @@ export async function publishCapability(name: string): Promise<ManagedCapability
   }
 }
 
+/** 手动触发 LLM 富化单个能力（补中文描述/参数/示例）。导入路径不自动富化，由用户显式点击触发。 */
+export async function enrichCapability(name: string): Promise<ManagedCapability> {
+  const body = await request<Partial<ManagedCapability> | null>(`/v1/capabilities/${encodeURIComponent(name)}/enrich`, {
+    method: 'POST',
+    body: '{}',
+  });
+  return normalizeCapability({ name, ...(body ?? {}) });
+}
+
+/** 批量精修：一次 LLM 调用优化多个草稿的名称+描述+参数，返回精修后的能力列表。 */
+export async function enrichCapabilities(names: string[]): Promise<ManagedCapability[]> {
+  const body = await request<{ capabilities?: Partial<ManagedCapability>[] }>('/v1/capabilities/enrich-batch', {
+    method: 'POST',
+    body: JSON.stringify({ names }),
+  });
+  return (body.capabilities ?? []).map((item) => normalizeCapability({ ...(item as ManagedCapability) }));
+}
+
 export async function unpublishCapability(name: string): Promise<ManagedCapability> {
   const body = await request<Partial<ManagedCapability> | null>(`/v1/capabilities/${encodeURIComponent(name)}/unpublish`, {
     method: 'POST',

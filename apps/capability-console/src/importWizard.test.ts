@@ -126,6 +126,8 @@ describe('import wizard helpers', () => {
       resource_type: 'bucket',
       operation: 'read',
       risk: 'low',
+      description: '',
+      summary: 'ok',
     });
   });
 
@@ -139,6 +141,8 @@ describe('import wizard helpers', () => {
       resource_type: 'service',
       operation: 'read',
       risk: 'low',
+      description: '',
+      summary: 'ok',
     };
 
     expect(buildCommitSelections(preview, selections, overrides)).toEqual([
@@ -150,6 +154,8 @@ describe('import wizard helpers', () => {
           resource_type: 'bucket',
           operation: 'read',
           risk: 'low',
+          description: '',
+          summary: 'ok',
         },
       },
       {
@@ -160,6 +166,8 @@ describe('import wizard helpers', () => {
           resource_type: 'service',
           operation: 'read',
           risk: 'low',
+          description: '',
+          summary: 'ok',
         },
       },
     ]);

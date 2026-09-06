@@ -64,6 +64,8 @@ type ImportCandidateOverride struct {
 	ResourceType string          `json:"resource_type,omitempty"`
 	Operation    tools.Operation `json:"operation,omitempty"`
 	Risk         tools.RiskLevel `json:"risk,omitempty"`
+	Description  string          `json:"description,omitempty"`
+	Summary      string          `json:"summary,omitempty"`
 }
 
 func OpenAPIFingerprint(body []byte) string {
@@ -142,6 +144,12 @@ func ApplyCandidateOverride(candidate ImportCandidate, override ImportCandidateO
 	}
 	if override.Risk != "" {
 		capability.Risk = override.Risk
+	}
+	if strings.TrimSpace(override.Description) != "" {
+		capability.AI.Description = strings.TrimSpace(override.Description)
+	}
+	if strings.TrimSpace(override.Summary) != "" {
+		capability.Output.SummaryTemplate = strings.TrimSpace(override.Summary)
 	}
 	capability.Status = StatusNeedsReview
 	return capability

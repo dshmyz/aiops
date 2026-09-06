@@ -418,6 +418,85 @@ func TestCapabilityQuickPublishPublishesCapability(t *testing.T) {
 	}
 }
 
+func TestCapabilityEnrichDraftRoute(t *testing.T) {
+	t.Parallel()
+	service := &capabilityManagementService{
+		enrichResult: capabilities.ManagedCapability{
+			Capability: capabilities.Capability{
+				Name:         "kafka.topic.retention.update",
+				Status:       capabilities.StatusNeedsReview,
+				Domain:       "kafka",
+				ResourceType: "topic",
+				Operation:    tools.Write,
+				Risk:         tools.Medium,
+				AI:           capabilities.AISpec{Description: "调整 Kafka topic 保留期"},
+				Backend:      capabilities.BackendSpec{Adapter: "http", Method: "POST", Path: "/api/kafka/clusters/{cluster}/topics/{topic}/retention", BaseURL: "https://middleware.example.com", TimeoutMS: 3000},
+			},
+			Source: capabilities.SourceDiscovered,
+		},
+	}
+	router := httpapi.NewRouter(
+		httpapi.NewHMACAuthenticator([]byte("test-secret")),
+		execution.NewReadOnlyService(&readRunner{}, nil),
+		httpapi.WithCapabilities(service),
+	)
+	req := signedRequestWithMethod(t, http.MethodPost, "/v1/capabilities/kafka.topic.retention.update/enrich", "", "admin-1", []string{"admin"})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
+	}
+	if service.enrichCalls != 1 || service.enrichName != "kafka.topic.retention.update" {
+		t.Fatalf("enrich calls = %d name = %q, want 1 kafka.topic.retention.update", service.enrichCalls, service.enrichName)
+	}
+	if !strings.Contains(res.Body.String(), `"description":"调整 Kafka topic 保留期"`) {
+		t.Fatalf("body = %s, want enriched description", res.Body.String())
+	}
+}
+
+func TestCapabilityEnrichBatchRoute(t *testing.T) {
+	t.Parallel()
+	service := &capabilityManagementService{
+		enrichBatchResult: []capabilities.ManagedCapability{
+			{
+				Capability: capabilities.Capability{
+					Name:         "weather.forecast.read",
+					Status:       capabilities.StatusNeedsReview,
+					Domain:       "weather",
+					ResourceType: "forecast",
+					Operation:    tools.Read,
+					Risk:         tools.Low,
+					AI:           capabilities.AISpec{Description: "查询未来几天天气"},
+					Backend:      capabilities.BackendSpec{Adapter: "http", Method: "GET", Path: "/api/weather/forecast", BaseURL: "https://weather.example.com", TimeoutMS: 3000},
+				},
+				Source: capabilities.SourceDiscovered,
+			},
+		},
+	}
+	router := httpapi.NewRouter(
+		httpapi.NewHMACAuthenticator([]byte("test-secret")),
+		execution.NewReadOnlyService(&readRunner{}, nil),
+		httpapi.WithCapabilities(service),
+	)
+	body := `{"names":["unknown.resource.resource.read.getres00"]}`
+	req := signedRequest(t, "/v1/capabilities/enrich-batch", body, "admin-1", []string{"admin"})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
+	}
+	if service.enrichBatchCalls != 1 || len(service.enrichBatchNames) != 1 || service.enrichBatchNames[0] != "unknown.resource.resource.read.getres00" {
+		t.Fatalf("enrich batch = %+v, want [unknown.resource.resource.read.getres00]", service.enrichBatchNames)
+	}
+	if !strings.Contains(res.Body.String(), `"name":"weather.forecast.read"`) {
+		t.Fatalf("body = %s, want refined name", res.Body.String())
+	}
+}
+
 func TestCapabilityQuickPublishMapsConflict(t *testing.T) {
 	t.Parallel()
 	service := &capabilityManagementService{
@@ -3071,6 +3150,14 @@ type capabilityManagementService struct {
 	quickPublishErr    error
 	quickPublishCalls  int
 	quickPublishReq    capabilities.QuickPublishRequest
+	enrichName         string
+	enrichResult       capabilities.ManagedCapability
+	enrichErr          error
+	enrichCalls        int
+	enrichBatchNames   []string
+	enrichBatchResult  []capabilities.ManagedCapability
+	enrichBatchErr     error
+	enrichBatchCalls   int
 }
 
 func (s *capabilityManagementService) List(context.Context) ([]capabilities.ManagedCapability, error) {
@@ -3147,6 +3234,24 @@ func (s *capabilityManagementService) QuickPublish(_ context.Context, request ca
 		return capabilities.ManagedCapability{}, s.quickPublishErr
 	}
 	return s.quickPublishResult, nil
+}
+
+func (s *capabilityManagementService) EnrichDraft(_ context.Context, name string) (capabilities.ManagedCapability, error) {
+	s.enrichCalls++
+	s.enrichName = name
+	if s.enrichErr != nil {
+		return capabilities.ManagedCapability{}, s.enrichErr
+	}
+	return s.enrichResult, nil
+}
+
+func (s *capabilityManagementService) EnrichDraftsBatch(_ context.Context, names []string) ([]capabilities.ManagedCapability, error) {
+	s.enrichBatchCalls++
+	s.enrichBatchNames = names
+	if s.enrichBatchErr != nil {
+		return nil, s.enrichBatchErr
+	}
+	return s.enrichBatchResult, nil
 }
 
 type errorAssistant struct {

@@ -551,6 +551,43 @@ func validateDraftName(name string) error {
 	return nil
 }
 
+// inferDescription 生成工具的 LLM 侧描述。优先用 OpenAPI 的 summary；
+// spec 没写时兜底从方法 + 路径 + 参数生成可读中文描述，保证导入的工具
+// 永远有非空 description——这是大模型判断"何时调用"的唯一依据。
+func inferDescription(method, path, summary string, input map[string]InputField) string {
+	if s := strings.TrimSpace(summary); s != "" {
+		return s
+	}
+	verb := map[string]string{
+		"GET":    "查询",
+		"POST":   "创建或执行",
+		"PUT":    "更新",
+		"PATCH":  "更新",
+		"DELETE": "删除",
+	}[strings.ToUpper(method)]
+	if verb == "" {
+		verb = "操作"
+	}
+	desc := fmt.Sprintf("%s资源（%s %s）", verb, strings.ToUpper(method), path)
+	if len(input) == 0 {
+		return desc
+	}
+	names := make([]string, 0, len(input))
+	for name := range input {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		if d := strings.TrimSpace(input[name].Description); d != "" {
+			parts = append(parts, fmt.Sprintf("%s（%s）", name, d))
+		} else {
+			parts = append(parts, name)
+		}
+	}
+	return desc + "，参数：" + strings.Join(parts, "、")
+}
+
 func inferCapability(method, path string, operation openAPIOperation, respSchema *openAPIObjectSchema, components *openAPIComponents) Capability {
 	text := strings.ToLower(path + " " + strings.Join([]string(operation.Tags), " ") + " " + operation.Summary)
 	domain := inferDomain(text)
@@ -627,7 +664,7 @@ func inferCapability(method, path string, operation openAPIOperation, respSchema
 		Backend:       BackendSpec{Adapter: "http", Method: method, Path: path, TimeoutMS: 3000},
 		InputSchema:   input,
 		Auth:          AuthSpec{Roles: []string{"viewer", "operator", "admin"}},
-		AI:            AISpec{Description: operation.Summary},
+		AI:            AISpec{Description: inferDescription(method, path, operation.Summary, input)},
 	}
 	// 从响应 schema 推断输出字段映射
 	outputFields := inferOutputFields(respSchema, components)

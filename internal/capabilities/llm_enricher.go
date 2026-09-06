@@ -4,10 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/gracegaoya/ai-operations-copilot/internal/tools"
 )
+
+// enrichBatchSize 每次 LLM 调用承载的草稿数。批量富化把多个草稿打包进一次调用，
+// 让模型一次性返回全部富化（10 个以下的 API 就是字面意义的一次发过去），而不是
+// 逐草稿调用。上限约束单次 prompt/输出体积，降低长 JSON 截断与遗漏风险。
+const enrichBatchSize = 10
 
 // ChatCompleter 是 llm_enricher 依赖的最小聊天接口。main 侧用 assistant 的
 // eino chat model 适配，使 capabilities 包不依赖具体 LLM provider。
@@ -34,6 +40,10 @@ func NewLLMImportEnricher(chat ChatCompleter) *LLMImportEnricher {
 
 // enrichedDraftShape 描述 LLM 需要填写的字段。字段尽量精简，减小 token 与出错率。
 type enrichedDraftShape struct {
+	// Key 是原始能力名，用于把富化结果匹配回草稿。LLM 常把建议的新名当键，
+	// 所以 key 单独携带原始名，与 name（建议的新名）解耦。
+	Key          string                   `json:"key,omitempty"`
+	Name         string                   `json:"name,omitempty"`
 	Description  string                   `json:"description"`
 	Summary      string                   `json:"summary,omitempty"`
 	Risk         string                   `json:"risk,omitempty"`
@@ -41,41 +51,88 @@ type enrichedDraftShape struct {
 	OutputFields map[string]string        `json:"output_fields,omitempty"`
 }
 
+// capabilityNamePattern 校验 LLM 建议的能力名：小写字母/数字开头，后续可含 . _ -
+// （与发布/文件名的安全约束一致）。
+var capabilityNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
 type enrichedField struct {
 	Description string   `json:"description,omitempty"`
-	Examples    []string `json:"examples,omitempty"`
-	Enum        []string `json:"enum,omitempty"`
+	// Examples 用 []any 容忍 LLM 给数字/布尔参数写非字符串示例（如 "examples":[3]），
+	// 否则整个富化 JSON 会因类型不匹配反序列化失败、静默丢掉全部富化。
+	Examples []any    `json:"examples,omitempty"`
+	Enum     []string `json:"enum,omitempty"`
+}
+
+// enrichedBatchShape 是一次批量富化的 LLM 返回：数组，顺序与输入草稿编号一致，
+// 每个元素用 key（原始名）标出自己的归属。缺哪个草稿就保留哪个的原样。
+type enrichedBatchShape struct {
+	Enrichments []enrichedDraftShape `json:"enrichments"`
 }
 
 func (e *LLMImportEnricher) Enrich(ctx context.Context, drafts []Capability) ([]Capability, error) {
 	out := make([]Capability, len(drafts))
 	copy(out, drafts)
-	if e == nil || e.chat == nil {
+	if e == nil || e.chat == nil || len(out) == 0 {
 		return out, nil
 	}
-	// 逐草稿调用 LLM（并发由上层控制），每个失败独立回退，互不影响。
-	for i := range out {
-		enriched, err := e.enrichOne(ctx, out[i])
-		if err != nil {
-			continue // 保留原始草稿
+	// 批量富化：按 enrichBatchSize 分组，每组一次 LLM 调用一次性返回整组富化，
+	// 而不是逐草稿调用。组内某个草稿缺失/非法→保留原样；整组失败→重试一次后
+	// 保留原草稿，绝不因富化中断导入。
+	for start := 0; start < len(out); start += enrichBatchSize {
+		end := start + enrichBatchSize
+		if end > len(out) {
+			end = len(out)
 		}
-		out[i] = enriched
+		e.enrichBatch(ctx, out[start:end])
 	}
 	return out, nil
 }
 
-func (e *LLMImportEnricher) enrichOne(ctx context.Context, draft Capability) (Capability, error) {
-	user := buildEnrichPrompt(draft)
-	response, err := e.chat.Complete(ctx, enrichmentSystemPrompt, user)
-	if err != nil {
-		return draft, err
+func (e *LLMImportEnricher) enrichBatch(ctx context.Context, chunk []Capability) {
+	user := buildEnrichBatchPrompt(chunk)
+	var batch enrichedBatchShape
+	ok := false
+	for attempt := 0; attempt < 2; attempt++ {
+		response, err := e.chat.Complete(ctx, enrichmentSystemPrompt, user)
+		if err != nil {
+			continue // 重试一次；仍失败则整组保留原草稿
+		}
+		if err := json.Unmarshal([]byte(extractEnrichJSON(response)), &batch); err != nil {
+			continue
+		}
+		ok = true
+		break
 	}
-	jsonStr := extractEnrichJSON(response)
-	var shape enrichedDraftShape
-	if err := json.Unmarshal([]byte(jsonStr), &shape); err != nil {
-		return draft, err
+	if !ok {
+		return
 	}
-	// 有选择地回填：只在 LLM 给出有价值内容时覆盖，避免劣化已存在的字段。
+	// 匹配规则（从强到弱）：
+	//  1. key（原始名）精确匹配；
+	//  2. 数量一致且无 key 可用时按位置（LLM 顺序编号返回，数组保序）——
+	//     覆盖 LLM 把新名当键的情况；
+	//  3. 单草稿：直接应用唯一返回。
+	for i := range chunk {
+		var shape *enrichedDraftShape
+		for j := range batch.Enrichments {
+			if batch.Enrichments[j].Key == chunk[i].Name {
+				shape = &batch.Enrichments[j]
+				break
+			}
+		}
+		if shape == nil && len(batch.Enrichments) == len(chunk) {
+			shape = &batch.Enrichments[i]
+		}
+		if shape != nil {
+			chunk[i] = applyEnrichment(chunk[i], *shape)
+		}
+	}
+}
+
+// applyEnrichment 有选择地回填：只在 LLM 给出有价值内容时覆盖，避免劣化已存在字段。
+func applyEnrichment(draft Capability, shape enrichedDraftShape) Capability {
+	if name := strings.TrimSpace(shape.Name); name != "" && name != draft.Name && capabilityNamePattern.MatchString(name) {
+		draft.Name = name
+	}
 	if desc := strings.TrimSpace(shape.Description); desc != "" {
 		draft.AI.Description = desc
 	}
@@ -96,7 +153,11 @@ func (e *LLMImportEnricher) enrichOne(ctx context.Context, draft Capability) (Ca
 			existing.Description = f
 		}
 		if len(field.Examples) > 0 {
-			existing.Examples = field.Examples
+			examples := make([]string, 0, len(field.Examples))
+			for _, ex := range field.Examples {
+				examples = append(examples, fmt.Sprintf("%v", ex))
+			}
+			existing.Examples = examples
 		}
 		if len(field.Enum) > 0 {
 			existing.Enum = field.Enum
@@ -120,7 +181,7 @@ func (e *LLMImportEnricher) enrichOne(ctx context.Context, draft Capability) (Ca
 			}
 		}
 	}
-	return draft, nil
+	return draft
 }
 
 // isValidRiskLevel 校验风险等级是否合法。
@@ -133,7 +194,10 @@ func isValidRiskLevel(risk string) bool {
 	}
 }
 
-const enrichmentSystemPrompt = `你是能力接口文档的助手。根据给定能力的信息，用简洁中文补全参数说明和输出配置，只返回合法 JSON。
+const enrichmentSystemPrompt = `你是能力接口文档的助手。下面给出一次导入的多个能力草稿，请为【每一个】能力补全参数说明和输出配置，只返回合法 JSON，不要解释、不要遗漏任何一个能力。
+
+返回格式（数组，顺序与上面编号一致；key 是原始能力名，必须与给出的 name 完全一致，一个都不能少）：
+{"enrichments":[{"key":"原能力name","name":"更简洁有意义的新名，仅小写字母/数字/._-，如 weather.forecast.read（拿不准就保持原样）","description":"能力的中文一句描述","summary":"结果摘要模板，可用 {{字段名}} 引用输出字段","risk":"low/medium/high","input_schema":{"参数名":{"description":"中文说明","examples":["示例值"],"enum":["合法取值"]}},"output_fields":{"字段名":"$.JSONPath路径"}}]}
 
 输出字段要求：
 - output_fields 是 "字段名": "JSONPath路径" 的映射
@@ -151,30 +215,33 @@ summary 要求：
 - 可用 {{字段名}} 引用输出字段，如 "状态: {{status}}"
 `
 
-// buildEnrichPrompt 把草稿的能力信息压缩进 prompt，让 LLM 补全元数据。
-func buildEnrichPrompt(draft Capability) string {
+// buildEnrichBatchPrompt 把一批草稿压缩进一个 prompt，让模型一次返回整批富化。
+func buildEnrichBatchPrompt(drafts []Capability) string {
+	var sb strings.Builder
+	for i, d := range drafts {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, describeDraft(d)))
+	}
+	sb.WriteString("\n请返回 JSON: {\"enrichments\":[{\"key\":\"原能力name\",...}]}，key 与上面给出的 name 完全一致，顺序一致，一个都不能少")
+	return sb.String()
+}
+
+// describeDraft 把单个草稿压缩成 prompt 里的简短描述。
+func describeDraft(d Capability) string {
 	var fields []string
-	for name, f := range draft.InputSchema {
+	for name, f := range d.InputSchema {
 		fields = append(fields, fmt.Sprintf("%s(type=%s, required=%v)", name, f.Type, f.Required))
 	}
 	var outputFields []string
-	for name, path := range draft.Output.Fields {
+	for name, path := range d.Output.Fields {
 		outputFields = append(outputFields, fmt.Sprintf("%s=%s", name, path))
 	}
 	return fmt.Sprintf(
-		"能力: name=%s domain=%s resource_type=%s operation=%s risk=%s\n"+
-			"摘要: %s\n"+
-			"输入参数: %s\n"+
-			"自动推断的输出字段: %s\n\n"+
-			"请返回 JSON: {\n"+
-			"  \"description\":\"能力的中文一句描述\",\n"+
-			"  \"summary\":\"结果摘要模板，可用 {{字段名}} 引用输出字段\",\n"+
-			"  \"risk\":\"low/medium/high\",\n"+
-			"  \"input_schema\":{\"参数名\":{\"description\":\"中文说明\",\"examples\":[\"示例值\"],\"enum\":[\"合法取值\"]}},\n"+
-			"  \"output_fields\":{\"字段名\":\"$.JSONPath路径\"}\n"+
-			"}",
-		draft.Name, draft.Domain, draft.ResourceType, draft.Operation, draft.Risk,
-		strings.TrimSpace(draft.AI.Description),
+		"name=%s domain=%s resource_type=%s operation=%s risk=%s\n"+
+			"   摘要: %s\n"+
+			"   输入参数: %s\n"+
+			"   自动推断的输出字段: %s",
+		d.Name, d.Domain, d.ResourceType, d.Operation, d.Risk,
+		strings.TrimSpace(d.AI.Description),
 		strings.Join(fields, "; "),
 		strings.Join(outputFields, "; "),
 	)

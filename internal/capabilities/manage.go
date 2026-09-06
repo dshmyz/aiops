@@ -156,6 +156,109 @@ func (m *Manager) enrichDrafts(ctx context.Context, drafts []Capability) []Capab
 	return enriched
 }
 
+// EnrichDraft 手动触发富化单个能力（草稿或已发布），同步执行——用户显式点击
+// "AI 补全"，单次调用可接受。LLM 补全描述/参数/示例/建议更名后保存，返回富化结果。
+// 失败时返回错误（前端提示），不静默降级。
+func (m *Manager) EnrichDraft(ctx context.Context, name string) (ManagedCapability, error) {
+	if _, ok := m.enricher.(nopEnricher); ok {
+		return ManagedCapability{}, errors.New("LLM enrichment is not configured (eino-openai mode required)")
+	}
+	item, err := m.Get(ctx, name)
+	if err != nil {
+		return ManagedCapability{}, err
+	}
+	enriched := m.enrichDrafts(ctx, []Capability{item.Capability})
+	if len(enriched) != 1 {
+		return item, nil
+	}
+	if err := m.resolveEnrichedName(ctx, item.Capability, &enriched[0], map[string]bool{}); err != nil {
+		return ManagedCapability{}, err
+	}
+	return m.saveEnriched(ctx, item, enriched[0])
+}
+
+// EnrichDraftsBatch 批量精修：一次 LLM 调用（内部按批）同时优化多个草稿的名称、
+// 描述与参数说明。名称冲突（批内重名/与已有能力冲突）时回退原名，绝不覆盖已有能力。
+func (m *Manager) EnrichDraftsBatch(ctx context.Context, names []string) ([]ManagedCapability, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	if _, ok := m.enricher.(nopEnricher); ok {
+		return nil, errors.New("LLM enrichment is not configured (eino-openai mode required)")
+	}
+	items := make([]ManagedCapability, 0, len(names))
+	drafts := make([]Capability, 0, len(names))
+	for _, name := range names {
+		item, err := m.Get(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+		drafts = append(drafts, item.Capability)
+	}
+	enriched := m.enrichDrafts(ctx, drafts)
+	used := make(map[string]bool, len(enriched))
+	out := make([]ManagedCapability, 0, len(enriched))
+	for i := range enriched {
+		if err := m.resolveEnrichedName(ctx, drafts[i], &enriched[i], used); err != nil {
+			return nil, err
+		}
+		saved, err := m.saveEnriched(ctx, items[i], enriched[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, saved)
+	}
+	return out, nil
+}
+
+// resolveEnrichedName 应用 LLM 建议的新名，带冲突检查：新名非法/批内重名/与已有
+// discovered 或 published 冲突时回退原名，绝不覆盖已存在的能力。
+func (m *Manager) resolveEnrichedName(ctx context.Context, original Capability, enriched *Capability, used map[string]bool) error {
+	newName := strings.TrimSpace(enriched.Name)
+	if newName == "" || newName == original.Name {
+		enriched.Name = original.Name
+		return nil
+	}
+	if !capabilityNamePattern.MatchString(newName) || used[newName] {
+		enriched.Name = original.Name
+		return nil
+	}
+	for _, source := range []string{SourceDiscovered, SourcePublished} {
+		exists, err := m.store.Has(ctx, source, newName)
+		if err != nil {
+			return err
+		}
+		if exists {
+			enriched.Name = original.Name
+			return nil
+		}
+	}
+	used[newName] = true
+	return nil
+}
+
+// saveEnriched 保存富化结果并处理改名：草稿改名 = 存新名 + 删旧名；已发布能力保持
+// 原名（运行中的工具引用，只润色字段）。
+func (m *Manager) saveEnriched(ctx context.Context, original ManagedCapability, enriched Capability) (ManagedCapability, error) {
+	enriched.Status = original.Capability.Status
+	if original.Source == SourcePublished {
+		enriched.Name = original.Name
+		return m.store.SavePublished(ctx, enriched)
+	}
+	if enriched.Name == original.Name {
+		return m.SaveDraft(ctx, enriched)
+	}
+	saved, err := m.SaveDraft(ctx, enriched)
+	if err != nil {
+		return ManagedCapability{}, err
+	}
+	if err := m.DeleteDraft(ctx, original.Name); err != nil {
+		return saved, err // 新名已存，旧名残留，上报但不吞
+	}
+	return saved, nil
+}
+
 func (m *Manager) List(ctx context.Context) ([]ManagedCapability, error) {
 	return m.store.ListAll(ctx)
 }
@@ -298,16 +401,8 @@ func (m *Manager) PreviewOpenAPIFromURL(ctx context.Context, request OpenAPIURLP
 	if err != nil {
 		return ImportPreview{}, err
 	}
-	// LLM 富化候选草稿（补参数说明/示例/枚举、优化摘要），让评审阶段就看到
-	// 更清晰的输入元数据。全程容错：失败保留原始规则草稿。
-	enriched := make([]Capability, 0, len(preview.Candidates))
-	for _, candidate := range preview.Candidates {
-		enriched = append(enriched, candidate.Capability)
-	}
-	enriched = m.enrichDrafts(ctx, enriched)
-	for i := range preview.Candidates {
-		preview.Candidates[i].Capability = enriched[i]
-	}
+	// preview 不碰 LLM 富化：规则推断 + 确定性兜底描述，秒回。富化由用户手动
+	// 触发（POST /v1/capabilities/{name}/enrich），大 Swagger 预览不再卡 120s 超时。
 	preview.Source.OpenAPIURL = normalizedURL
 	preview.Source.BackendBaseURL = strings.TrimSpace(request.BackendBaseURL)
 	return preview, nil
@@ -380,21 +475,8 @@ func (m *Manager) CommitOpenAPIFromURL(ctx context.Context, request OpenAPIURLCo
 		}
 		result.Capabilities = append(result.Capabilities, item)
 	}
-	// 与 PreviewOpenAPIFromURL 一致：commit 前对选中的候选做 LLM 富化（一次批量
-	// 调用），否则用户在预览阶段看到的 AI 补充（参数说明/示例/枚举）不会落到草稿。
-	// 富化在落库后进行并回写，失败不影响草稿保存。
-	if len(result.Capabilities) > 0 {
-		drafts := make([]Capability, 0, len(result.Capabilities))
-		for _, item := range result.Capabilities {
-			drafts = append(drafts, item.Capability)
-		}
-		enriched := m.enrichDrafts(ctx, drafts)
-		for i := range result.Capabilities {
-			if saved, err := m.SaveDraft(ctx, enriched[i]); err == nil {
-				result.Capabilities[i] = saved
-			}
-		}
-	}
+	// 富化由用户手动触发（POST /v1/capabilities/{name}/enrich），commit 路径不碰
+	// LLM：草稿先落库立即返回，大 Swagger 不再卡在请求里超时。
 	for _, candidate := range preview.Candidates {
 		if _, ok := selected[candidate.ID]; !ok {
 			result.Skipped = append(result.Skipped, OpenAPIURLCommitSkipped{CandidateID: candidate.ID, Reason: "not selected"})
@@ -418,7 +500,6 @@ func (m *Manager) ImportOpenAPIFromURL(ctx context.Context, request OpenAPIURLIm
 	if err != nil {
 		return nil, err
 	}
-	drafts = m.enrichDrafts(ctx, drafts)
 	imported := make([]ManagedCapability, 0, len(drafts))
 	for _, draft := range drafts {
 		draft.Backend.BaseURL = strings.TrimSpace(request.BackendBaseURL)
@@ -428,6 +509,8 @@ func (m *Manager) ImportOpenAPIFromURL(ctx context.Context, request OpenAPIURLIm
 		}
 		imported = append(imported, item)
 	}
+	// 富化由用户手动触发（POST /v1/capabilities/{name}/enrich），导入路径不碰
+	// LLM：草稿立即落库（带确定性兜底描述、立即可用），大 Swagger 秒回、永不超时。
 	return imported, nil
 }
 

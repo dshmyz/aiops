@@ -111,7 +111,7 @@ function candidateProbeCellText(candidateId: string): string {
               <small>{{ candidateProbeCellText(candidate.id) }}</small>
             </div>
             <details class="candidate-adjust candidate-adjust--compact" :data-test="`candidate-adjust-${candidate.id}`">
-              <summary title="调整命名、领域、风险等级"><span class="candidate-adjust__chevron" aria-hidden="true"></span>调整</summary>
+              <summary title="调整命名、领域、风险等级、描述"><span class="candidate-adjust__chevron" aria-hidden="true"></span>调整</summary>
               <div class="candidate-edit-grid">
                 <input :data-test="`candidate-name-${candidate.id}`" class="mini-input" :value="capabilities.candidateOverrides.value[candidate.id]?.name" @input="capabilities.updateCandidateOverride(candidate.id, { name: ($event.target as HTMLInputElement).value })" />
                 <input :data-test="`candidate-domain-${candidate.id}`" class="mini-input" :value="capabilities.candidateOverrides.value[candidate.id]?.domain" @input="capabilities.updateCandidateOverride(candidate.id, { domain: ($event.target as HTMLInputElement).value })" />
@@ -125,6 +125,7 @@ function candidateProbeCellText(candidateId: string): string {
                   <option value="medium">中</option>
                   <option value="high">高</option>
                 </select>
+                <textarea :data-test="`candidate-description-${candidate.id}`" class="mini-input candidate-description" rows="2" :value="capabilities.candidateOverrides.value[candidate.id]?.description" @input="capabilities.updateCandidateOverride(candidate.id, { description: ($event.target as HTMLTextAreaElement).value })" placeholder="AI 描述：告诉大模型这个工具是干嘛的、何时调用"></textarea>
               </div>
             </details>
           </article>

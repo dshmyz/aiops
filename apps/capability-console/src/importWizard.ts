@@ -28,6 +28,8 @@ export function createCandidateOverrides(preview: ImportPreview): Record<string,
       resource_type: summary.resource_type,
       operation: summary.operation,
       risk: summary.risk,
+      description: candidate.capability.ai?.description ?? '',
+      summary: candidate.capability.output?.summary_template ?? '',
     }];
   }));
 }

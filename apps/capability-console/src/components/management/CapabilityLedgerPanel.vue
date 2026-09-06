@@ -11,6 +11,24 @@ const publishableCount = computed(
   () => props.capabilities.filteredCapabilities.value.filter((c) => props.capabilities.isPublishable(c)).length,
 );
 
+const draftCount = computed(
+  () => props.capabilities.capabilities.value.filter((c) => c.source !== 'published').length,
+);
+
+async function handleEnrichDrafts() {
+  try {
+    const count = await props.capabilities.enrichAllDrafts();
+    if (count === undefined) {
+      ElMessage.info('没有待精修的草稿');
+      return;
+    }
+    ElMessage.success(`AI 已精修 ${count} 个草稿的名称与描述`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'AI 精修失败';
+    ElMessage.error(msg);
+  }
+}
+
 async function handlePublishAll() {
   const result = await props.capabilities.publishAll();
   if (!result) {
@@ -135,6 +153,9 @@ function escapeHtml(value: string): string {
       <!-- 批量操作栏 -->
       <div class="batch-actions">
         <span>已选 {{ publishableCount }} 个可发布</span>
+        <el-button size="small" :disabled="draftCount === 0" :loading="capabilities.enrichAllLoading.value" data-test="enrich-all-drafts" @click="handleEnrichDrafts">
+          AI 精修草稿{{ draftCount > 0 ? `（${draftCount} 个）` : '' }}
+        </el-button>
         <el-button size="small" type="primary" :disabled="publishableCount === 0" @click="handlePublishAll">
           一键发布全部可发布{{ publishableCount > 0 ? `（${publishableCount} 个）` : '' }}
         </el-button>

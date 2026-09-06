@@ -145,6 +145,8 @@ func TestApplyCandidateOverrideUsesAdminMetadata(t *testing.T) {
 		ResourceType: "cluster",
 		Operation:    tools.Read,
 		Risk:         tools.Medium,
+		Description:  "查询指定集群的状态",
+		Summary:      "状态: {{status}}",
 	})
 
 	if capability.Name != "minio.cluster.status.read" || capability.Domain != "minio" || capability.ResourceType != "cluster" || capability.Risk != tools.Medium {
@@ -152,6 +154,40 @@ func TestApplyCandidateOverrideUsesAdminMetadata(t *testing.T) {
 	}
 	if capability.Backend.Path != "/api/middleware/status" || capability.Status != capabilities.StatusNeedsReview {
 		t.Fatalf("capability backend/status changed unexpectedly: %+v", capability)
+	}
+	if capability.AI.Description != "查询指定集群的状态" || capability.Output.SummaryTemplate != "状态: {{status}}" {
+		t.Fatalf("capability ai/output = %+v, want overridden description and summary", capability)
+	}
+}
+
+func TestImportOpenAPIDescriptionFallsBackWhenNoSummary(t *testing.T) {
+	t.Parallel()
+	ensureImporterTestDomains(t)
+	body := []byte(`openapi: 3.0.0
+info: {title: Weather, version: 1.0.0}
+paths:
+  /api/weather/{city}:
+    get:
+      tags: [weather]
+      parameters:
+        - name: city
+          in: path
+          required: true
+          schema: {type: string, description: 城市名}
+`)
+	drafts, err := capabilities.ImportOpenAPI(body)
+	if err != nil {
+		t.Fatalf("ImportOpenAPI returned %v", err)
+	}
+	if len(drafts) != 1 {
+		t.Fatalf("draft count = %d, want 1", len(drafts))
+	}
+	desc := drafts[0].AI.Description
+	if desc == "" {
+		t.Fatal("description empty: summary missing should fall back to generated description")
+	}
+	if !strings.Contains(desc, "查询") || !strings.Contains(desc, "/api/weather/{city}") || !strings.Contains(desc, "city（城市名）") {
+		t.Fatalf("fallback description = %q, want method+path+param phrasing", desc)
 	}
 }
 

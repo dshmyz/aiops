@@ -2239,6 +2239,13 @@ nav button:focus-visible {
   border: none;
 }
 
+.candidate-edit-grid .candidate-description {
+  grid-column: 1 / -1;
+  resize: vertical;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
 .commit-summary.sticky-commit {
   position: relative;
   margin: 0;
@@ -2695,6 +2702,14 @@ nav button:focus-visible {
 }
 
 .form-grid .wide { grid-column: 1 / -1; }
+
+.ai-desc-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.ai-desc-row .el-textarea { flex: 1; }
 
 .two-column {
   display: grid;

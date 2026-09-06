@@ -129,6 +129,8 @@ export interface ImportCandidateOverride {
   resource_type: string;
   operation: CapabilityOperation;
   risk: CapabilityRisk;
+  description: string;
+  summary: string;
 }
 
 export interface ImportCommitSelection {
