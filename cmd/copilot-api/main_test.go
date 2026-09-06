@@ -215,6 +215,51 @@ func TestCapabilityManagerFromEnvHotRegistersPublishedCapability(t *testing.T) {
 	}
 }
 
+func TestHotPublishSyncsCapabilityIntoBoundAgentExecutor(t *testing.T) {
+	tools.ResetDynamicToolsForTest()
+	policy.ResetDynamicRolePermissionsForTest()
+	t.Cleanup(tools.ResetDynamicToolsForTest)
+	t.Cleanup(policy.ResetDynamicRolePermissionsForTest)
+
+	root := t.TempDir()
+	t.Setenv("COPILOT_CAPABILITIES_DIR", root)
+	writeFile(t, filepath.Join(root, "discovered", "minio.bucket.capacity.read.yaml"), validReadCapabilityYAML("needs_review"))
+
+	adapter := capabilities.NewHTTPAdapter(http.DefaultClient)
+	_, _, _, runtime := buildCapabilityRuntimes(nil, adapter, true, staticWriteExecutor{})
+	exec, err := assistant.NewAgentExecutor(assistant.AgentExecutorConfig{
+		ChatModel:      nil,
+		Adapter:        adapter,
+		AuditService:   nil,
+		Capabilities:   nil,
+		ModelName:      "test-model",
+		MaxSteps:       3,
+	})
+	if err != nil {
+		t.Fatalf("NewAgentExecutor returned %v", err)
+	}
+	if exec.HasTool("minio.bucket.capacity.read") {
+		t.Fatal("executor already has the capability before publish")
+	}
+	runtime.BindAgent(exec)
+
+	manager := capabilityManagerFromEnv(capabilities.NewFileCapabilityStore(root), adapter, runtime, nil, nil)
+	published, err := manager.Publish(context.Background(), "minio.bucket.capacity.read")
+	if err != nil {
+		t.Fatalf("Publish returned %v", err)
+	}
+	if !exec.HasTool(published.Name) {
+		t.Fatal("hot-published capability not synced into bound agent executor toolset")
+	}
+
+	if _, err := manager.Unpublish(context.Background(), published.Name); err != nil {
+		t.Fatalf("Unpublish returned %v", err)
+	}
+	if exec.HasTool(published.Name) {
+		t.Fatal("capability still in agent executor toolset after unpublish")
+	}
+}
+
 func TestCapabilityRuntimesRouteHotPublishedWriteThroughHTTPAdapter(t *testing.T) {
 	tools.ResetDynamicToolsForTest()
 	policy.ResetDynamicRolePermissionsForTest()

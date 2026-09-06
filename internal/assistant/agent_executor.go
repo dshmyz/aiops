@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
@@ -29,8 +30,11 @@ import (
 type AgentExecutor struct {
 	chat           model.BaseChatModel // 执行层：选工具、调参数
 	reasoningChat  model.BaseChatModel // 分析层：深度推理、生成报告（可为 nil）
+	mu             sync.RWMutex
 	tools          []tool.BaseTool
 	toolMap        map[string]tool.BaseTool // name → tool 快速查找
+	adapter        *capabilities.HTTPAdapter
+	publishedCaps  map[string]capabilities.Capability // 已发布能力快照，热接入/下架时维护
 	audit          *audit.Service
 	modelName      string
 	maxSteps       int
@@ -87,11 +91,20 @@ func NewAgentExecutor(cfg AgentExecutorConfig) (*AgentExecutor, error) {
 		}
 	}
 
+	publishedCaps := make(map[string]capabilities.Capability, len(cfg.Capabilities))
+	for _, c := range cfg.Capabilities {
+		if c.Status == capabilities.StatusPublished {
+			publishedCaps[c.Name] = c
+		}
+	}
+
 	return &AgentExecutor{
 		chat:           cfg.ChatModel,
 		reasoningChat:  cfg.ReasoningModel,
 		tools:          einoTools,
 		toolMap:        toolMap,
+		adapter:        cfg.Adapter,
+		publishedCaps:  publishedCaps,
 		audit:          cfg.AuditService,
 		modelName:      cfg.ModelName,
 		maxSteps:       cfg.MaxSteps,
@@ -114,6 +127,78 @@ func NewAgentExecutorWithCache(cfg AgentExecutorConfig) (*AgentExecutor, error) 
 		exec.rateLimiter = NewRateLimiter(cfg.RateLimit, 5) // 5 并发上限
 	}
 	return exec, nil
+}
+
+// AddPublishedCapability 把新发布的能力热接入执行器工具集，无需重启即可被 LLM
+// 选用。实现 capabilities.PublishedCapabilityRuntime，由宿主进程在 publish /
+// quick-publish 时调用。幂等：同名能力已接入（启动快照或重复发布）时直接返回。
+func (e *AgentExecutor) AddPublishedCapability(cap capabilities.Capability) error {
+	if cap.Status != capabilities.StatusPublished {
+		return nil
+	}
+	capTool := NewCapabilityTool(cap, e.adapter, e.audit, identity.CurrentUser{})
+	info, err := capTool.Info(context.Background())
+	if err != nil || info == nil || info.Name == "" {
+		return fmt.Errorf("build tool info for %q: %v", cap.Name, err)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, exists := e.toolMap[info.Name]; exists {
+		return nil // 幂等：同名工具已接入
+	}
+	// copy-on-write：新切片，绝不原地改旧底层数组，保证在途 Run 的快照不被并发改写。
+	newTools := make([]tool.BaseTool, 0, len(e.tools)+1)
+	newTools = append(newTools, e.tools...)
+	newTools = append(newTools, capTool)
+	e.tools = newTools
+	e.toolMap[info.Name] = capTool
+	e.publishedCaps[cap.Name] = cap
+	e.paramProducers = buildProducerIndex(e.publishedCapabilitiesLocked())
+	return nil
+}
+
+// RemovePublishedCapability 在下架时把工具移出执行器工具集，与 AddPublishedCapability
+// 对称，避免 AI 仍能调用已下线能力。幂等：工具不存在时静默返回。
+func (e *AgentExecutor) RemovePublishedCapability(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, exists := e.toolMap[name]; !exists {
+		return
+	}
+	delete(e.toolMap, name)
+	for i, t := range e.tools {
+		if info, _ := t.Info(context.Background()); info != nil && info.Name == name {
+			// copy-on-write：与 Add 对称，新切片赋值，不原地删。
+			newTools := make([]tool.BaseTool, 0, len(e.tools)-1)
+			newTools = append(newTools, e.tools[:i]...)
+			newTools = append(newTools, e.tools[i+1:]...)
+			e.tools = newTools
+			break
+		}
+	}
+	delete(e.publishedCaps, name)
+	e.paramProducers = buildProducerIndex(e.publishedCapabilitiesLocked())
+}
+
+// publishedCapabilitiesLocked 返回已发布能力快照（调用方须持有 e.mu 读/写锁）。
+func (e *AgentExecutor) publishedCapabilitiesLocked() []capabilities.Capability {
+	if len(e.publishedCaps) == 0 {
+		return nil
+	}
+	caps := make([]capabilities.Capability, 0, len(e.publishedCaps))
+	for _, c := range e.publishedCaps {
+		caps = append(caps, c)
+	}
+	return caps
+}
+
+// HasTool 报告工具集里是否存在指定名称的工具。供宿主进程/测试校验热发布是否
+// 已同步进执行器工具集。
+func (e *AgentExecutor) HasTool(name string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	_, ok := e.toolMap[name]
+	return ok
 }
 
 // WithWriteGate 挂载写工具门。写工具（Operation==Write）在 e.executeTool 之前先过此
@@ -509,8 +594,10 @@ func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole,
 	// 工具集：全量已注册工具每轮都对模型开放，不再单独跑一次意图分类 LLM
 	//（省一次 ~4s 往返）。意图与工具选择由模型在每轮内语义判断：知识型问题直接
 	// 文字回答，实时数据问题从全量工具中选相关者（角色提示词 agent_role.go 两条
-	// 都已写明）。
+	// 都已写明）。快照取一次：热发布在运行中改工具集，锁保证读到的是一致快照。
+	e.mu.RLock()
 	allTools := e.tools
+	e.mu.RUnlock()
 
 loop:
 	for step := 0; step < e.maxSteps; step++ {
@@ -1156,7 +1243,12 @@ func (e *AgentExecutor) executeTool(ctx context.Context, name string, args strin
 	if !AgentEnabled() {
 		return "", fmt.Errorf("agent disabled by operator")
 	}
-	t, ok := e.toolMap[name]
+	t, ok := func() (tool.BaseTool, bool) {
+		e.mu.RLock()
+		defer e.mu.RUnlock()
+		t, ok := e.toolMap[name]
+		return t, ok
+	}()
 	if !ok {
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}

@@ -46,29 +46,47 @@ import (
 // compositeCapabilityRuntime fans hot-published capabilities out to both the
 // read and write runners. Each runner filters by operation internally, so a
 // single dispatch keeps the manager wiring simple while preserving the
-// "read-only via read runner, writes via write runner" boundary.
+// "read-only via read runner, writes via write runner" boundary. agent 是可选
+// 的热接入目标：LLM function-calling 执行器的工具集在启动时是快照，发布/下架
+// 必须同步进去，否则新工具对模型不可见（见 BindAgent）。
 type compositeCapabilityRuntime struct {
 	read  *capabilities.CapabilityReadRunner
 	write *capabilities.CapabilityWriteRunner
+	agent capabilities.PublishedCapabilityRuntime // 可选：agent 执行器热接入
 }
 
 func (r *compositeCapabilityRuntime) AddPublishedCapability(capability capabilities.Capability) error {
 	if err := r.read.AddPublishedCapability(capability); err != nil {
 		return err
 	}
-	return r.write.AddPublishedCapability(capability)
+	if err := r.write.AddPublishedCapability(capability); err != nil {
+		return err
+	}
+	if r.agent != nil {
+		return r.agent.AddPublishedCapability(capability)
+	}
+	return nil
 }
 
 func (r *compositeCapabilityRuntime) RemovePublishedCapability(name string) {
 	r.read.RemovePublishedCapability(name)
 	r.write.RemovePublishedCapability(name)
+	if r.agent != nil {
+		r.agent.RemovePublishedCapability(name)
+	}
+}
+
+// BindAgent 把 agent 执行器挂到热发布链路：之后每次 publish/unpublish 都会同步
+// 它的工具集。执行器在启动快照之外新增的能力即刻对 LLM 可见，无需重启。
+func (r *compositeCapabilityRuntime) BindAgent(agent capabilities.PublishedCapabilityRuntime) {
+	r.agent = agent
 }
 
 // buildCapabilityRuntimes wires the read runner, write executor (which also
 // implements execution.Verifier), and hot-publish runtime. When capabilities
 // are not configured the function returns the static stubs so the rest of the
 // server keeps working without a capability directory.
-func buildCapabilityRuntimes(loaded []capabilities.Capability, adapter *capabilities.HTTPAdapter, capabilitiesConfigured bool, fallbackWriter execution.Executor) (execution.ReadRunner, execution.Executor, execution.Verifier, capabilities.PublishedCapabilityRuntime) {
+func buildCapabilityRuntimes(loaded []capabilities.Capability, adapter *capabilities.HTTPAdapter, capabilitiesConfigured bool, fallbackWriter execution.Executor) (execution.ReadRunner, execution.Executor, execution.Verifier, *compositeCapabilityRuntime) {
 	if !capabilitiesConfigured {
 		return staticReadRunner{}, fallbackWriter, nil, nil
 	}
@@ -177,7 +195,7 @@ func main() {
 	var readRunner execution.ReadRunner = staticReadRunner{}
 	var writeExecutor execution.Executor = staticWriteExecutor{}
 	var verifier execution.Verifier
-	var capabilityRuntime capabilities.PublishedCapabilityRuntime
+	var capabilityRuntime *compositeCapabilityRuntime
 	capabilitiesConfigured := os.Getenv("COPILOT_CAPABILITIES_DIR") != ""
 	capabilityAdapter := capabilities.NewHTTPAdapterWithConfig(nil, capabilities.AdapterConfig{
 		MaxRetries:       3,
@@ -353,6 +371,12 @@ func main() {
 			} else {
 				assistantService = assistantService.WithAgentExecutor(agentExec)
 				logger.Info("agent executor enabled (LLM function calling)")
+				// 把 agent 执行器挂到热发布链路：之后 publish/unpublish 即时同步工具集，
+				// 新发布的能力无需重启即可被 LLM 选用（补启动快照的盲区）。
+				if capabilityRuntime != nil {
+					capabilityRuntime.BindAgent(agentExec)
+					logger.Info("agent executor bound to capability hot-publish runtime")
+				}
 				// 主动巡检：定期检查已注册端点的健康状态。端点由操作者显式配置
 				//（环境变量），多为内部服务，探活必须放行内部地址——SSRF 防线面向
 				// 不可信输入，不适用于操作者自己配置的巡检目标。
