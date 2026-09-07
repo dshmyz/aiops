@@ -161,6 +161,12 @@ func recommendCandidate(capability Capability, existingNames map[string]struct{}
 	if _, exists := existingNames[capability.Name]; exists {
 		return RecommendationNeedsAdjustment, []string{"已有同名能力，需要确认命名"}, []string{"已有同名能力"}
 	}
+	// 与内置静态工具同名（alert.query / prometheus.query / topic.retention.set 等）：
+	// 发布必撞 ErrCapabilityNameConflict，导入时就标"需要调整"并提示改名，
+	// 避免用户一路选到发布才报"与内置工具冲突"。
+	if _, exists := tools.Lookup(capability.Name); exists {
+		return RecommendationNeedsAdjustment, []string{"与内置工具同名，发布会冲突，请在「调整」里改名"}, []string{"与内置工具同名"}
+	}
 	// POST/PUT 等方法也可以是查询接口（国内内部系统常见 POST /list），不再按
 	// 方法一票否决；是否真的有副作用由用户在调整面板把 operation 改成 write 来表达。
 	if capability.Operation == tools.Write {

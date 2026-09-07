@@ -26,14 +26,18 @@ type RateLimiterConfig struct {
 }
 
 // DefaultRateLimiterConfig returns production-safe defaults:
-//   - Per-Subject: 30 req/min (burst 30, refill 0.5/s)
-//   - Per-IP (unauthenticated fallback): 60 req/min (burst 60, refill 1/s)
+//   - Per-Subject: 120 req/min (burst 120, refill 2/s)
+//   - Per-IP (unauthenticated fallback): 240 req/min (burst 240, refill 4/s)
+//
+// 30/min 的旧默认对多人交互式控制台太紧：一次导入（预览+试调+提交+发布）+ 助手
+// 流式对话几分钟就烧穿，导致全站 429。LLM 调用已有 agent 执行器内部的阻塞限流
+// 兜底，HTTP 层只做防滥用护栏，120/min 足够拦截异常又不绊正常使用。
 func DefaultRateLimiterConfig() RateLimiterConfig {
 	return RateLimiterConfig{
-		SubjectCapacity: 30,
-		SubjectRefillPS: 0.5,
-		IPCapacity:      60,
-		IPRefillPS:      1.0,
+		SubjectCapacity: 120,
+		SubjectRefillPS: 2.0,
+		IPCapacity:      240,
+		IPRefillPS:      4.0,
 	}
 }
 
