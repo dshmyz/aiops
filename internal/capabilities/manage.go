@@ -197,6 +197,29 @@ func (m *Manager) EnrichDraftsBatch(ctx context.Context, names []string) ([]Mana
 		drafts = append(drafts, item.Capability)
 	}
 	enriched := m.enrichDrafts(ctx, drafts)
+	// LLM 批量对大量相似草稿常漏发/少发，部分草稿名字+描述都原样未动。自动重试这些
+	// "漏网"草稿（最多 2 轮，只发仍未命中的），直到全部命中或不再变化，收敛覆盖率。
+	for round := 0; round < 2; round++ {
+		var missedIdx []int
+		for i := range enriched {
+			if enriched[i].Name == drafts[i].Name && enriched[i].AI.Description == drafts[i].AI.Description {
+				missedIdx = append(missedIdx, i)
+			}
+		}
+		if len(missedIdx) == 0 {
+			break
+		}
+		missed := make([]Capability, 0, len(missedIdx))
+		for _, idx := range missedIdx {
+			missed = append(missed, drafts[idx])
+		}
+		missedEnriched := m.enrichDrafts(ctx, missed)
+		for k, idx := range missedIdx {
+			if k < len(missedEnriched) {
+				enriched[idx] = missedEnriched[k]
+			}
+		}
+	}
 	used := make(map[string]bool, len(enriched))
 	out := make([]ManagedCapability, 0, len(enriched))
 	for i := range enriched {

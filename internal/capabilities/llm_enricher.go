@@ -40,8 +40,10 @@ func NewLLMImportEnricher(chat ChatCompleter) *LLMImportEnricher {
 
 // enrichedDraftShape 描述 LLM 需要填写的字段。字段尽量精简，减小 token 与出错率。
 type enrichedDraftShape struct {
-	// Key 是原始能力名，用于把富化结果匹配回草稿。LLM 常把建议的新名当键，
-	// 所以 key 单独携带原始名，与 name（建议的新名）解耦。
+	// Index 是草稿在输入列表中的序号（1 基），用于把富化结果匹配回草稿。
+	// 显式序号比依赖 LLM 回显原始名可靠得多——自动生成的又长又丑的名字常被
+	// LLM 当键改写导致匹配落空。Key 保留为次级匹配手段。
+	Index        int                      `json:"index,omitempty"`
 	Key          string                   `json:"key,omitempty"`
 	Name         string                   `json:"name,omitempty"`
 	Description  string                   `json:"description"`
@@ -107,23 +109,37 @@ func (e *LLMImportEnricher) enrichBatch(ctx context.Context, chunk []Capability)
 		return
 	}
 	// 匹配规则（从强到弱）：
-	//  1. key（原始名）精确匹配；
-	//  2. 数量一致且无 key 可用时按位置（LLM 顺序编号返回，数组保序）——
-	//     覆盖 LLM 把新名当键的情况；
-	//  3. 单草稿：直接应用唯一返回。
+	//  1. index（输入列表序号，1 基）精确匹配——最可靠，与名字丑不丑无关；
+	//  2. key（原始名）匹配——兼容只回显原名的模型；
+	//  3. 数量一致时按位置兜底。
+	byIndex := map[int]enrichedDraftShape{}
+	keyed := map[string]enrichedDraftShape{}
+	for _, it := range batch.Enrichments {
+		if it.Index > 0 {
+			byIndex[it.Index] = it
+		}
+		if it.Key != "" {
+			keyed[it.Key] = it
+		}
+	}
+	applied := make([]bool, len(chunk))
 	for i := range chunk {
-		var shape *enrichedDraftShape
-		for j := range batch.Enrichments {
-			if batch.Enrichments[j].Key == chunk[i].Name {
-				shape = &batch.Enrichments[j]
-				break
+		if shape, ok := byIndex[i+1]; ok {
+			chunk[i] = applyEnrichment(chunk[i], shape)
+			applied[i] = true
+			continue
+		}
+		if shape, ok := keyed[chunk[i].Name]; ok {
+			chunk[i] = applyEnrichment(chunk[i], shape)
+			applied[i] = true
+		}
+	}
+	// 仍未匹配且数量一致：按位置兜底（LLM 保序返回）。
+	if len(batch.Enrichments) == len(chunk) {
+		for i := range chunk {
+			if !applied[i] {
+				chunk[i] = applyEnrichment(chunk[i], batch.Enrichments[i])
 			}
-		}
-		if shape == nil && len(batch.Enrichments) == len(chunk) {
-			shape = &batch.Enrichments[i]
-		}
-		if shape != nil {
-			chunk[i] = applyEnrichment(chunk[i], *shape)
 		}
 	}
 }
@@ -196,8 +212,8 @@ func isValidRiskLevel(risk string) bool {
 
 const enrichmentSystemPrompt = `你是能力接口文档的助手。下面给出一次导入的多个能力草稿，请为【每一个】能力补全参数说明和输出配置，只返回合法 JSON，不要解释、不要遗漏任何一个能力。
 
-返回格式（数组，顺序与上面编号一致；key 是原始能力名，必须与给出的 name 完全一致，一个都不能少）：
-{"enrichments":[{"key":"原能力name","name":"更简洁有意义的新名，仅小写字母/数字/._-，如 weather.forecast.read（拿不准就保持原样）","description":"能力的中文一句描述","summary":"结果摘要模板，可用 {{字段名}} 引用输出字段","risk":"low/medium/high","input_schema":{"参数名":{"description":"中文说明","examples":["示例值"],"enum":["合法取值"]}},"output_fields":{"字段名":"$.JSONPath路径"}}]}
+返回格式（index 必须与上面列出的序号一一对应，一个都不能少）：
+{"enrichments":[{"index":1,"name":"更简洁有意义的新名，仅小写字母/数字/._-，如 weather.forecast.read（拿不准就保持原样）","description":"能力的中文一句描述","summary":"结果摘要模板，可用 {{字段名}} 引用输出字段","risk":"low/medium/high","input_schema":{"参数名":{"description":"中文说明","examples":["示例值"],"enum":["合法取值"]}},"output_fields":{"字段名":"$.JSONPath路径"}}]}
 
 输出字段要求：
 - output_fields 是 "字段名": "JSONPath路径" 的映射

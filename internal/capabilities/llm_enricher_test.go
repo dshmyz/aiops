@@ -2,6 +2,7 @@ package capabilities
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -39,7 +40,7 @@ func draftForEnrich() Capability {
 func TestLLMImportEnricherFillsFieldMetadata(t *testing.T) {
 	fc := &fakeCompleter{response: `{
 		"enrichments": [{
-			"key": "kafka.topic.retention.set",
+			"index": 1,
 			"description": "调整 Kafka topic 的保留期",
 			"input_schema": {
 				"topic": {"description": "目标 topic 名", "examples": ["orders"], "enum": ["orders","payments"]},
@@ -74,7 +75,7 @@ func TestLLMImportEnricherFillsFieldMetadata(t *testing.T) {
 func TestLLMImportEnricherMissingNameKeepsOriginal(t *testing.T) {
 	// 多草稿批量返回里漏了某个 name → 该草稿保留原样（键匹配只用于多草稿；
 	// 单草稿手动触发场景不依赖键，按位置应用）。
-	fc := &fakeCompleter{response: `{"enrichments": [{"key":"kafka.topic.retention.set","description":"新的描述"}]}`}
+	fc := &fakeCompleter{response: `{"enrichments": [{"index":1,"description":"新的描述"}]}`}
 	enrich := NewLLMImportEnricher(fc)
 	first := draftForEnrich()
 	second := draftForEnrich()
@@ -109,7 +110,7 @@ func TestLLMImportEnricherFallsBackOnError(t *testing.T) {
 func TestLLMImportEnricherToleratesNumericExamples(t *testing.T) {
 	fc := &fakeCompleter{response: `{
 		"enrichments": [{
-			"key": "kafka.topic.retention.set",
+			"index": 1,
 			"description": "调整保留期",
 			"input_schema": {
 				"retention_hours": {"description": "保留小时数", "examples": [3, 7]}
@@ -143,7 +144,7 @@ func TestLLMImportEnricherFallsBackOnBadJSON(t *testing.T) {	fc := &fakeComplete
 }
 
 func TestLLMImportEnricherHandlesCodeFencedJSON(t *testing.T) {
-	fc := &fakeCompleter{response: "```json\n{\"enrichments\":[{\"key\":\"kafka.topic.retention.set\",\"description\":\"来自围栏\",\"input_schema\":{}}]}\n```"}
+	fc := &fakeCompleter{response: "```json\n{\"enrichments\":[{\"index\":1,\"description\":\"来自围栏\",\"input_schema\":{}}]}\n```"}
 	enrich := NewLLMImportEnricher(fc)
 	got, err := enrich.Enrich(context.Background(), []Capability{draftForEnrich()})
 	if err != nil {
@@ -157,7 +158,13 @@ func TestLLMImportEnricherHandlesCodeFencedJSON(t *testing.T) {
 // 批量富化：超过单批上限的草稿被分到多个批次，每批一次调用，全部草稿都被富化，
 // 输出数组长度与输入一致（按下标回填）。
 func TestLLMImportEnricherEnrichesAllDraftsInBatches(t *testing.T) {
-	fc := &fakeCompleter{response: `{"enrichments":[{"key":"kafka.topic.retention.set","description":"补全的描述","input_schema":{}}]}`}
+	// 一批上限 10：响应给出 index 1..10，两个批次都能按 index 命中全部草稿。
+	items := make([]string, 0, 10)
+	for i := 1; i <= 10; i++ {
+		items = append(items, fmt.Sprintf(`{"index":%d,"description":"补全的描述","input_schema":{}}`, i))
+	}
+	response := `{"enrichments":[` + strings.Join(items, ",") + `]}`
+	fc := &fakeCompleter{response: response}
 	enrich := NewLLMImportEnricher(fc)
 	drafts := make([]Capability, 12)
 	for i := range drafts {
@@ -201,5 +208,29 @@ func TestLLMImportEnricherMatchesByPositionWhenKeyRenamed(t *testing.T) {
 	}
 	if got[1].AI.Description != "B 的描述" || got[1].Name != "weather.b.read" {
 		t.Fatalf("second = %+v, want positional apply", got[1])
+	}
+}
+
+// index 是批量富化的主匹配键：即使 LLM 把建议的新名写进 name、原始名被丢弃，
+// 只要 index 正确，富化仍精确归属到对应草稿（自动生成的又长又丑的名字不再漏修）。
+func TestLLMImportEnricherMatchesByIndexWhenNamesRenamed(t *testing.T) {
+	fc := &fakeCompleter{response: `{
+		"enrichments": [
+			{"index":1,"name":"minio.bucket.capacity.read","description":"MinIO 桶容量描述"},
+			{"index":2,"name":"kafka.topic.lag.read","description":"Kafka 消费延迟描述"}
+		]
+	}`}
+	enrich := NewLLMImportEnricher(fc)
+	a := draftForEnrich(); a.Name = "minio.bucket.capacity.read.getbucketcapacity"
+	b := draftForEnrich(); b.Name = "kafka.topic.lag.read.gettopiclag"
+	got, err := enrich.Enrich(context.Background(), []Capability{a, b})
+	if err != nil {
+		t.Fatalf("Enrich: %v", err)
+	}
+	if got[0].AI.Description != "MinIO 桶容量描述" || got[0].Name != "minio.bucket.capacity.read" {
+		t.Fatalf("first = %+v, want index-matched with renamed name", got[0])
+	}
+	if got[1].AI.Description != "Kafka 消费延迟描述" || got[1].Name != "kafka.topic.lag.read" {
+		t.Fatalf("second = %+v, want index-matched", got[1])
 	}
 }
