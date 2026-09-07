@@ -125,9 +125,9 @@ function candidateProbeCellText(candidateId: string): string {
                   <option value="medium">中</option>
                   <option value="high">高</option>
                 </select>
-                <textarea :data-test="`candidate-description-${candidate.id}`" class="mini-input candidate-description" rows="2" :value="capabilities.candidateOverrides.value[candidate.id]?.description" @input="capabilities.updateCandidateOverride(candidate.id, { description: ($event.target as HTMLTextAreaElement).value })" placeholder="AI 描述：告诉大模型这个工具是干嘛的、何时调用"></textarea>
               </div>
             </details>
+            <textarea :data-test="`candidate-description-${candidate.id}`" class="candidate-description-visible" rows="2" :value="capabilities.candidateOverrides.value[candidate.id]?.description" @input="capabilities.updateCandidateOverride(candidate.id, { description: ($event.target as HTMLTextAreaElement).value })" placeholder="填 AI 描述：这个接口是干嘛的、何时调用。留空则导入后用兜底描述，可再点「AI 精修」"></textarea>
           </article>
         </div>
         <div data-test="import-commit-summary" class="commit-summary sticky-commit">
