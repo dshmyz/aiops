@@ -144,7 +144,7 @@ function candidateProbeCellText(candidateId: string): string {
             :loading="capabilities.importCommitLoading.value"
             @click="capabilities.commitSwaggerImport({ autoPublishClean: true })"
           >试调通过的 {{ capabilities.cleanProbedCandidates.value.length }} 个直接发布</el-button>
-          <el-button data-test="commit-openapi-import" type="primary" :disabled="!capabilities.canCommitImportPreview.value" :loading="capabilities.importCommitLoading.value" @click="capabilities.commitSwaggerImport()">生成 Capability 草稿</el-button>
+          <el-button data-test="commit-openapi-import" type="primary" :disabled="!capabilities.canCommitImportPreview.value" :loading="capabilities.importCommitLoading.value" @click="capabilities.commitSwaggerImport({ autoPublishClean: true })">导入并自动发布可用工具</el-button>
         </div>
       </section>
     </section>

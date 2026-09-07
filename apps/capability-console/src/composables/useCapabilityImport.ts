@@ -168,6 +168,11 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
     error.value = '';
     importCommitLoading.value = true;
     try {
+      // 导入即用：自动发布前先确保已试调（试调打真实后端，成功且干净的低风险读
+      // 能力直接发布），否则"自动发布"永远没有候选。
+      if (options?.autoPublishClean && Object.keys(candidateProbeResults.value).length === 0) {
+        await probeSelectedCandidates();
+      }
       const result = await commitOpenAPIURLImport({
         openapi_url: importPreview.value.source.openapi_url || importOpenAPIURLText.value,
         backend_base_url: importPreview.value.source.backend_base_url || importBackendBaseURL.value,
