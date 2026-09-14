@@ -279,6 +279,43 @@ async function submit() {
 </template>
 
 <style scoped>
+/* 文字密度：标题/说明/标签三级层次分明（17px 标题 / 13px 说明 / 14px 标签），
+   标题块与表单之间留呼吸，避免整块文字糊成一片。 */
+.quick-publish-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.quick-publish-heading h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+}
+
+.quick-publish-heading span {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+
+.quick-publish-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 20px;
+}
+
+.quick-publish-grid .wide { grid-column: 1 / -1; }
+
+.quick-publish-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
 .required::after {
   content: ' *';
   color: var(--color-danger, #f56c6c);

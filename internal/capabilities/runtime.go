@@ -34,7 +34,7 @@ func RegisterPublished(root string) ([]Capability, error) {
 	}
 	for _, capability := range loaded {
 		if _, exists := tools.Lookup(capability.Name); exists {
-			return nil, fmt.Errorf("published capability %q conflicts with an existing tool", capability.Name)
+			return nil, fmt.Errorf("published capability %q conflicts with an existing tool: 与内置工具重名，请改名后再注册", capability.Name)
 		}
 	}
 	for _, capability := range loaded {

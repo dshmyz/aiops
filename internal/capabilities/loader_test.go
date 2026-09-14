@@ -46,7 +46,7 @@ func TestLoadPublishedRejectsStaticToolConflict(t *testing.T) {
 	conflicting := strings.Replace(validReadYAML("published"), "name: minio.bucket.capacity.read", "name: "+tools.ClusterStatusRead, 1)
 	mustWrite(t, filepath.Join(root, "published", "cluster.status.read.yaml"), conflicting)
 
-	if _, err := capabilities.LoadPublished(root); err == nil || !strings.Contains(err.Error(), "conflicts with an existing tool") {
+	if _, err := capabilities.LoadPublished(root); err == nil || !strings.Contains(err.Error(), "与内置工具重名") {
 		t.Fatalf("LoadPublished err = %v, want existing tool conflict", err)
 	}
 }

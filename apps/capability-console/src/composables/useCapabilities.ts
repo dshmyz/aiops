@@ -1,6 +1,7 @@
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { ComputedRef, Ref, WritableComputedRef } from 'vue';
 import { listCapabilities } from '../api';
+import type { ProbeGenerateResult } from '../api';
 import { canPublish } from '../capability';
 import {
   candidateReasonText,
@@ -12,6 +13,7 @@ import {
 } from '../capabilityFormat';
 import { filterImportBatchItems } from '../importBatch';
 import type { ImportBatch } from '../importBatch';
+import { uiStateOf } from '../capabilityState';
 import { filterImportCandidates, selectedCandidates } from '../importWizard';
 import { useCapabilityEditor } from './useCapabilityEditor';
 import { useCapabilityImport } from './useCapabilityImport';
@@ -56,14 +58,20 @@ export interface UseCapabilities {
   /** 能力存储是否已配置。false 时列表为空是"未启用"而非"零能力"。 */
   configured: Ref<boolean>;
   testInputText: Ref<string>;
+  /** 写能力验证用的示例响应体（写接口禁止试调，离线推断输出映射）。 */
+  testSampleBody: Ref<string>;
   searchText: Ref<string>;
   statusFilter: Ref<string>;
+  /** 只看校验失败项：台账「校验失败」统计卡点击切换。 */
+  invalidOnly: Ref<boolean>;
   domainFilter: Ref<string>;
   importOpenAPIURLText: Ref<string>;
   importBackendBaseURL: Ref<string>;
   importMessage: Ref<string>;
   importWizardStep: Ref<ImportWizardStep>;
   managementPhase: Ref<ManagementPhase>;
+  /** 接入向导是否展开。清单优先布局下右侧向导可折叠；无能力待处理时默认展开。 */
+  wizardOpen: Ref<boolean>;
   importPreview: Ref<ImportPreview | null>;
   importPreviewLoading: Ref<boolean>;
   importPreviewGeneration: Ref<number>;
@@ -73,6 +81,13 @@ export interface UseCapabilities {
   candidateFilters: Ref<{ recommendation: ImportRecommendation | 'all'; domain: string; search: string }>;
   importBatch: Ref<ImportBatch | null>;
   importDomainFilter: Ref<string>;
+  /** 单接口接入（probe-generate）：填一个后端接口地址自动生成能力草稿。 */
+  urlEndpoint: Ref<string>;
+  urlMethod: Ref<string>;
+  urlDescription: Ref<string>;
+  urlSampleBody: Ref<string>;
+  urlImportLoading: Ref<boolean>;
+  generatedUrlResult: Ref<ProbeGenerateResult | null>;
   aiPromptOverride: Ref<string | null>;
   aiResponse: Ref<AssistantConsoleResponse | null>;
   aiError: Ref<string>;
@@ -138,11 +153,18 @@ export interface UseCapabilities {
   applyInferredOutput: () => void;
   /** 批量试调勾选的候选（仅 GET 读能力），结果内联到候选列表。 */
   probeSelectedCandidates: () => Promise<void>;
+  /** 单接口接入：对输入的后端接口地址执行探测并生成能力草稿。 */
+  runUrlProbeGenerate: () => Promise<void>;
+  clearUrlProbeGenerate: () => void;
+  /** 把 probe-generate 生成的能力草稿写回评审区并切到 review 阶段。 */
+  commitUrlProbeGenerate: () => void;
   previewSwaggerURL: () => Promise<void>;
   clearImportPreview: () => void;
   loadBuiltinExample: () => Promise<void>;
   builtinExampleActive: ComputedRef<boolean>;
-  commitSwaggerImport: (options?: { autoPublishClean?: boolean }) => Promise<void>;
+  commitSwaggerImport: () => Promise<void>;
+  /** 发布已验证通过（✓ 低风险读取）的候选；仅在用户显式点击时调用。 */
+  publishVerifiedDrafts: () => Promise<{ published: string[]; failed: { name: string; reason: string }[] }>;
   updateCandidateOverride: (id: string, patch: Partial<ImportCandidateOverride>) => void;
   toggleImportIgnored: (name: string, ignored: boolean) => void;
   openImportedCapability: (item: ImportBatch['items'][number]) => void;
@@ -169,6 +191,7 @@ export interface UseCapabilities {
   testInputFieldValue: (name: string) => string | boolean | number;
   setTestInputField: (name: string, rawValue: string | boolean, type: InputField['type']) => void;
   sourceLabel: (source: string) => string;
+  capabilityStateLabel: (capability: ManagedCapability) => string;
   operationLabel: (operation: string) => string;
   riskLabel: (risk: string) => string;
   recommendationLabel: (value: ImportRecommendation) => string;
@@ -202,6 +225,10 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
   // 已有能力库时由 loadCapabilities 加载后维持，需要评审点向导/清单即可。
   // （loadCapabilities 里 JSON 空列表时的降级逻辑保留，作为无能力场景的一致性兜底。）
   const managementPhase = ref<ManagementPhase>('source');
+  // 接入向导是否展开。清单优先布局下，左侧能力清单始终可见，右侧接入向导
+  // 默认展开（阶段为 source——默认落在连源）；用户可手动收起以聚焦清单。
+  // review 阶段兼作"评审工单页打开"开关：默认 false=列表主界面；接入画布打开时为 true。
+  const wizardOpen = ref(false);
 
   // 子 composable
   const editor = useCapabilityEditor({
@@ -216,6 +243,7 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     error,
     managementPhase,
     onSelect: (capability) => selectCapability(capability),
+    onOpenWorkbench: () => { wizardOpen.value = true; },
   });
   const publish = useCapabilityPublish({
     capabilities,
@@ -229,6 +257,7 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
       importWizard.importMessage.value = message;
     },
     onRefresh: () => loadCapabilities(),
+    onPublished: () => { wizardOpen.value = true; },
     ignoredKeys: importWizard.ignoredImportCapabilityKeys,
   });
 
@@ -249,9 +278,15 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
       configured.value = result.configured;
       if (capabilities.value.length > 0) {
         selectCapability(capabilities.value[0]);
-        if (!initialLoaded) managementPhase.value = 'review';
+        // 列表为主界面：有能力库时默认落在评审（列表）阶段；接入是动作，
+        // 通过页面内的引导按钮进入，不再默认占据主界面。
+        if (!initialLoaded) {
+          managementPhase.value = 'review';
+        }
       } else if (!initialLoaded) {
+        // 无能力时落在接入画布，引导用户先接入。
         managementPhase.value = 'source';
+        wizardOpen.value = true;
       }
       initialLoaded = true;
     } catch (err) {
@@ -260,6 +295,13 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
       loading.value = false;
     }
   }
+
+  // 从接入/验证工单切回列表时收起工单开关，保证落在列表主界面。
+  watch(managementPhase, (phase, prev) => {
+    if (prev && (prev === 'source' || prev === 'candidates') && phase === 'review') {
+      wizardOpen.value = false;
+    }
+  });
 
   // 展示标签（纯函数）
   const sourceLabelFn = sourceLabel;
@@ -312,23 +354,34 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     return '发布当前 Capability';
   }
 
+  function capabilityStateLabel(capability: ManagedCapability): string {
+    const state = uiStateOf(capability, isPublishable);
+    return {
+      draft: '草稿',
+      needs_validation: '待验证',
+      publishable: '可发布',
+      published: '已发布',
+    }[state];
+  }
+
   function nextActionLabel(capability: ManagedCapability): string {
-    if (capability.source === 'published') {
-      return '用 AI 试问一次';
+    const state = uiStateOf(capability, isPublishable);
+    if (state === 'published') {
+      return '用 AI 验证';
     }
     if (editor.hasPublishedTwin(capability)) {
-      return '已有 AI 可用版本';
+      return '已有可用版本';
     }
-    if (!canPublish(capability)) {
-      if (capability.operation === 'write') {
-        return capability.governance ? '先校验' : '补齐 governance';
-      }
-      return '继续评审';
-    }
-    if (isPublishable(capability)) {
+    if (state === 'publishable') {
       return '发布给 AI';
     }
-    return '继续评审';
+    if (capability.operation === 'write' && !capability.governance) {
+      return '补充执行保护';
+    }
+    if (state === 'needs_validation') {
+      return '开始真实试调';
+    }
+    return '补充接口信息';
   }
 
   return {
@@ -343,14 +396,17 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     loading,
     configured,
     testInputText: editor.testInputText,
+    testSampleBody: editor.testSampleBody,
     searchText: publish.searchText,
     statusFilter: publish.statusFilter,
+    invalidOnly: publish.invalidOnly,
     domainFilter: publish.domainFilter,
     importOpenAPIURLText: importWizard.importOpenAPIURLText,
     importBackendBaseURL: importWizard.importBackendBaseURL,
     importMessage: importWizard.importMessage,
     importWizardStep: importWizard.importWizardStep,
     managementPhase,
+    wizardOpen,
     importPreview: importWizard.importPreview,
     importPreviewLoading: importWizard.importPreviewLoading,
     importPreviewGeneration: importWizard.importPreviewGeneration,
@@ -360,6 +416,12 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     candidateFilters: importWizard.candidateFilters,
     importBatch: importWizard.importBatch,
     importDomainFilter: importWizard.importDomainFilter,
+    urlEndpoint: importWizard.urlEndpoint,
+    urlMethod: importWizard.urlMethod,
+    urlDescription: importWizard.urlDescription,
+    urlSampleBody: importWizard.urlSampleBody,
+    urlImportLoading: importWizard.urlImportLoading,
+    generatedUrlResult: importWizard.generatedUrlResult,
     aiPromptOverride: editor.aiPromptOverride,
     aiResponse: editor.aiResponse,
     aiError: editor.aiError,
@@ -420,11 +482,15 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     probeSelected: editor.probeSelected,
     applyInferredOutput: editor.applyInferredOutput,
     probeSelectedCandidates: importWizard.probeSelectedCandidates,
+    runUrlProbeGenerate: importWizard.runUrlProbeGenerate,
+    clearUrlProbeGenerate: importWizard.clearUrlProbeGenerate,
+    commitUrlProbeGenerate: importWizard.commitUrlProbeGenerate,
     previewSwaggerURL: importWizard.previewSwaggerURL,
     clearImportPreview: importWizard.clearImportPreview,
     loadBuiltinExample: importWizard.loadBuiltinExample,
     builtinExampleActive: importWizard.builtinExampleActive,
     commitSwaggerImport: importWizard.commitSwaggerImport,
+    publishVerifiedDrafts: importWizard.publishVerifiedDrafts,
     updateCandidateOverride: importWizard.updateCandidateOverride,
     toggleImportIgnored: importWizard.toggleImportIgnored,
     openImportedCapability: importWizard.openImportedCapability,
@@ -452,6 +518,7 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     setTestInputField: editor.setTestInputField,
     sourceLabel: sourceLabelFn,
     operationLabel: operationLabelFn,
+    capabilityStateLabel,
     riskLabel: riskLabelFn,
     recommendationLabel: recommendationLabelFn,
     candidateReasonText: candidateReasonTextFn,

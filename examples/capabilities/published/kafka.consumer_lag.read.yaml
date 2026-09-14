@@ -20,8 +20,8 @@ output:
  severity_path: $.status
  summary_template: Consumer group {name} lag is {lag}
  fields:
- lag: $.data.lag
- members: $.data.members
+  lag: $.data.lag
+  members: $.data.members
 governance:
  requires_action_plan: false
  requires_approval: false

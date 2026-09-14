@@ -66,6 +66,10 @@ type ImportCandidateOverride struct {
 	Risk         tools.RiskLevel `json:"risk,omitempty"`
 	Description  string          `json:"description,omitempty"`
 	Summary      string          `json:"summary,omitempty"`
+	// InputExamples 按参数名回填示例值：批量试调用过的真实资源值
+	// （cluster=demo、bucket=archive）随提交落进草稿 input_schema.examples，
+	// 评审页参数框与 AI 调用即有可参考的实参。键为参数名。
+	InputExamples map[string]string `json:"input_examples,omitempty"`
 }
 
 func OpenAPIFingerprint(body []byte) string {
@@ -150,6 +154,14 @@ func ApplyCandidateOverride(candidate ImportCandidate, override ImportCandidateO
 	}
 	if strings.TrimSpace(override.Summary) != "" {
 		capability.Output.SummaryTemplate = strings.TrimSpace(override.Summary)
+	}
+	for name, value := range override.InputExamples {
+		field, ok := capability.InputSchema[name]
+		if !ok || strings.TrimSpace(value) == "" || len(field.Examples) > 0 {
+			continue
+		}
+		field.Examples = []string{strings.TrimSpace(value)}
+		capability.InputSchema[name] = field
 	}
 	capability.Status = StatusNeedsReview
 	return capability

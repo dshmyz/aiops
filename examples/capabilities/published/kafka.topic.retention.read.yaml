@@ -23,7 +23,7 @@ output:
  severity_path: $.status
  summary_template: Topic {topic} retention is {retention_hours}h
  fields:
- retention_hours: $.data.retention_hours
+  retention_hours: $.data.retention_hours
 governance:
  requires_action_plan: false
  requires_approval: false

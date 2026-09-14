@@ -19,40 +19,14 @@ function mountAI(overrides: Partial<UseCapabilities> = {}) {
 describe('AIStage', () => {
   test('渲染已发布能力列表与 AI 运行器', () => {
     const { wrapper } = mountAI();
-    expect(wrapper.find('[data-test="studio-ledger"]').exists()).toBe(true);
+    // 已发布列表由外层（ManagementView 侧栏）渲染，AI 页只含试运行面板
+    expect(wrapper.find('[data-test="studio-ledger"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="studio-ai-runner"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="ai-prompt"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="run-ai-preflight"]').exists()).toBe(true);
   });
 
-  test('已发布能力显示在列表中', () => {
-    const published: ManagedCapability = normalizeCapability({
-      name: 'minio.bucket.capacity.read',
-      domain: 'minio',
-      resource_type: 'bucket',
-      source: 'published',
-    });
-    const { wrapper } = mountAI({
-      capabilities: ref([published]),
-      filteredCapabilities: computed(() => [published]),
-    } as never);
-    expect(wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').exists()).toBe(true);
-  });
 
-  test('点击能力名调用 selectCapability', async () => {
-    const fn = vi.fn();
-    const published: ManagedCapability = normalizeCapability({
-      name: 'minio.bucket.capacity.read',
-      source: 'published',
-    });
-    const { wrapper } = mountAI({
-      capabilities: ref([published]),
-      filteredCapabilities: computed(() => [published]),
-      selectCapability: fn,
-    } as never);
-    await wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').trigger('click');
-    expect(fn).toHaveBeenCalledWith(published);
-  });
 
   test('run-ai-preflight 按钮在未就绪时禁用', () => {
     const { wrapper } = mountAI({ aiPreflightReady: computed(() => false) } as never);

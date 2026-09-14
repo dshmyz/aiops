@@ -11,15 +11,16 @@ function mountRail(overrides: Partial<UseCapabilities> = {}) {
 }
 
 describe('WorkflowRail', () => {
-  test('渲染 4 个步骤按钮，含序号、标题、说明', () => {
+  test('渲染 3 个步骤按钮，含序号、标题、说明', () => {
     const { wrapper } = mountRail();
     const steps = wrapper.findAll('.workflow-step');
-    expect(steps).toHaveLength(4);
+    expect(steps).toHaveLength(3);
 
-    expect(wrapper.find('[data-test="workflow-step-source"]').text()).toContain('接入 API');
-    expect(wrapper.find('[data-test="workflow-step-candidates"]').text()).toContain('选择能力');
-    expect(wrapper.find('[data-test="workflow-step-review"]').text()).toContain('评审发布');
-    expect(wrapper.find('[data-test="workflow-step-ai"]').text()).toContain('AI 试问');
+    expect(wrapper.find('[data-test="workflow-step-source"]').text()).toContain('连接接口');
+    expect(wrapper.find('[data-test="workflow-step-candidates"]').text()).toContain('验证接口');
+    expect(wrapper.find('[data-test="workflow-step-review"]').text()).toContain('确认并发布');
+    // 方案①：发布从步骤降为动作，不再作为独立第 4 步
+    expect(wrapper.find('[data-test="workflow-step-ai"]').exists()).toBe(false);
   });
 
   test('当前阶段对应的步骤标记为 active', () => {
@@ -37,10 +38,13 @@ describe('WorkflowRail', () => {
 
   test('点击步骤切换 managementPhase', async () => {
     const { wrapper, capabilities } = mountRail({
+      capabilities: ref([
+        { name: 'c1', source: 'discovered', domain: 'd', resource_type: 'r', operation: 'read', risk: 'low', input_schema: {}, output: { kind: 'table', fields: [] }, backend: { adapter: 'http', method: 'GET', base_url: 'http://x', path: '/a' } },
+      ] as never),
       stats: computed(() => ({ published: 1, review: 0, invalid: 0, publishable: 0 })),
     } as never);
-    await wrapper.find('[data-test="workflow-step-ai"]').trigger('click');
-    expect(capabilities.managementPhase.value).toBe('ai');
+    await wrapper.find('[data-test="workflow-step-review"]').trigger('click');
+    expect(capabilities.managementPhase.value).toBe('review');
   });
 
   test('importPreview 存在时 source 步骤标记 done', () => {
@@ -54,13 +58,27 @@ describe('WorkflowRail', () => {
     expect(wrapper.find('[data-test="workflow-step-source"]').classes()).toContain('done');
   });
 
-  test('已发布能力为 0 时 AI 步骤禁用', () => {
-    const { wrapper } = mountRail({ stats: computed(() => ({ published: 0, review: 0, invalid: 0, publishable: 0 })) } as never);
-    expect(wrapper.find('[data-test="workflow-step-ai"]').attributes('disabled')).toBeDefined();
+  test('无能力时 review（试调验收）步骤禁用', () => {
+    const { wrapper } = mountRail({ capabilities: ref([]) } as never);
+    expect(wrapper.find('[data-test="workflow-step-review"]').attributes('disabled')).toBeDefined();
   });
 
-  test('已发布能力 > 0 时 AI 步骤可用', () => {
-    const { wrapper } = mountRail({ stats: computed(() => ({ published: 1, review: 0, invalid: 0, publishable: 0 })) } as never);
-    expect(wrapper.find('[data-test="workflow-step-ai"]').attributes('disabled')).toBeUndefined();
+  test('有能力时 review（试调验收）步骤可用', () => {
+    const { wrapper } = mountRail({
+      capabilities: ref([
+        {
+          name: 'c1',
+          source: 'discovered',
+          domain: 'storage',
+          resource_type: 'bucket',
+          operation: 'read',
+          risk: 'low',
+          input_schema: {},
+          output: { kind: 'table', fields: [] },
+          backend: { adapter: 'http', method: 'GET', base_url: 'http://x', path: '/a' },
+        },
+      ] as never),
+    } as never);
+    expect(wrapper.find('[data-test="workflow-step-review"]').attributes('disabled')).toBeUndefined();
   });
 });

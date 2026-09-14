@@ -108,6 +108,49 @@ describe('useCapabilities — testInputText 残留', () => {
   });
 });
 
+describe('useCapabilities — 校验失败筛选', () => {
+  beforeEach(() => {
+    mockedList.mockReset();
+    mockedList.mockResolvedValue({ configured: true, capabilities: [] });
+  });
+
+  function loadWithInvalid() {
+    const caps = useCapabilities();
+    const good = makeCapability({ name: 'minio.bucket.capacity.read', validation: { valid: true, error: '' } });
+    const bad = makeCapability({
+      name: 'kafka.topic.retention.update',
+      operation: 'write',
+      risk: 'medium',
+      backend: { adapter: 'http', method: 'POST', path: '/api/kafka/topics/{topic}/retention', timeout_ms: 3000, base_url: 'https://middleware.example.com' },
+      validation: { valid: false, error: '缺治理' },
+    });
+    caps.loadCapabilities();
+    caps.capabilities.value = [good, bad];
+    return { caps, good, bad };
+  }
+
+  it('默认展示全部，含校验失败项', () => {
+    const { caps, bad } = loadWithInvalid();
+    expect(caps.filteredCapabilities.value).toHaveLength(2);
+    expect(caps.stats.value.invalid).toBe(1);
+  });
+
+  it('开启 invalidOnly 后只显示校验失败项，且状态筛选复位为全部', () => {
+    const { caps } = loadWithInvalid();
+    caps.statusFilter.value = 'draft';
+    caps.invalidOnly.value = true;
+    expect(caps.filteredCapabilities.value).toHaveLength(1);
+    expect(caps.filteredCapabilities.value[0].validation.valid).toBe(false);
+  });
+
+  it('关闭 invalidOnly 恢复全部', () => {
+    const { caps } = loadWithInvalid();
+    caps.invalidOnly.value = true;
+    caps.invalidOnly.value = false;
+    expect(caps.filteredCapabilities.value).toHaveLength(2);
+  });
+});
+
 describe('useCapabilities — 加载落地阶段', () => {
   it('能力库为空时首次加载落在 source（接入 API）', async () => {
     mockedList.mockResolvedValue({ configured: true, capabilities: [] });
@@ -116,10 +159,11 @@ describe('useCapabilities — 加载落地阶段', () => {
     expect(caps.managementPhase.value).toBe('source');
   });
 
-  it('存在能力库时首次加载落在 review（评审发布）', async () => {
+  it('存在能力库时首次加载落在 source（连源），不强制切阶段', async () => {
     mockedList.mockResolvedValue({ configured: true, capabilities: [makeCapability()] });
     const caps = useCapabilities();
     await caps.loadCapabilities();
+    // 列表为主界面：有能力库时默认落在评审（列表）阶段；接入走引导按钮。
     expect(caps.managementPhase.value).toBe('review');
   });
 

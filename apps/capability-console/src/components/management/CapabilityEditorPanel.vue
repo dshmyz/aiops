@@ -51,7 +51,7 @@ const authHeaderName = computed({
   <details class="advanced-editor">
     <summary>编辑 Capability 详情</summary>
     <section class="editor-group">
-      <div class="group-title"><h3>识别结果</h3><span>{{ capabilities.sourceLabel(capabilities.selected.value.source) }} / {{ capabilities.operationLabel(capabilities.selected.value.operation) }}</span></div>
+      <div class="group-title"><h3>工具信息</h3><span>{{ capabilities.sourceLabel(capabilities.selected.value.source) }} / {{ capabilities.operationLabel(capabilities.selected.value.operation) }}</span></div>
       <div class="form-grid">
         <label>名称<el-input data-test="capability-name" v-model="capabilities.selected.value.name" placeholder="minio.bucket.capacity.read" /></label>
         <label>领域<el-input v-model="capabilities.selected.value.domain" placeholder="minio" /></label>
@@ -60,7 +60,7 @@ const authHeaderName = computed({
         <label>风险等级<el-select v-model="capabilities.selected.value.risk"><el-option label="低" value="low" /><el-option label="中" value="medium" /><el-option label="高" value="high" /></el-select></label>
         <label class="wide">AI 描述
           <div class="ai-desc-row">
-            <el-input data-test="ai-description" v-model="capabilities.selected.value.ai.description" type="textarea" :rows="2" placeholder="描述该能力的作用，供 AI 判断何时调用" />
+            <el-input data-test="ai-description" v-model="capabilities.selected.value.ai.description" type="textarea" :rows="4" placeholder="描述该能力的作用，供 AI 判断何时调用" />
             <el-button data-test="ai-enrich" size="small" type="primary" :loading="capabilities.enrichLoading.value" @click="capabilities.enrichSelected(capabilities.selected.value)">AI 补全</el-button>
           </div>
         </label>

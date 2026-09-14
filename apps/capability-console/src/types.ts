@@ -131,6 +131,8 @@ export interface ImportCandidateOverride {
   risk: CapabilityRisk;
   description: string;
   summary: string;
+  /** 按参数名回填的示例值（批量试调的真实资源值），提交时随 overrides 传给后端。 */
+  input_examples?: Record<string, string>;
 }
 
 export interface ImportCommitSelection {

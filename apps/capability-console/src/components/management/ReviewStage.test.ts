@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils';
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import ElementPlus from 'element-plus';
 import { describe, expect, test, vi } from 'vitest';
 import ReviewStage from './ReviewStage.vue';
@@ -7,7 +7,6 @@ import { makeCapabilities } from './testHelpers';
 import { normalizeCapability } from '../../capability';
 import type { UseCapabilities } from '../../composables/useCapabilities';
 import type { ManagedCapability } from '../../types';
-import type { ImportBatch } from '../../importBatch';
 
 function makeCapability(overrides: Partial<ManagedCapability> = {}): ManagedCapability {
   return normalizeCapability({
@@ -33,36 +32,12 @@ function mountReview(overrides: Partial<UseCapabilities> = {}) {
 }
 
 describe('ReviewStage', () => {
-  test('渲染能力清单与评审详情', () => {
+  // 注：能力清单（studio-ledger）已上提到 ManagementView 层常驻，ReviewStage 只负责
+  // 评审详情（编辑器 + 测试 + 折叠的发布清单/探活）。清单自身在 ManagementView.test.ts 覆盖。
+
+  test('渲染评审详情', () => {
     const { wrapper } = mountReview();
-    expect(wrapper.find('[data-test="studio-ledger"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="studio-translator"]').exists()).toBe(true);
-  });
-
-  test('渲染搜索与筛选器', () => {
-    const { wrapper } = mountReview();
-    expect(wrapper.find('[data-test="capability-search"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="status-filter"]').exists()).toBe(true);
-  });
-
-  test('能力表格渲染能力行', () => {
-    const cap = makeCapability();
-    const { wrapper } = mountReview({
-      capabilities: ref([cap]),
-    });
-    expect(wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="next-minio.bucket.capacity.read"]').exists()).toBe(true);
-  });
-
-  test('点击能力名调用 selectCapability', async () => {
-    const fn = vi.fn();
-    const cap = makeCapability();
-    const { wrapper } = mountReview({
-      capabilities: ref([cap]),
-      selectCapability: fn,
-    });
-    await wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').trigger('click');
-    expect(fn).toHaveBeenCalledWith(cap);
   });
 
   test('渲染发布清单与发布按钮', () => {
@@ -118,14 +93,18 @@ describe('ReviewStage', () => {
     expect(fn).toHaveBeenCalledOnce();
   });
 
-  test('importBatch 存在时显示导入批次面板', () => {
-    const batch: ImportBatch = {
-      items: [],
-      domains: ['minio'],
-      stats: { total: 1, read: 1, write: 0, selected: 1, ignored: 0, needsMapping: 0, notAIReady: 0 },
-    };
-    const { wrapper } = mountReview({ importBatch: ref(batch) } as never);
-    expect(wrapper.find('[data-test="import-batch"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="import-batch-stat-total"]').text()).toContain('1');
+  test('评审主视是三张确认卡，技术面板收进发布卡高级详情', () => {
+    const { wrapper } = mountReview();
+    // 三张卡按顺序可见
+    expect(wrapper.find('[data-test="confirm-card-tool"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="confirm-card-verify"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="confirm-card-publish"]').exists()).toBe(true);
+    // 高级详情仍可达：编辑器、测试、发布检查、试调都在 details 槽内
+    const advanced = wrapper.find('[data-test="confirm-card-advanced"]');
+    expect(advanced.exists()).toBe(true);
+    expect(wrapper.find('[data-test="capability-name"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="test-input-form"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="publish-checklist"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="probe-panel"]').exists()).toBe(true);
   });
 });

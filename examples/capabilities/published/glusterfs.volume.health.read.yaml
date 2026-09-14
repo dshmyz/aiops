@@ -16,13 +16,13 @@ input_schema:
       type: string
       required: true
 output:
- kind: observation
- severity_path: $.status
- summary_template: Volume {name} has {online_bricks} online bricks and {heal_backlog} heal backlog
- fields:
- heal_backlog: $.data.heal_backlog
- offline_bricks: $.data.offline_bricks
- online_bricks: $.data.online_bricks
+  kind: observation
+  severity_path: $.status
+  summary_template: Volume {name} has {online_bricks} online bricks and {heal_backlog} heal backlog
+  fields:
+    heal_backlog: $.data.heal_backlog
+    offline_bricks: $.data.offline_bricks
+    online_bricks: $.data.online_bricks
 governance:
  requires_action_plan: false
  requires_approval: false

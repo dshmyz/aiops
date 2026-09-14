@@ -269,12 +269,40 @@ export async function testCapability(capability: Capability, input: Record<strin
   return body.result;
 }
 
-// 试调探活：真实调用一次后端 + 按真实响应推断输出映射（LLM 优先、规则兜底）。
+// 试调探活：读能力真实调用一次后端 + 按真实响应推断输出映射（LLM 优先、规则兜底）；
+// 写能力禁止试调，传 sample_body（示例响应体）做离线推断。
 // 对应 POST /v1/capabilities/probe-infer。
-export async function probeInferCapability(capability: Capability, input: Record<string, unknown>): Promise<ProbeInferResult> {
+export async function probeInferCapability(capability: Capability, input: Record<string, unknown>, sampleBody = ''): Promise<ProbeInferResult> {
   return request<ProbeInferResult>('/v1/capabilities/probe-infer', {
     method: 'POST',
-    body: JSON.stringify({ capability, input }),
+    body: JSON.stringify({ capability, input, sample_body: sampleBody }),
+  });
+}
+
+// 单接口接入：给定"后端接口地址"自动生成能力草稿 + 三段真值。
+// 对应 POST /v1/capabilities/probe-generate（读真实探测、写用 sample_body 离线推断）。
+export interface ProbeGeneratePayload {
+  backend?: {
+    adapter?: string;
+    method?: string;
+    path?: string;
+    base_url?: string;
+  };
+  description?: string;
+  sample_body?: string;
+  /** 读接口的探测实参（键为路径变量名），如 { cluster: "demo", bucket: "archive" }。 */
+  input?: Record<string, unknown>;
+}
+
+export interface ProbeGenerateResult {
+  capability: Capability;
+  probe: ProbeInferResult;
+}
+
+export async function probeGenerateCapability(payload: ProbeGeneratePayload): Promise<ProbeGenerateResult> {
+  return request<ProbeGenerateResult>('/v1/capabilities/probe-generate', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });
 }
 

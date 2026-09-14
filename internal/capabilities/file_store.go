@@ -153,7 +153,7 @@ func (s *FileCapabilityStore) MoveDraftToPublished(_ context.Context, name strin
 		return ManagedCapability{}, err
 	}
 	if _, err := os.Stat(dstPath); err == nil {
-		return ManagedCapability{}, fmt.Errorf("%w: %q is already published, unpublish the old version first", ErrCapabilityNameConflict, capability.Name)
+		return ManagedCapability{}, fmt.Errorf("%w: 能力 %q 已有已发布版本，请先在能力台账下架旧版本，再发布新版本", ErrCapabilityNameConflict, capability.Name)
 	} else if !os.IsNotExist(err) {
 		return ManagedCapability{}, err
 	}
@@ -191,7 +191,7 @@ func (s *FileCapabilityStore) MovePublishedToDraft(_ context.Context, name strin
 		return ManagedCapability{}, err
 	}
 	if _, err := os.Stat(dstPath); err == nil {
-		return ManagedCapability{}, fmt.Errorf("%w: %q already exists as a draft, remove the draft first", ErrCapabilityNameConflict, capability.Name)
+		return ManagedCapability{}, fmt.Errorf("%w: 已存在同名草稿 %q（可能是之前导入留下的），请先在能力台账删除该草稿后再下架", ErrCapabilityNameConflict, capability.Name)
 	} else if !os.IsNotExist(err) {
 		return ManagedCapability{}, err
 	}

@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { ElButton, ElAlert } from 'element-plus';
 import WorkflowRail from '../components/management/WorkflowRail.vue';
+import CapabilityLedgerPanel from '../components/management/CapabilityLedgerPanel.vue';
 import SourceStage from '../components/management/SourceStage.vue';
+import CapabilityCreationCanvas from '../components/management/CapabilityCreationCanvas.vue';
+import WorkOrderHeader from '../components/management/WorkOrderHeader.vue';
+import WorkflowSpine from '../components/management/WorkflowSpine.vue';
 import CandidatesStage from '../components/management/CandidatesStage.vue';
 import ReviewStage from '../components/management/ReviewStage.vue';
 import AIStage from '../components/management/AIStage.vue';
@@ -26,20 +30,38 @@ function askAi() {
   };
   emit('ask-ai', ctx);
 }
+
+// 阶段切换由用户明确点击步骤或主操作完成；不强制修改滚动位置。
+
+// 工单页 → 列表页：review 收起工单开关；接入/验证工单回列表并重置画布。
+function closeDetail() {
+  props.capabilities.wizardOpen.value = false;
+}
+
+function backToList() {
+  props.capabilities.managementPhase.value = 'review';
+  props.capabilities.wizardOpen.value = false;
+}
 </script>
 
 <template>
   <ViewShell
     v-show="capabilities.managementPhase.value"
-    class="management-entry"
+    class="management-entry capability-studio"
     data-test="management-entry"
     data-view="management"
-    eyebrow="AI Capability Studio"
-    title="把后台 API 翻译成 AI 工具"
-    copy="从 Swagger 收件箱选择接口，补齐参数和摘要，然后直接在右侧用自然语言试运行。"
+    eyebrow=""
+    title=""
+    copy=""
   >
-    <template #actions>
-      <el-button data-test="new-draft" type="primary" @click="capabilities.newDraft">新建草稿</el-button>
+    <!-- 只有进入评审/发布阶段（需要挑选草稿）才显示管理动作；创建/验证途中保持零干扰。 -->
+    <template v-if="capabilities.managementPhase.value === 'review' || capabilities.managementPhase.value === 'ai'" #actions>
+      <el-button
+        data-test="toggle-wizard"
+        type="primary"
+        @click="capabilities.managementPhase.value = 'source'; capabilities.wizardOpen.value = true"
+      >+ 接入 AI 工具</el-button>
+      <el-button data-test="new-draft" type="primary" @click="capabilities.newDraft(); capabilities.wizardOpen.value = true" plain>新建草稿</el-button>
       <el-button @click="capabilities.loadCapabilities">刷新</el-button>
       <el-button
         data-test="management-ask-ai"
@@ -63,12 +85,65 @@ function askAi() {
       :closable="false"
     />
 
-    <section data-test="workflow-console" class="workflow-console" aria-label="Capability 接入向导">
-      <WorkflowRail :capabilities="capabilities" />
-      <SourceStage v-if="capabilities.managementPhase.value === 'source'" :capabilities="capabilities" />
-      <CandidatesStage v-else-if="capabilities.managementPhase.value === 'candidates'" :capabilities="capabilities" />
-      <ReviewStage v-else-if="capabilities.managementPhase.value === 'review'" :capabilities="capabilities" />
-      <AIStage v-else :capabilities="capabilities" />
+    <!-- 信息架构（最终形态）：
+         review/ai = 列表主界面：纯清单单列全宽 + 顶栏动作；行内「评审」打开工单页。
+         source/candidates = 接入/验证工单页（全屏单列）。
+         wizardOpen 在 review 阶段兼作"工单页打开"开关。 -->
+    <section
+      v-if="capabilities.managementPhase.value === 'review' && capabilities.wizardOpen.value"
+      data-test="workflow-console"
+      class="workflow-console studio-layout is-intake"
+      aria-label="Capability 评审工单"
+    >
+      <div class="studio-wizard">
+        <div class="review-topbar">
+          <button data-test="back-to-list" class="secondary-inline" type="button" @click="closeDetail">← 返回列表</button>
+        </div>
+        <WorkOrderHeader :capabilities="capabilities" />
+        <WorkflowSpine :capabilities="capabilities" />
+        <ReviewStage :capabilities="capabilities" />
+      </div>
+    </section>
+    <section
+      v-else-if="capabilities.managementPhase.value === 'ai' && capabilities.wizardOpen.value"
+      data-test="workflow-console"
+      class="workflow-console studio-layout is-intake"
+      aria-label="AI 验证工单"
+    >
+      <div class="studio-wizard">
+        <div class="review-topbar">
+          <button data-test="back-to-list" class="secondary-inline" type="button" @click="closeDetail">← 返回列表</button>
+        </div>
+        <WorkOrderHeader :capabilities="capabilities" />
+        <WorkflowSpine :capabilities="capabilities" />
+        <AIStage :capabilities="capabilities" />
+      </div>
+    </section>
+    <section
+      v-else-if="capabilities.managementPhase.value === 'source' || capabilities.managementPhase.value === 'candidates'"
+      data-test="workflow-console"
+      class="workflow-console studio-layout is-intake"
+      :class="{ 'is-candidate': capabilities.managementPhase.value === 'candidates' }"
+      aria-label="Capability 接入"
+    >
+      <div class="studio-wizard">
+        <div class="review-topbar">
+          <button data-test="back-to-list" class="secondary-inline" type="button" @click="backToList">← 返回列表</button>
+        </div>
+        <el-alert v-if="capabilities.error.value" class="alert" type="error" :title="capabilities.error.value" show-icon />
+        <WorkOrderHeader :capabilities="capabilities" />
+        <WorkflowSpine :capabilities="capabilities" />
+        <CapabilityCreationCanvas v-if="capabilities.managementPhase.value === 'source'" :capabilities="capabilities" />
+        <CandidatesStage v-else :capabilities="capabilities" />
+      </div>
+    </section>
+    <section
+      v-else
+      data-test="workflow-console"
+      class="workflow-console studio-layout is-intake"
+      aria-label="Capability 列表"
+    >
+      <CapabilityLedgerPanel :capabilities="capabilities" />
     </section>
   </ViewShell>
 </template>

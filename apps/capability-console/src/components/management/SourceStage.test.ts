@@ -15,16 +15,20 @@ function mountSource(overrides: Partial<UseCapabilities> = {}) {
 }
 
 describe('SourceStage', () => {
-  test('渲染导入向导与快速发布面板', () => {
+  test('渲染双入口并列（URL ‖ Swagger）与高级 JSON 折叠区', () => {
     const { wrapper } = mountSource();
     expect(wrapper.find('[data-test="import-wizard"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="quick-publish-panel"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="openapi-url-input"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="backend-base-url-input"]').exists()).toBe(true);
+    // 连源双入口并列：单一 URL 卡片 + Swagger 卡片
+    expect(wrapper.find('[data-test="url-source-card"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="swagger-source-card"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="url-entry"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="url-endpoint-input"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="preview-openapi-url"]').exists()).toBe(true);
+    // 高级 JSON 仍为折叠进阶项
+    expect(wrapper.find('[data-test="manual-create-panel"]').exists()).toBe(true);
   });
 
-  test('渲染统计卡片', () => {
+  test('统计卡片渲染', () => {
     const { wrapper } = mountSource({
       stats: computed(() => ({ published: 3, review: 2, invalid: 1, publishable: 1 })),
     } as never);

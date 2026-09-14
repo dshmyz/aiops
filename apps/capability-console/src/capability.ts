@@ -67,10 +67,23 @@ export function normalizeCapability(raw: Partial<ManagedCapability>): ManagedCap
     ...raw,
     backend: { ...fallback.backend, ...raw.backend },
     input_schema: raw.input_schema ?? fallback.input_schema,
-    output: { ...fallback.output, ...raw.output, fields: raw.output?.fields ?? fallback.output.fields },
-    auth: { ...fallback.auth, ...raw.auth },
-    ai: { ...fallback.ai, ...raw.ai },
-    governance: raw.governance,
+    output: {
+      ...fallback.output,
+      ...raw.output,
+      fields: raw.output?.fields ?? fallback.output.fields,
+      // 后端 Go nil map 序列化为 null，直接下发会让编辑器 Object.keys/join 崩掉
+      status_mapping: raw.output?.status_mapping ?? undefined,
+    },
+    auth: { ...fallback.auth, ...raw.auth, roles: raw.auth?.roles ?? fallback.auth.roles },
+    ai: { ...fallback.ai, ...raw.ai, examples: raw.ai?.examples ?? fallback.ai.examples },
+    // governance 整体可选，但存在时内部字段也可能是 null（旧草稿/导入产物），统一补默认值
+    governance: raw.governance
+      ? {
+          ...raw.governance,
+          precheck_tools: raw.governance.precheck_tools ?? [],
+          rollback: raw.governance.rollback ?? { strategy: '' },
+        }
+      : raw.governance,
     source: raw.source ?? 'discovered',
     validation: raw.validation ?? { valid: false, error: '未校验' },
   };

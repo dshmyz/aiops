@@ -9,20 +9,24 @@ const result = computed(() => props.capabilities.probeResult.value);
 const loading = computed(() => props.capabilities.probeLoading.value);
 const selected = computed(() => props.capabilities.selected.value);
 
-// 读能力都能试调（POST 查询也行，与后端 Test 的治理边界一致）；写入能力不行。
-const canProbe = computed(() => {
-  const capability = selected.value;
-  return Boolean(capability.backend.base_url?.trim()) && capability.operation === 'read';
-});
+// 读能力都能试调（POST 查询也行，与后端 Test 的治理边界一致）；
+// 写能力禁止试调（治理边界），改为粘贴示例响应体做离线推断。
+const isWrite = computed(() => selected.value.operation === 'write');
+const canProbeRead = computed(() => Boolean(selected.value.backend.base_url?.trim()) && selected.value.operation === 'read');
+const canProbe = computed(() => canProbeRead.value || isWrite.value);
 const canProbeHint = computed(() => {
-  const capability = selected.value;
-  if (!capability.backend.base_url?.trim()) {
+  if (selected.value.operation === 'read' && !selected.value.backend.base_url?.trim()) {
     return '先在「编辑 Capability 详情」里填后端 Base URL';
   }
-  if (capability.operation !== 'read') {
-    return '试调只支持读取类能力；写入能力发布前走审批链路';
-  }
   return '';
+});
+const probeOkLabel = computed(() => (isWrite.value ? '样例推断成功' : '试调成功'));
+// 写能力验证卡用的示例响应体，读写到编辑器共享状态（probeSelected 会带上）。
+const sampleBody = computed({
+  get: () => props.capabilities.testSampleBody.value,
+  set: (value: string) => {
+    props.capabilities.testSampleBody.value = value;
+  },
 });
 const inferredByLabel = computed(() => {
   if (result.value?.inferred_by === 'llm_sample') {
@@ -59,11 +63,24 @@ function copyRaw() {
 <template>
   <section class="review-block" data-test="probe-panel">
     <div class="review-block-title">
-      <h3>试调真实接口</h3>
-      <span>调一次真实后端，AI 按真实响应配置输出映射</span>
+      <h3>验证输出映射</h3>
+      <span>{{ isWrite ? '写接口不发起试调：粘贴示例响应体，离线推断输出映射' : '调一次真实后端，AI 按真实响应配置输出映射' }}</span>
     </div>
     <template v-if="canProbe">
-      <div class="probe-actions">
+      <div v-if="isWrite" class="probe-write">
+        <p class="probe-hint">变更类接口不发起试调（避免产生真实变更），发布后执行仍走「计划 → 审批」流程。粘贴一次真实调用的示例响应体，AI 会用它推断输出映射。</p>
+        <textarea
+          data-test="probe-sample-body"
+          v-model="sampleBody"
+          rows="5"
+          class="filter-input filter-input--mono"
+          placeholder='例如：{"code":0,"data":{"topic":"orders","status":"ok"}}'
+        />
+        <el-button data-test="probe-run-write" type="warning" :loading="loading" @click="runProbe">
+          {{ loading ? '正在推断…' : '从样例推断输出映射' }}
+        </el-button>
+      </div>
+      <div v-else class="probe-actions">
         <el-button data-test="probe-run" type="warning" :loading="loading" @click="runProbe">
           {{ loading ? '正在试调…' : '试调真实接口' }}
         </el-button>
@@ -74,7 +91,7 @@ function copyRaw() {
           <div v-for="warning in result.warnings" :key="warning" class="probe-warning-row">⚠ {{ warning }}</div>
         </div>
         <div v-if="result.probe" class="probe-summary" data-test="probe-summary">
-          <strong>试调成功</strong>
+          <strong>{{ probeOkLabel }}</strong>
           <span>{{ probeSummary }}</span>
         </div>
         <div v-if="result.inferred" class="probe-inferred" data-test="probe-inferred">
@@ -98,7 +115,7 @@ function copyRaw() {
           </table>
         </div>
         <details v-if="result.raw_body" class="probe-raw">
-          <summary>查看真实响应体</summary>
+          <summary>{{ isWrite ? '查看示例响应体' : '查看真实响应体' }}</summary>
           <pre data-test="probe-raw-body">{{ result.raw_body }}</pre>
           <el-button size="small" @click="copyRaw">复制</el-button>
         </details>
@@ -110,6 +127,8 @@ function copyRaw() {
 
 <style scoped>
 .review-block { display: flex; flex-direction: column; gap: 12px; }
+.probe-write { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.probe-write textarea { width: 100%; font-family: var(--font-mono, monospace); font-size: 12px; }
 .probe-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .probe-hint { font-size: 12px; color: var(--el-text-color-secondary, #909399); }
 .probe-warnings { display: flex; flex-direction: column; gap: 4px; }

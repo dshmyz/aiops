@@ -4,11 +4,26 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+// registerKeyValueEncoder registers the console key=value encoder once. In
+// console (dev) mode structured fields print as readable key=value pairs instead
+// of the JSON object zap's default console encoder always appends; production
+// JSON logging is unaffected.
+var registerKeyValueEncoderOnce sync.Once
+
+func initKeyValueEncoder() {
+	registerKeyValueEncoderOnce.Do(func() {
+		_ = zap.RegisterEncoder("keyvalue", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
+			return newKeyValueEncoder(cfg), nil
+		})
+	})
+}
 
 // loggerHolder keeps a single process-wide zap.Logger so that all packages
 // can retrieve it via Logger() without threading it through every constructor.
@@ -35,8 +50,11 @@ func InitLogger(level string) *zap.Logger {
 	logFormat := strings.ToLower(strings.TrimSpace(os.Getenv("COPILOT_LOG_FORMAT")))
 
 	if logFormat == "console" {
-		// 开发模式：人类可读的 console 格式，带颜色和缩进
+		// 开发模式：人类可读的 console 格式，带颜色和缩进。结构化字段用自定义
+		// key=value 编码器渲染（而非 JSON 对象尾巴），生产 json 模式不受影响。
+		initKeyValueEncoder()
 		cfg = zap.NewDevelopmentConfig()
+		cfg.Encoding = "keyvalue"
 		cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		cfg.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("15:04:05")
 		cfg.EncoderConfig.EncodeCaller = zapcore.ShortCallerEncoder

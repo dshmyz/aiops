@@ -105,7 +105,7 @@
 
   /* Layout */
   --sidebar-width: 220px;
-  --left-panel-width: 320px;
+  --left-panel-width: 400px;
 }
 
 /* Light theme - macOS Sequoia light */
@@ -811,13 +811,13 @@ nav button:focus-visible {
    ============================================ */
 .filter-input {
   padding: 0 var(--space-4);
-  height: 32px;
+  height: 40px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
   color: var(--color-text-primary);
   font-size: var(--font-md);
-  line-height: 32px;
+  line-height: 40px;
   outline: none;
   box-sizing: border-box;
   transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
@@ -856,7 +856,7 @@ nav button:focus-visible {
   appearance: none;
   -webkit-appearance: none;
   padding: 0 36px 0 var(--space-4);
-  height: 32px;
+  height: 40px;
   background-color: var(--color-bg-elevated);
   background-image: var(--select-arrow);
   background-repeat: no-repeat;
@@ -865,7 +865,7 @@ nav button:focus-visible {
   border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   font-size: var(--font-md);
-  line-height: 32px;
+  line-height: 40px;
   outline: none;
   cursor: pointer;
   box-sizing: border-box;
@@ -878,13 +878,15 @@ nav button:focus-visible {
 }
 
 .mini-input {
-  padding: var(--space-1) var(--space-3);
+  height: 40px;
+  padding: 0 var(--space-3);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   color: var(--color-text-primary);
-  font-size: var(--font-sm);
+  font-size: var(--font-md);
   outline: none;
+  box-sizing: border-box;
   font-family: var(--font-mono);
   transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
 }
@@ -894,15 +896,38 @@ nav button:focus-visible {
   box-shadow: 0 0 0 1px var(--color-accent) inset;
 }
 
+/* 以 textarea 形式使用的 mini-input（如候选项 AI 描述）：放开固定高度，
+   尊重 rows 行数并可纵向拖拽，避免被 height:38px 压成单行。 */
+textarea.mini-input,
+.mini-input.candidate-description {
+  height: auto;
+  min-height: 72px;
+  padding: var(--space-2) var(--space-3);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* 以 textarea 形式使用的 filter-input（如 UrlEntry 示例响应体）：
+   同样放开 .filter-input 的固定 40px/行高，让 rows 生效并支持拖拽。 */
+textarea.filter-input {
+  height: auto;
+  min-height: 72px;
+  padding: var(--space-2) var(--space-3);
+  line-height: 1.5;
+  resize: vertical;
+}
+
 .mini-select {
-  padding: var(--space-1) var(--space-3);
+  height: 40px;
+  padding: 0 var(--space-3);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   color: var(--color-text-secondary);
-  font-size: var(--font-sm);
+  font-size: var(--font-md);
   outline: none;
   cursor: pointer;
+  box-sizing: border-box;
   transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
 }
 
@@ -925,6 +950,7 @@ nav button:focus-visible {
 
 /* Element Plus overrides */
 .el-input__wrapper {
+  min-height: 40px !important;
   background: var(--color-bg-elevated) !important;
   box-shadow: 0 0 0 1px var(--color-border-strong) inset !important;
   border-radius: var(--radius-md) !important;
@@ -949,12 +975,12 @@ nav button:focus-visible {
   box-shadow: 0 0 0 1px var(--color-border-strong) inset !important;
 }
 
-/* 新版 Element Plus el-select 使用 .el-select__wrapper，统一视觉与高度 */
+/* 新版 Element Plus el-select 使用 .el-select__wrapper，统一视觉与高度（36px 偏矮，放大到 40px 与全局输入控件一致） */
 .el-select__wrapper {
   background: var(--color-bg-elevated) !important;
   box-shadow: 0 0 0 1px var(--color-border-strong) inset !important;
   border-radius: var(--radius-md) !important;
-  min-height: 32px !important;
+  min-height: 40px !important;
 }
 
 .el-select__wrapper.is-focused {
@@ -1270,14 +1296,539 @@ nav button:focus-visible {
   flex-shrink: 0;
 }
 
+/* 评审状态行：下一步动作 + 校验标签，hairline 上下收口。
+   统计卡已移入工具库面板，此处不再重复工具库数字。 */
+.review-status-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  margin-bottom: 4px;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.review-status-line span:first-child {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+/* 工具库面板内的统计：行内数字条（与候选页统计同语言）。 */
+.ledger-kpis.stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ledger-kpis .stats-grid-item {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.ledger-kpis .stats-grid-item:hover {
+  background: none;
+}
+
+/* 可点击统计（如「校验失败」）：整项可点，hover 时数字变色提示。 */
+.ledger-kpis .stats-grid-item.is-clickable {
+  cursor: pointer;
+}
+
+.ledger-kpis .stats-grid-item.is-clickable:hover strong {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ledger-kpis .stats-grid-item span {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+.ledger-kpis .stats-grid-item strong {
+  font-size: 17px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+
+/* ============================================
+   Capability Studio 画布层次（灰画布 + 白卡）
+   画布必须与白卡有肉眼可辨的对比度（≥8% 灰度差），
+   卡片投影要能看出"浮起"。改色前先在两种主题下截图对比。
+   ============================================ */
+.capability-studio .topbar {
+  background: transparent;
+}
+.capability-studio .studio-wizard {
+  box-shadow: none;
+}
+.capability-studio .studio-layout > .review-list {
+  box-shadow: none;
+}
+.capability-studio .view-shell,
+.capability-studio .topbar {
+  background: transparent;
+}
+
+.capability-studio .studio-wizard > .workflow-stage,
+.capability-studio .wo-header,
+.capability-studio .wo-spine {
+  background: var(--color-bg-elevated);
+}
+
+/* 工单头 + 步骤脊 + 阶段内容 组成一张连续白卡 */
+.capability-studio .studio-wizard {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.04);
+  padding: 20px 24px 28px;
+}
+
+/* 工单卡片与列表页同一容器边距（全宽 + shell 边距），页与页左右边缘完全一致 */
+
+/* 侧栏清单也是白卡（背景继承全局 elevated，补边框/投影统一语言） */
+.capability-studio .studio-layout > .review-list {
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* 工具库入口卡（连接页右上）白卡化 */
+.existing-capabilities-entry {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* 来源选择行（从一个接口开始 / 导入 API 文档）白卡化，替代裸 hairline */
+.source-choice {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.source-choice:hover {
+  border-color: var(--view-accent, var(--color-accent));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* 高级方式折叠区维持浅内嵌（不与外层白卡打架） */
+.creation-canvas__advanced {
+  background: var(--color-bg);
+}
+
+.review-topbar { margin-bottom: 14px; }
+
+/* 接入引导卡：列表主界面时的"接入"动作入口——轻量、明确、不占主区。 */
+.intake-invite {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 28px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 14px;
+  background: var(--color-bg-elevated);
+}
+
+.intake-invite__title { margin: 0; font-size: 17px; font-weight: 700; color: var(--color-text-primary); }
+.intake-invite__copy { margin: 0; font-size: 14px; color: var(--color-text-secondary); line-height: 1.6; }
+
 /* ============================================
    Workflow Console
    ============================================ */
+/* 滚动契约（勿破坏）：管理页整页唯一滚动容器是 .app-main。
+   workflow-console / studio-layout / studio-wizard / workflow-review /
+   review-detail 全部 overflow: visible、不设固定高度，内容自然撑高。
+   唯一例外：侧栏清单 sticky + 内部滚动。历史上多次因中间层自带
+   overflow:hidden/auto 造成"页面拉不动"，改滚动前先读本注释。 */
 .workflow-console {
+  flex: 1;
+  display: block;
+  overflow: visible;
+}
+
+/* ============================================
+   Work order（工单）：任务头 + 接线契约条（签名元素）
+   ============================================ */
+.wo-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 0 16px;
+}
+
+.wo-header__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wo-header__row h2 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.wo-header__library {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.wo-header__library:hover { color: var(--view-accent, var(--color-accent)); }
+
+/* 接线契约条：上下 hairline 夹住的等宽路径带，整页签名。 */
+.wo-contract {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+}
+
+.method-doc {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
+.wo-contract__path {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wo-contract__path.is-placeholder {
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  letter-spacing: 0;
+}
+
+.wo-status {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.wo-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--color-border-strong);
+  flex-shrink: 0;
+}
+
+.wo-dot.is-live {
+  background: var(--view-accent, var(--color-accent));
+  animation: wo-pulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wo-dot.is-live { animation: none; }
+}
+
+@keyframes wo-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ============================================
+   Studio layout（接入任务流：向导主内容 + 清单侧栏）
+   ============================================ */
+/* DOM 顺序为 向导 → 清单（窄屏时向导在上），桌面双栏用显式列位把
+   清单固定到窄左列、向导放宽右列，避免按 DOM 顺序错分配。 */
+.studio-layout {
+  display: grid;
+  /* 列表为主界面：清单吃满剩余宽度（主列），评审是右窄栏（当前选中详情） */
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 24px;
+  overflow: visible;
+  padding: 20px 0 48px;
+  width: 100%;
+}
+
+/* 评审双栏组整体居中；单列阶段（连接/验证）卡片组同样居中，
+   三阶段页面重心一致。 */
+
+.studio-layout > .studio-wizard {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  align-self: start;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+.studio-layout > .existing-capabilities-entry {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
+/* 侧栏清单：sticky 跟随页面滚动，自身内部滚动，不影响整页滚动契约 */
+.studio-layout > .review-list {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-actions > span {
+  flex-basis: 100%;
+  white-space: nowrap;
+}
+
+.existing-capabilities-entry {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 72px;
+  padding: 14px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.existing-capabilities-entry:hover {
+  border-color: var(--view-accent, var(--color-accent));
+  background: var(--color-bg-hover);
+}
+
+.existing-capabilities-entry__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-lg);
+  background: var(--view-accent-soft, var(--color-accent-soft));
+  color: var(--view-accent, var(--color-accent));
+}
+
+.existing-capabilities-entry span:nth-child(2) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.existing-capabilities-entry small { color: var(--color-text-tertiary); }
+.existing-capabilities-entry__arrow { color: var(--view-accent, var(--color-accent)); }
+
+.studio-layout.is-intake { display: block; overflow: visible; }
+.studio-layout.is-intake .existing-capabilities-entry { margin: 0 0 var(--space-4); }
+.studio-layout.is-intake .studio-wizard { overflow: visible; }
+
+/* 候选验证阶段：与连接阶段完全一致——block 单列 + 860 居中，同一内容节奏。 */
+.studio-layout.is-candidate { display: block; overflow: visible; }
+.studio-layout.is-candidate .studio-wizard { overflow: visible; }
+
+/* 评审/候选阶段：窄屏下向导在上、清单在下（单列 flex，不再用 grid 列位）。 */
+@media (max-width: 960px) {
+  .studio-layout:not(.is-intake) {
+    display: flex;
+    flex-direction: column;
+  }
+  .studio-layout:not(.is-intake) > .review-list {
+    order: 2;
+    grid-column: auto;
+    grid-row: auto;
+    position: static;
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+  .studio-layout:not(.is-intake) > .studio-wizard {
+    order: 1;
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 960px) {
+  .studio-layout {
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+    overflow: visible;
+    padding-top: var(--space-5);
+  }
+
+  .studio-layout > .review-list {
+    max-height: 238px;
+    overflow-y: auto;
+  }
+
+  .studio-wizard {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 860px) {
+  .studio-layout > .review-list {
+    max-height: 210px;
+  }
+}
+
+
+
+.studio-wizard {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: visible;
+}
+
+.studio-wizard.is-collapsed {
+  overflow-y: auto;
+}
+
+.studio-wizard > .workflow-stage {
+  padding-top: 0;
+}
+
+.studio-wizard__empty {
   flex: 1;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  min-height: 240px;
+  border: 1px dashed var(--color-border, #d0d7de);
+  border-radius: var(--radius-xl);
+  color: var(--color-text-tertiary, #6e7781);
+  background: var(--color-bg-elevated, #ffffff);
+}
+
+/* 向导置于右栏时，各 stage 不再自持 340px 侧栏，由右栏宽度接管。
+   只读向导的内容在自身高度内滚动，避免被外层裁剪导致屏幕外内容无法显示。 */
+.studio-wizard .workflow-start {
+  display: block;
   overflow-y: auto;
+  padding-top: 0;
+}
+
+.studio-wizard .workflow-start > .stage-side {
+  position: static;
+  width: 100%;
+  max-width: none;
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-subtle, var(--color-bg-elevated));
+}
+
+/* ============================================
+   Source entry grid（连源双入口：URL ‖ Swagger）
+   ============================================ */
+.source-entry-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
+  gap: var(--space-5);
+  align-items: stretch;
+}
+
+.source-entry-card:first-child {
+  border-color: color-mix(in srgb, var(--view-accent, var(--color-accent)) 38%, var(--color-border));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--view-accent, var(--color-accent)) 12%, transparent);
+}
+
+.source-entry-card:first-child .import-wizard__label::after {
+  content: '推荐';
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--view-accent-soft, var(--color-accent-soft));
+  color: var(--view-accent, var(--color-accent));
+  font-size: var(--font-xs);
+  font-weight: 700;
+}
+
+.source-entry-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border, #d0d7de);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-elevated, #ffffff);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(31, 35, 40, 0.04));
+}
+
+.source-entry-card .import-wizard__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+  font-weight: 700;
+}
+
+.source-entry-card .import-strip {
+  width: 100%;
+}
+
+@media (max-width: 1200px) {
+  .source-entry-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .workflow-stage {
@@ -1647,6 +2198,61 @@ nav button:focus-visible {
 .stage-header h2 { font-size: var(--font-2xl); margin-bottom: var(--space-1); }
 .stage-header p { font-size: var(--font-base); color: var(--color-text-secondary); }
 
+.candidate-workbench-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: 4px 4px var(--space-5);
+}
+
+.candidate-workbench-head h2 {
+  margin: 2px 0 4px;
+  font-size: var(--font-2xl);
+  color: var(--color-text-primary);
+}
+
+.candidate-workbench-head p:last-child {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+}
+
+.candidate-source-details {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.candidate-source-details > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px var(--space-5);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--font-sm);
+}
+
+.candidate-source-details > summary::-webkit-details-marker { display: none; }
+.candidate-source-details > summary span,
+.candidate-source-details > summary small { color: var(--color-text-tertiary); }
+.candidate-source-details > summary strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--font-xs); }
+
+.candidate-summary-line {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+}
+
+.candidate-summary-line strong { color: var(--color-text-primary); font-size: var(--font-base); }
+.candidate-summary-line .is-success { color: var(--color-success); }
+.candidate-summary-line .is-warning { color: var(--color-warning); }
+
 .candidate-stage {
   /* 由外层 .workflow-candidates 负责滚动，这里不再 flex:1+overflow:hidden
      锁高，改为内容自然堆叠，确保每个候选行都可完整展示（不挤压）。 */
@@ -1687,41 +2293,41 @@ nav button:focus-visible {
   overflow: visible;
 }
 
-/* Candidate stats: 3×2 卡片矩阵，每张卡有独立阴影和语义色 */
+/* Candidate stats: hairline 行内数字条，与工单语言一致（无卡壳、无阴影）。
+   语义色只上数字本身。 */
 .candidate-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-3);
-  padding: var(--space-5);
-  padding-bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 28px;
+  padding: 14px 0 12px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .candidate-stat-card {
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-bg);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  transition: transform 0.15s var(--ease-spring);
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .candidate-stat-card:hover {
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .candidate-stat-card span {
-  font-size: var(--font-xs);
-  color: var(--color-text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
 }
 
 .candidate-stat-card strong {
-  font-size: var(--font-xl);
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 700;
   font-family: var(--font-mono);
   color: var(--color-text-primary);
   letter-spacing: -0.01em;
@@ -1930,8 +2536,8 @@ nav button:focus-visible {
 .capability-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4);
+  gap: 6px;
+  padding: 9px 12px;
   border-radius: var(--radius-lg);
   background: var(--color-bg-elevated);
   box-shadow: var(--shadow-sm);
@@ -1970,7 +2576,10 @@ nav button:focus-visible {
   border: none;
   cursor: pointer;
   text-align: left;
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .capability-card__name:hover {
@@ -1988,7 +2597,10 @@ nav button:focus-visible {
   font-size: var(--font-xs);
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .capability-card__foot {
@@ -2014,22 +2626,26 @@ nav button:focus-visible {
 .candidate-list {
   flex: none;
   overflow: visible;
-  padding: var(--space-5);
+  padding: 0;
 }
 
+/* 候选行：表格行式 hairline（无行卡、无阴影），路径是行主角（等宽）。
+   选中态 = 左侧 2px 主题竖条 + 行底色轻染。 */
 .candidate-row {
   display: grid;
-  grid-template-columns: auto auto 1fr auto auto;
+  /* minmax(0, 1fr)：nowrap 等宽路径不能把列最小宽度撑成全文宽度，
+     否则路径会溢出压到右侧徽标列。 */
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
   gap: var(--space-3);
   align-items: flex-start;
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  margin-bottom: var(--space-3);
-  transition: background 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out), transform 0.15s var(--ease-spring);
-  border: none;
-  background: var(--color-bg);
-  box-shadow: var(--shadow-sm);
+  padding: 14px 4px 14px 10px;
+  border-radius: 0;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: none;
+  box-shadow: none;
   position: relative;
+  transition: background 0.15s var(--ease-out);
 }
 
 .candidate-row:last-child {
@@ -2038,13 +2654,13 @@ nav button:focus-visible {
 
 .candidate-row:hover {
   background: var(--color-bg-hover);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
+  transform: none;
+  box-shadow: none;
 }
 
 .candidate-row:has(input[type="checkbox"]:checked) {
   background: var(--view-accent-soft, var(--color-accent-soft));
-  box-shadow: var(--shadow-sm), inset 3px 0 0 var(--view-accent, var(--color-accent));
+  box-shadow: inset 2px 0 0 var(--view-accent, var(--color-accent));
 }
 
 /* Custom checkbox: 隐藏原生 input，用 .candidate-check__mark 画苹果风勾选圆 */
@@ -2108,11 +2724,12 @@ nav button:focus-visible {
 }
 
 .candidate-main strong {
-  font-size: var(--font-md);
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 700;
   color: var(--color-text-primary);
   font-family: var(--font-mono);
   word-break: break-all;
+  letter-spacing: -0.01em;
 }
 
 .candidate-main small {
@@ -2133,15 +2750,14 @@ nav button:focus-visible {
 }
 
 .verdict-cell strong {
-  font-size: var(--font-xs);
+  font-size: 12px;
   font-weight: 700;
   color: var(--color-text-secondary);
   display: inline-block;
-  padding: 4px 10px;
+  padding: 3px 9px;
   border-radius: var(--radius-pill);
   background: var(--color-bg-hover);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .verdict-cell small {
@@ -2276,12 +2892,18 @@ nav button:focus-visible {
 /* ============================================
    Stage: Review (Step 3)
    ============================================ */
+.review-detail-only {
+  display: block;
+  overflow: visible;
+}
+
+/* 评审阶段是工单单列（清单已由外层 studio-layout 侧栏承担），
+   不再保留旧双栏 grid——否则 review-detail 被塞进 340px 窄列，
+   内容挤压、右侧留白。 */
 .workflow-review {
   flex: 1;
-  display: grid;
-  grid-template-columns: var(--left-panel-width) 1fr;
-  gap: var(--space-6);
-  overflow: hidden;
+  display: block;
+  overflow: visible;
 }
 
 .review-list {
@@ -2502,7 +3124,7 @@ nav button:focus-visible {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  overflow-y: auto;
+  overflow: visible;
   background: var(--color-bg-elevated);
   border: none;
   border-radius: var(--radius-xl);
@@ -2703,6 +3325,30 @@ nav button:focus-visible {
 
 .form-grid .wide { grid-column: 1 / -1; }
 
+/* 编辑器内 element-plus 输入对齐自定义高度（默认 el 输入偏矮，系统性放高） */
+.editor-group .el-input__wrapper,
+.editor-group .el-select__wrapper,
+.auth-config .el-input__wrapper,
+.auth-config .el-select__wrapper {
+  min-height: 40px;
+  border-radius: var(--radius-md);
+}
+.editor-group .el-input-number,
+.auth-config .el-input-number {
+  height: 40px;
+  width: 100%;
+}
+.editor-group .el-input-number .el-input__inner,
+.auth-config .el-input-number .el-input__inner {
+  height: 38px;
+}
+.editor-group .el-textarea__inner,
+.auth-config .el-textarea__inner {
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  line-height: 1.6;
+}
+
 .ai-desc-row {
   display: flex;
   gap: var(--space-3);
@@ -2715,7 +3361,12 @@ nav button:focus-visible {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-4);
-  padding: var(--space-5);
+  padding: var(--space-5) 0 var(--space-5) 26px;
+}
+
+/* 高级详情在编号章节的缩进体系内，去掉旧卡片左右 padding，参数表拿到全宽。 */
+.advanced-editor-stack .two-column {
+  padding: var(--space-5) 0;
 }
 
 .two-column > div { min-width: 0; }
@@ -2730,10 +3381,10 @@ nav button:focus-visible {
   display: grid;
   /* 固定 track 在窄容器里不会收缩，会把"删除"按钮顶出卡片。
      改为可收缩 track + 子控件满宽，让 grid 自适应嵌套容器。 */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 110px) 40px minmax(0, 64px);
-  gap: var(--space-2);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 120px) 40px minmax(0, 72px);
+  gap: var(--space-3);
   align-items: center;
-  padding: 8px 4px;
+  padding: 10px 6px;
   border-bottom: none;
   transition: background 0.12s var(--ease-out);
   border-radius: var(--radius-sm);
@@ -3053,19 +3704,12 @@ nav button:focus-visible {
    ============================================ */
 .workflow-ai {
   flex: 1;
-  display: grid;
-  grid-template-columns: var(--left-panel-width) minmax(0, 1fr);
-  gap: var(--space-6);
-  overflow: hidden;
-}
-
-/* stage-hero 跨满两列，避免在 2 列 grid 中被挤进窄列导致下方 aside 错位 */
-.workflow-ai > .stage-hero {
-  grid-column: 1 / -1;
+  display: block;
+  overflow: visible;
 }
 
 .ai-runner-focus {
-  overflow-y: auto;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
@@ -4391,13 +5035,8 @@ nav button:focus-visible {
    Responsive
    ============================================ */
 @media (max-width: 1024px) {
-  .workflow-review,
-  .workflow-ai {
-    grid-template-columns: 260px 1fr;
-  }
-
   :root {
-    --left-panel-width: 260px;
+    --left-panel-width: 340px;
   }
 
   /* Preview grid: 3 columns gets too cramped on narrow viewports,
@@ -5611,7 +6250,7 @@ button.stat-card.has-danger::before { background: var(--color-danger); }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 10px;
+  padding: 12px 10px;
   min-height: 0;
 }
 
@@ -5619,16 +6258,22 @@ button.stat-card.has-danger::before { background: var(--color-danger); }
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
+  /* 显式覆盖基类的 column：紧凑行是“路径 + 名称”同行 baseline 排布，
+     column 方向会让 nowrap 路径无法横向收缩而溢出。 */
+  flex-direction: row;
   align-items: baseline;
   gap: 8px;
 }
 
 .candidate-main--compact .candidate-path {
-  font-size: 13px;
+  font-size: 15px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1 1 auto;
+  /* basis 0 + min-width 0：nowrap 等宽路径的 min-content 不能参与收缩计算，
+     否则 flex-shrink 失效，路径溢出行宽压到右侧徽标。 */
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .candidate-main--compact .candidate-override,

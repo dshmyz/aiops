@@ -51,6 +51,9 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
   const validation = ref<ValidationResult>({ valid: false, error: '未校验' });
   const preview = ref<NormalizedResult | null>(null);
   const testInputText = ref('{}');
+  // 写能力验证用的示例响应体：写接口禁止试调（治理边界），验证卡改为粘贴
+  // 一次真实调用的示例响应体做离线推断，见 ReviewConfirmCards 验证卡。
+  const testSampleBody = ref('');
   // 试调探活：真实调一次后端 + 按真实响应推断输出映射。
   const probeResult = ref<ProbeInferResult | null>(null);
   const probeLoading = ref(false);
@@ -219,7 +222,7 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     const operation = selected.value.operation;
     const method = selected.value.backend.method;
     const operationMatchesMethod =
-      (operation === 'read' && ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) ||
+      (operation === 'read' && method === 'GET') ||
       (operation === 'write' && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method));
     return [
       {
@@ -238,7 +241,7 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
       {
         label: `${method === 'GET' ? 'GET' : method} 请求`,
         ok: operationMatchesMethod,
-        detail: `请求方法 ${method}（读取类接口支持 GET/POST 等查询方法）`,
+        detail: `请求方法 ${method}（读取类接口使用 GET，写入类接口使用 POST/PUT/PATCH/DELETE）`,
       },
       {
         label: '后端地址',
@@ -357,20 +360,31 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     validation.value = selected.value.validation;
     preview.value = null;
     probeResult.value = null;
+    testSampleBody.value = '';
     resetAIPreflight();
     if (switching) {
-      testInputText.value = '{}';
+      // 测试参数默认值：优先用接口路径里的真实资源值（单接口探测时拆出的
+      // demo/archive 这类值已经写进 input examples），其次 schema examples，
+      // 让评审页的参数框开箱即填，而不是空着等用户重新猜一遍。
+      const seeded: Record<string, unknown> = {};
+      for (const [name, field] of Object.entries(selected.value.input_schema)) {
+        const example = field.examples?.[0];
+        if (example !== undefined && example !== '') {
+          seeded[name] = field.type === 'integer' || field.type === 'number' ? Number(example) : example;
+        }
+      }
+      testInputText.value = JSON.stringify(seeded);
     } else {
       // 先更新 selected 再裁剪，pruneTestInput 基于新能力的合法字段集合。
       pruneTestInput();
     }
   }
 
-  function newDraft() {
-    selected.value = normalizeCapability({ ...emptyCapability(), source: 'discovered', validation: { valid: false } });
+  function newDraft() {    selected.value = normalizeCapability({ ...emptyCapability(), source: 'discovered', validation: { valid: false } });
     validation.value = { valid: false, error: '未校验' };
     preview.value = null;
     testInputText.value = '{}';
+    testSampleBody.value = '';
     resetAIPreflight();
     managementPhase.value = 'review';
   }
@@ -380,6 +394,7 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     validation.value = { valid: false, error: '未校验' };
     preview.value = null;
     testInputText.value = '{}';
+    testSampleBody.value = '';
     resetAIPreflight();
     managementPhase.value = 'review';
   }
@@ -402,7 +417,10 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     error.value = '';
     try {
       validation.value = await validateCapability(toCapability(selected.value));
-      selected.value.validation = validation.value;
+      // 注意：不要把结果写回 selected.value.validation —— selected 被 deep
+      // watch 监听用于自动校验，写回会形成「校验→触发→再校验」的自循环，
+      // 每 ~800ms 刷一次 /v1/capabilities/validate 直到触发限流。校验态由
+      // validation ref 独立驱动即可（发布检查表读的也是 validation.value）。
       if (validation.value.valid) {
         if (showToast) {
           ElMessage.success('校验通过');
@@ -445,14 +463,15 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     }
   }
 
-  // 试调探活：真实调用后端一次，返回真实响应 + AI/规则推断的输出映射。
-  // 与 testSelected 共用测试参数（testInputText），结果由 ProbePanel 展示。
+  // 试调探活：读能力真实调用后端一次，返回真实响应 + AI/规则推断的输出映射；
+  // 写能力治理边界禁止试调，改为把示例响应体（testSampleBody）交给后端离线推断。
+  // 与 testSelected 共用测试参数（testInputText），结果由 ProbePanel/验证卡展示。
   async function probeSelected() {
     error.value = '';
     probeLoading.value = true;
     try {
       const input = JSON.parse(testInputText.value) as Record<string, unknown>;
-      probeResult.value = await probeInferCapability(toCapability(selected.value), input);
+      probeResult.value = await probeInferCapability(toCapability(selected.value), input, testSampleBody.value);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '试调失败';
       error.value = msg;
@@ -618,6 +637,7 @@ export function useCapabilityEditor(options: UseCapabilityEditorOptions) {
     validation,
     preview,
     testInputText,
+    testSampleBody,
     probeResult,
     probeLoading,
     aiPromptOverride,

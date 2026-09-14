@@ -120,7 +120,7 @@ describe('CandidatesStage', () => {
       importPreview: ref(makePreview()),
       importCommitSummary: computed(() => ({ selected: 2, reads: 1, writes: 1, highRisk: 0 })),
     } as never);
-    expect(wrapper.find('[data-test="import-commit-summary"]').text()).toContain('已选择 2 个候选 API');
+    expect(wrapper.find('[data-test="import-commit-summary"]').text()).toContain('已选择 2 个接口');
   });
 
   test('canCommitImportPreview 为 false 时提交按钮禁用', () => {

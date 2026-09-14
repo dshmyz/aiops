@@ -26,7 +26,7 @@ const props = defineProps<{ capabilities: UseCapabilities }>();
         </label>
       </div>
     </section>
-    <label class="block-label">测试输入 JSON<el-input data-test="test-input" v-model="capabilities.testInputText.value" type="textarea" :rows="4" /></label>
+    <label class="block-label">测试输入 JSON<el-input data-test="test-input" v-model="capabilities.testInputText.value" type="textarea" :rows="6" /></label>
     <div class="actions">
       <el-button data-test="save-draft" @click="capabilities.saveSelectedDraft">保存草稿</el-button>
       <el-button data-test="validate-capability" type="primary" @click="capabilities.validateSelected">校验</el-button>
@@ -39,7 +39,7 @@ const props = defineProps<{ capabilities: UseCapabilities }>();
       </div>
       <label class="block-label tight">
         自然语言请求
-        <el-input data-test="ai-prompt" v-model="capabilities.aiPromptText.value" type="textarea" :rows="3" />
+        <el-input data-test="ai-prompt" v-model="capabilities.aiPromptText.value" type="textarea" :rows="4" />
       </label>
       <div class="ai-preflight-actions">
         <button data-test="run-ai-preflight" class="primary-inline" :disabled="!capabilities.aiPreflightReady.value || capabilities.aiLoading.value" @click="capabilities.runAIPreflight">

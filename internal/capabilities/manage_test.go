@@ -103,7 +103,7 @@ func TestManagerPublishConflictWithStaticToolCarriesNameAndSource(t *testing.T) 
 	if !strings.Contains(err.Error(), tools.ClusterStatusRead) {
 		t.Fatalf("error message %q does not contain capability name %q", err.Error(), tools.ClusterStatusRead)
 	}
-	if !strings.Contains(err.Error(), "tool") {
+	if !strings.Contains(err.Error(), "内置工具") {
 		t.Fatalf("error message %q does not indicate conflict source is a tool", err.Error())
 	}
 }
@@ -129,7 +129,7 @@ func TestManagerPublishConflictWithPublishedFileCarriesNameAndSource(t *testing.
 	if !strings.Contains(err.Error(), "redis.cluster.info.read") {
 		t.Fatalf("error message %q does not contain capability name", err.Error())
 	}
-	if !strings.Contains(err.Error(), "published") {
+	if !strings.Contains(err.Error(), "已有已发布版本") {
 		t.Fatalf("error message %q does not indicate conflict source is a published capability", err.Error())
 	}
 }
@@ -193,7 +193,7 @@ func TestManagerUnpublishConflictWithDiscoveredDraftCarriesNameAndSource(t *test
 	if !strings.Contains(err.Error(), "redis.cluster.info.read") {
 		t.Fatalf("error message %q does not contain capability name", err.Error())
 	}
-	if !strings.Contains(err.Error(), "draft") {
+	if !strings.Contains(err.Error(), "同名草稿") {
 		t.Fatalf("error message %q does not indicate conflict source is an existing draft", err.Error())
 	}
 }
@@ -536,7 +536,7 @@ paths:
 	if !strings.Contains(err.Error(), "middleware.duplicate.read") {
 		t.Fatalf("error message %q does not contain conflicting capability name", err.Error())
 	}
-	if !strings.Contains(err.Error(), "batch") {
+	if !strings.Contains(err.Error(), "同一批") {
 		t.Fatalf("error message %q does not indicate conflict source is same-batch name collision", err.Error())
 	}
 	if got := discoveredEntryCount(t, dir); got != 0 {
@@ -584,7 +584,7 @@ paths:
 	if !strings.Contains(err.Error(), "GET /api/minio/{cluster}/buckets/{bucket}/capacity") {
 		t.Fatalf("error message %q does not contain the duplicated candidate id", err.Error())
 	}
-	if !strings.Contains(err.Error(), "selected more than once") {
+	if !strings.Contains(err.Error(), "选中多次") {
 		t.Fatalf("error message %q does not indicate conflict source is duplicate selection", err.Error())
 	}
 	if got := discoveredEntryCount(t, dir); got != 0 {

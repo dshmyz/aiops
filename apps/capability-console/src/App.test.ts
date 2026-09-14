@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
 import App from './App.vue';
 import ManagementView from './views/ManagementView.vue';
+import { resetCreationCanvasState } from './components/management/creationCanvasState';
 import { setStreamingEnabled } from './composables/useAssistant';
 
 function ok(body: unknown): Response {
@@ -59,17 +60,34 @@ async function navigateTo(wrapper: ReturnType<typeof mountApp>, selector: string
   await flushPromises();
 }
 
+/** 列表主界面（review + 工单关闭）：默认落地。 */
+async function openList(wrapper: ReturnType<typeof mountApp>) {
+  await openManagement(wrapper);
+}
+
+/** 评审工单页：列表点首个能力条目进入。 */
 async function openReview(wrapper: ReturnType<typeof mountApp>) {
   await openManagement(wrapper);
-  await wrapper.find('[data-test="workflow-step-review"]').trigger('click');
-  await flushPromises();
+  if (!wrapper.find('[data-test="workflow-review"]').exists()) {
+    const firstRow = wrapper.find('[data-test="capability-table-body"] .capability-card button.link-button');
+    await firstRow.trigger('click');
+    await flushPromises();
+  }
 }
 
 // The management view now lands on the capability list (review). These helpers
 // reach the sibling phases from there.
 async function openSource(wrapper: ReturnType<typeof mountApp>) {
   await openManagement(wrapper);
-  await wrapper.find('[data-test="workflow-step-source"]').trigger('click');
+  const canvas = wrapper.find('[data-test="creation-canvas"]');
+  if (!canvas.exists()) {
+    // 列表主界面：经顶栏「+ 接入 AI 工具」进入画布（空库时已在画布）
+    await wrapper.find('[data-test="toggle-wizard"]').trigger('click');
+    await flushPromises();
+  }
+  await wrapper.find('[data-test="capability-goal-input"]').setValue('查询 MinIO 桶容量');
+  await wrapper.find('[data-test="confirm-capability-goal"]').trigger('click');
+  await wrapper.find('[data-test="source-openapi"]').trigger('click');
   await flushPromises();
 }
 
@@ -78,6 +96,8 @@ describe('Capability Console', () => {
     // Disable SSE streaming in tests so existing fetch mocks for
     // /v1/assistant/messages continue to work without SSE mocking.
     setStreamingEnabled(false);
+    // 画布目标是模块级状态，跨测试持久；每条用例从干净目标开始。
+    resetCreationCanvasState();
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url === '/v1/capabilities') {
@@ -95,7 +115,7 @@ describe('Capability Console', () => {
               validation: { valid: true },
             },
             {
-              name: 'kafka.topic.retention.set',
+              name: 'kafka.topic.retention.update',
               status: 'needs_review',
               source: 'discovered',
               domain: 'kafka',
@@ -202,7 +222,7 @@ describe('Capability Console', () => {
         if (body.message === '把 orders retention 调成 72 小时') {
           return ok({
             type: 'execution_result',
-            tool: 'kafka.topic.retention.set',
+            tool: 'kafka.topic.retention.update',
             plan_id: 'plan-rb-1',
             status: 'succeeded',
             conversation_id: 'conv-rb',
@@ -217,7 +237,7 @@ describe('Capability Console', () => {
             tool: 'event.query',
             answer: {
               events: [
-                { id: 'evt-a1', tool_name: 'kafka.topic.retention.set', action: 'plan_confirmed', decision: 'denied', subject: 'admin-1', created_at: '2026-08-01T10:00:00Z' },
+                { id: 'evt-a1', tool_name: 'kafka.topic.retention.update', action: 'plan_confirmed', decision: 'denied', subject: 'admin-1', created_at: '2026-08-01T10:00:00Z' },
               ],
               count: 1,
             },
@@ -263,7 +283,7 @@ describe('Capability Console', () => {
           plans: [
             {
               id: 'plan-1',
-              tool: 'kafka.topic.retention.set',
+              tool: 'kafka.topic.retention.update',
               risk: 'medium',
               status: 'pending_confirmation',
               version: 1,
@@ -277,7 +297,7 @@ describe('Capability Console', () => {
       if (url === '/v1/action-plans/plan-1') {
         return ok({
           id: 'plan-1',
-          tool: 'kafka.topic.retention.set',
+          tool: 'kafka.topic.retention.update',
           risk: 'medium',
           status: 'pending_confirmation',
           version: 1,
@@ -294,7 +314,7 @@ describe('Capability Console', () => {
               id: 'audit-1',
               plan_id: 'plan-1',
               subject: 'operator-1',
-              tool_name: 'kafka.topic.retention.set',
+              tool_name: 'kafka.topic.retention.update',
               action: 'plan_created',
               decision: 'permitted',
               metadata: { source: 'assistant', risk: 'medium' },
@@ -304,7 +324,7 @@ describe('Capability Console', () => {
               id: 'audit-2',
               plan_id: 'plan-1',
               subject: 'admin-1',
-              tool_name: 'kafka.topic.retention.set',
+              tool_name: 'kafka.topic.retention.update',
               action: 'plan_confirmed',
               decision: 'permitted',
               metadata: { idempotency_key: 'plan:plan-1:hash' },
@@ -321,7 +341,7 @@ describe('Capability Console', () => {
               id: 'audit-search-1',
               plan_id: 'plan-2',
               subject: 'admin-1',
-              tool_name: 'kafka.topic.retention.set',
+              tool_name: 'kafka.topic.retention.update',
               action: 'plan_confirmed',
               decision: 'denied',
               metadata: { source: 'search' },
@@ -356,10 +376,11 @@ describe('Capability Console', () => {
   
       expect(wrapper.find('[data-test="assistant-entry"]').exists()).toBe(false);
       expect(managementEl.style.display).not.toBe('none');
-      expect(wrapper.find('[data-test="management-entry"]').text()).toContain('把后台 API 翻译成 AI 工具');
-      // 落地落在能力清单（review）而非导入向导
-      expect(wrapper.find('[data-test="workflow-review"]').exists()).toBe(true);
-      expect(wrapper.find('[data-test="capability-table-body"]').text()).toContain('minio.bucket.capacity.read');
+      expect(wrapper.find('[data-test="management-entry"]').text()).toContain('AI 工具库');
+      // 列表页=纯列表单列：清单主区 + 顶栏「+ 接入 AI 工具」
+      expect(wrapper.find('[data-test="studio-ledger"]').exists()).toBe(true);
+      expect(wrapper.find('[data-test="toggle-wizard"]').exists()).toBe(true);
+      expect(wrapper.find('[data-test="workflow-review"]').exists()).toBe(false);
     },
     // 全量并行运行时会 mount 整个 App + 加载全部能力 mock，偶发超过默认 5s 超时，单独放宽
     15000,
@@ -772,10 +793,10 @@ describe('Capability Console', () => {
     await openManagement(wrapper);
 
     expect(wrapper.find('[data-test="workflow-console"]').exists()).toBe(true);
-    // 落地默认落在能力清单（评审发布）
-    expect(wrapper.find('[data-test="workflow-step-review"]').text()).toContain('评审发布');
-    expect(wrapper.find('[data-test="workflow-step-ai"]').text()).toContain('AI 试问');
-    expect(wrapper.find('[data-test="workflow-step-source"]').text()).toContain('接入 API');
+    // 列表页=纯列表：清单主区 + 顶栏接入按钮；步骤脊只出现在接入/评审工单页
+    expect(wrapper.find('[data-test="studio-ledger"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="toggle-wizard"]').exists()).toBe(true);
+    expect(wrapper.find('.wo-spine').exists()).toBe(false);
   });
 
   test('starts capability management as a guided workflow instead of an always-on three-column console', async () => {
@@ -785,23 +806,27 @@ describe('Capability Console', () => {
     await openManagement(wrapper);
 
     expect(wrapper.find('[data-test="workflow-console"]').exists()).toBe(true);
-    // 落地默认落在能力清单（评审发布）而非导入向导；评审编辑区随清单出现，但 AI 试问不显示
-    expect(wrapper.find('[data-test="workflow-step-review"]').classes()).toContain('active');
-    expect(wrapper.find('[data-test="workflow-review"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="workflow-start"]').exists()).toBe(false);
-    expect(wrapper.find('[data-test="studio-ai-runner"]').exists()).toBe(false);
+    // 列表为主界面：默认纯列表页
+    expect(wrapper.find('[data-test="studio-ledger"]').exists()).toBe(true);
+    expect(wrapper.find('.wo-spine').exists()).toBe(false);
 
-    // 点向导第 1 步进入打开 API 导入
-    await wrapper.find('[data-test="workflow-step-source"]').trigger('click');
+    // 「+ 接入 AI 工具」进入画布；画布首屏不含技术连接字段
+    await wrapper.find('[data-test="toggle-wizard"]').trigger('click');
     await flushPromises();
-    expect(wrapper.find('[data-test="workflow-step-source"]').classes()).toContain('active');
-    expect(wrapper.find('[data-test="workflow-start"]').text()).toContain('先接入一批后台 API');
+    expect(wrapper.find('[data-test="creation-canvas"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('用一句话描述任务');
 
+    // 选择导入 API 文档后，Swagger 链路仍可用
+    await wrapper.find('[data-test="capability-goal-input"]').setValue('查询 MinIO 桶容量');
+    await wrapper.find('[data-test="confirm-capability-goal"]').trigger('click');
+    await wrapper.find('[data-test="source-openapi"]').trigger('click');
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
+    await wrapper.find('[data-test="continue-openapi-candidates"]').trigger('click');
+    await flushPromises();
 
-    expect(wrapper.find('[data-test="workflow-step-candidates"]').classes()).toContain('active');
-    expect(wrapper.find('[data-test="workflow-candidates"]').text()).toContain('选择要变成 AI 工具的 API');
+    expect(wrapper.find('[data-test="workflow-step-candidates"]').classes()).toContain('is-current');
+    expect(wrapper.find('[data-test="workflow-candidates"]').text()).toContain('选择要接入的接口');
     expect(wrapper.find('[data-test="workflow-candidates"]').text()).toContain('minio.bucket.capacity.read.imported');
   });
 
@@ -918,7 +943,7 @@ describe('Capability Console', () => {
       if (url === '/v1/assistant/messages') {
         return ok({
           type: 'confirmation_required',
-          tool: 'kafka.topic.retention.set',
+          tool: 'kafka.topic.retention.update',
           plan_id: 'plan-inline-1',
           status: 'pending_confirmation',
           version: 1,
@@ -930,7 +955,7 @@ describe('Capability Console', () => {
       if (url === '/v1/action-plans/plan-inline-1') {
         return ok({
           id: 'plan-inline-1',
-          tool: 'kafka.topic.retention.set',
+          tool: 'kafka.topic.retention.update',
           risk: 'medium',
           status: 'pending_confirmation',
           version: 1,
@@ -954,7 +979,7 @@ describe('Capability Console', () => {
     // Inline confirm UI should appear within the assistant entry.
     const inline = wrapper.find('[data-test="assistant-inline-confirm"]');
     expect(inline.exists()).toBe(true);
-    expect(inline.text()).toContain('kafka.topic.retention.set');
+    expect(inline.text()).toContain('kafka.topic.retention.update');
     expect(inline.text()).toContain('retention_hours');
     expect(inline.find('[data-test="confirm-plan"]').exists()).toBe(true);
     expect(inline.find('[data-test="confirm-plan"]').attributes('disabled')).toBeUndefined();
@@ -1027,7 +1052,7 @@ describe('Capability Console', () => {
       if (url === '/v1/assistant/messages') {
         return ok({
           type: 'confirmation_required',
-          tool: 'kafka.topic.retention.set',
+          tool: 'kafka.topic.retention.update',
           plan_id: 'plan-inline-2',
           status: 'pending_confirmation',
           version: 1,
@@ -1038,7 +1063,7 @@ describe('Capability Console', () => {
       if (url === '/v1/action-plans/plan-inline-2') {
         return ok({
           id: 'plan-inline-2',
-          tool: 'kafka.topic.retention.set',
+          tool: 'kafka.topic.retention.update',
           risk: 'medium',
           status: 'pending_confirmation',
           version: 1,
@@ -1164,8 +1189,9 @@ describe('Capability Console', () => {
   test('keeps the management workbench readable on laptop widths', () => {
     const styles = readFileSync('src/styles.css', 'utf8');
 
-    expect(styles).toMatch(/\.workflow-review \{[\s\S]*grid-template-columns: var\(--left-panel-width\) 1fr;/);
-    expect(styles).toMatch(/@media \(max-width: 768px\)[\s\S]*\.workflow-review,[\s\S]*grid-template-columns: 1fr;/);
+    // 评审阶段已是工单单列（清单走外层 studio-layout 侧栏），
+    // 不再有内部双栏 grid；窄屏断点只保留助手工作台的折叠。
+    expect(styles).not.toMatch(/\.workflow-review \{[\s\S]*grid-template-columns: minmax\(280px/);
   });
 
   test('styles capability management as a guided workflow workbench', () => {
@@ -1193,11 +1219,16 @@ describe('Capability Console', () => {
 
     await openManagement(wrapper);
 
-    expect(wrapper.find('[data-test="workflow-console"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="workflow-step-source"]').text()).toContain('接入 API');
-    expect(wrapper.find('[data-test="workflow-step-candidates"]').text()).toContain('选择能力');
-    expect(wrapper.find('[data-test="workflow-step-review"]').text()).toContain('评审发布');
-    expect(wrapper.find('[data-test="workflow-step-ai"]').text()).toContain('AI 试问');
+    // 列表页：无步骤脊；经「+ 接入 AI 工具」进画布后出现三步脊
+    expect(wrapper.find('.wo-spine').exists()).toBe(false);
+    await wrapper.find('[data-test="toggle-wizard"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="workflow-step-source"]').text()).toContain('连接');
+    expect(wrapper.find('[data-test="workflow-step-candidates"]').text()).toContain('验证');
+    expect(wrapper.find('[data-test="workflow-step-review"]').text()).toContain('发布');
+    expect(wrapper.findAll('.wo-spine__step')).toHaveLength(3);
+    expect(wrapper.find('[data-test="workflow-step-ai"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="api-orchestration-canvas"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="ops-workbench"]').exists()).toBe(false);
   });
@@ -1205,41 +1236,36 @@ describe('Capability Console', () => {
   test('renders capability inventory and enables publishing for writes', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
-    expect(wrapper.text()).toContain('把后台 API 翻译成 AI 工具');
-    expect(wrapper.text()).toContain('从 Swagger 收件箱选择接口，补齐参数和摘要，然后直接在右侧用自然语言试运行。');
-    expect(wrapper.find('[data-test="workflow-review"]').text()).toContain('待处理能力');
-    expect(wrapper.find('[data-test="workflow-review"]').text()).toContain('评审发布');
+    expect(wrapper.find('[data-test="studio-ledger"]').text()).toContain('AI 工具库');
     expect(wrapper.text()).toContain('minio.bucket.capacity.read');
-    expect(wrapper.text()).toContain('kafka.topic.retention.set');
+    expect(wrapper.text()).toContain('kafka.topic.retention.update');
     expect(wrapper.find('[data-test="next-minio.bucket.capacity.read"]').text()).toContain('发布给 AI');
-    expect(wrapper.find('[data-test="next-kafka.topic.retention.set"]').text()).toContain('发布给 AI');
-    expect(wrapper.find('[data-test="next-glusterfs.volume.health.read"]').text()).toContain('用 AI 试问一次');
-    expect(wrapper.find('[data-test="publish-kafka.topic.retention.set"]').text()).toContain('发布');
-    expect(wrapper.find('[data-test="publish-kafka.topic.retention.set"]').attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('[data-test="next-kafka.topic.retention.update"]').text()).toContain('发布给 AI');
+    expect(wrapper.find('[data-test="next-glusterfs.volume.health.read"]').text()).toContain('用 AI 验证');
+    expect(wrapper.find('[data-test="publish-kafka.topic.retention.update"]').text()).toContain('发布');
+    expect(wrapper.find('[data-test="publish-kafka.topic.retention.update"]').attributes('disabled')).toBeUndefined();
   });
 
   test('shows operational summary and filters inventory', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openManagement(wrapper);
+    await openList(wrapper);
 
     expect(wrapper.find('[data-test="stat-published"]').text()).toContain('1');
-    expect(wrapper.find('[data-test="stat-review"]').text()).toContain('2');
+    expect(wrapper.find('[data-test="stat-review"]').text()).toContain('0');
     expect(wrapper.find('[data-test="stat-invalid"]').text()).toContain('1');
     expect(wrapper.find('[data-test="stat-publishable"]').text()).toContain('2');
 
-    await wrapper.find('[data-test="workflow-step-review"]').trigger('click');
-    await flushPromises();
     await wrapper.find('[data-test="capability-search"]').setValue('kafka');
-    expect(wrapper.find('[data-test="capability-table-body"]').text()).toContain('kafka.topic.retention.set');
+    expect(wrapper.find('[data-test="capability-table-body"]').text()).toContain('kafka.topic.retention.update');
     expect(wrapper.find('[data-test="capability-table-body"]').text()).not.toContain('minio.bucket.capacity.read');
 
     await wrapper.find('[data-test="capability-search"]').setValue('');
     await wrapper.find('[data-test="status-filter"]').setValue('published');
     expect(wrapper.find('[data-test="capability-table-body"]').text()).toContain('glusterfs.volume.health.read');
-    expect(wrapper.find('[data-test="capability-table-body"]').text()).not.toContain('kafka.topic.retention.set');
+    expect(wrapper.find('[data-test="capability-table-body"]').text()).not.toContain('kafka.topic.retention.update');
   });
 
   test('uses local preview data when the API is not connected in development', async () => {
@@ -1250,7 +1276,7 @@ describe('Capability Console', () => {
 
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     expect(wrapper.text()).toContain('minio.bucket.capacity.read');
     expect(wrapper.find('[data-test="stat-publishable"]').text()).toContain('2');
@@ -1262,12 +1288,13 @@ describe('Capability Console', () => {
     await flushPromises();
     await openSource(wrapper);
 
-    expect(wrapper.find('[data-test="import-wizard"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="commit-openapi-import"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.find('[data-test="openapi-url-input"]').exists()).toBe(true);
 
     await wrapper.find('[data-test="openapi-url-input"]').setValue('https://admin.example.com/v3/api-docs');
     await wrapper.find('[data-test="backend-base-url-input"]').setValue('https://middleware.example.com');
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-test="continue-openapi-candidates"]').trigger('click');
     await flushPromises();
 
     const previewCall = fetchMock.mock.calls.find(([input]) => String(input) === '/v1/capabilities/import/openapi-url/preview');
@@ -1309,7 +1336,7 @@ describe('Capability Console', () => {
         },
       }],
     });
-    expect(wrapper.find('[data-test="import-result"]').text()).toContain('1 个待评审草稿');
+    expect(wrapper.find('[data-test="import-result"]').text()).toContain('已导入 1 个草稿');
     expect(wrapper.find('[data-test="import-batch"]').text()).toContain('本次导入');
     expect(wrapper.find('[data-test="import-batch"]').text()).toContain('minio.bucket.capacity.read.imported');
     expect(wrapper.find('[data-test="import-batch-stat-total"]').text()).toContain('1');
@@ -1334,10 +1361,12 @@ describe('Capability Console', () => {
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
+    await wrapper.find('[data-test="continue-openapi-candidates"]').trigger('click');
+    await flushPromises();
     await wrapper.find('[data-test="candidate-selected-GET /api/minio/{cluster}/buckets/{bucket}/capacity"]').setValue(false);
 
-    expect(wrapper.find('[data-test="commit-openapi-import"]').attributes('disabled')).toBeDefined();
-    expect(wrapper.find('[data-test="import-commit-summary"]').text()).toContain('已选择 0 个候选 API');
+    expect(wrapper.find('[data-test="import-commit-summary"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="import-commit-summary"]').text()).toContain('已选择 0 个接口');
   });
 
   test('clears Swagger preview when source fields change or preview retry fails', async () => {
@@ -1348,11 +1377,16 @@ describe('Capability Console', () => {
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
+    await wrapper.find('[data-test="continue-openapi-candidates"]').trigger('click');
+    await flushPromises();
     expect(wrapper.find('[data-test="import-preview"]').exists()).toBe(true);
 
+    // 预览成功后进入候选阶段；回到 source 画布时目标和来源选择均已持久，
+    // Swagger 面板直接可见，修改地址即触发预览清空
+    await wrapper.find('[data-test="workflow-step-source"]').trigger('click');
+    await flushPromises();
     await wrapper.find('[data-test="openapi-url-input"]').setValue('https://admin.example.com/changed-api-docs');
     expect(wrapper.find('[data-test="import-preview"]').exists()).toBe(false);
-    expect(wrapper.find('[data-test="commit-openapi-import"]').attributes('disabled')).toBeDefined();
 
     fetchMock.mockImplementationOnce(async () =>
       new Response(JSON.stringify({ error: 'Swagger URL 不可访问' }), {
@@ -1365,7 +1399,6 @@ describe('Capability Console', () => {
 
     expect(wrapper.text()).toContain('Swagger URL 不可访问');
     expect(wrapper.find('[data-test="import-preview"]').exists()).toBe(false);
-    expect(wrapper.find('[data-test="commit-openapi-import"]').attributes('disabled')).toBeDefined();
   });
 
   test('ignores stale Swagger preview responses after source changes', async () => {
@@ -1420,7 +1453,6 @@ describe('Capability Console', () => {
     await flushPromises();
 
     expect(wrapper.find('[data-test="import-preview"]').exists()).toBe(false);
-    expect(wrapper.find('[data-test="commit-openapi-import"]').attributes('disabled')).toBeDefined();
     expect(wrapper.find('[data-test="workflow-review"]').exists()).toBe(false);
   });
 
@@ -1430,6 +1462,8 @@ describe('Capability Console', () => {
     await openSource(wrapper);
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-test="continue-openapi-candidates"]').trigger('click');
     await flushPromises();
     await wrapper.find('[data-test="candidate-operation-GET /api/minio/{cluster}/buckets/{bucket}/capacity"]').setValue('write');
 
@@ -1444,6 +1478,8 @@ describe('Capability Console', () => {
     await openSource(wrapper);
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-test="continue-openapi-candidates"]').trigger('click');
     await flushPromises();
     await wrapper.find('[data-test="commit-openapi-import"]').trigger('click');
     await flushPromises();
@@ -1460,6 +1496,8 @@ describe('Capability Console', () => {
 
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();
+    await wrapper.find('[data-test="continue-openapi-candidates"]').trigger('click');
+    await flushPromises();
     await wrapper.find('[data-test="candidate-domain-filter"]').setValue('kafka');
 
     const candidates = wrapper.find('[data-test="import-preview"]').text();
@@ -1473,9 +1511,10 @@ describe('Capability Console', () => {
     await openManagement(wrapper);
 
     await wrapper.find('[data-test="new-draft"]').trigger('click');
+    await flushPromises();
     await wrapper.find('[data-test="backend-path"]').setValue('/api/minio/{cluster}/buckets/{bucket}/capacity');
 
-    expect(wrapper.text()).toContain('识别结果');
+    expect(wrapper.text()).toContain('工具信息');
     expect(wrapper.text()).toContain('后端接口');
     expect(wrapper.text()).toContain('输入参数');
     expect(wrapper.text()).toContain('AI 摘要字段');
@@ -1491,6 +1530,7 @@ describe('Capability Console', () => {
     await openManagement(wrapper);
 
     await wrapper.find('[data-test="new-draft"]').trigger('click');
+    await flushPromises();
     await wrapper.find('[data-test="capability-name"]').setValue('minio.bucket.capacity.read');
     await wrapper.find('[data-test="add-input-field"]').trigger('click');
     await wrapper.find('[data-test="input-name-0"]').setValue('bucket');
@@ -1516,9 +1556,11 @@ describe('Capability Console', () => {
   test('shows publish readiness checklist for safe and unsafe capabilities', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     await wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').trigger('click');
+    const advDetails = wrapper.find('[data-test="confirm-card-advanced"]');
+    if (advDetails.exists() && !(advDetails.element as HTMLDetailsElement).open) { await advDetails.find('summary').trigger('click'); await flushPromises(); }
     const safeChecklist = wrapper.find('[data-test="publish-checklist"]').text();
     expect(safeChecklist).toContain('目标文件');
     expect(safeChecklist).toContain('可以发布');
@@ -1528,7 +1570,8 @@ describe('Capability Console', () => {
     expect(safeChecklist).toContain('GET 请求');
     expect(safeChecklist).toContain('格式检查');
 
-    await wrapper.find('[data-test="edit-kafka.topic.retention.set"]').trigger('click');
+    await wrapper.find('[data-test="back-to-list"]').trigger('click');
+    await wrapper.find('[data-test="edit-kafka.topic.retention.update"]').trigger('click');
     const unsafeChecklist = wrapper.find('[data-test="publish-checklist"]').text();
     expect(unsafeChecklist).toContain('写入类能力');
     expect(unsafeChecklist).toContain('POST 请求');
@@ -1541,12 +1584,17 @@ describe('Capability Console', () => {
   test('renders governance summary per capability operation', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     await wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').trigger('click');
+    const advDetails = wrapper.find('[data-test="confirm-card-advanced"]');
+    if (advDetails.exists() && !(advDetails.element as HTMLDetailsElement).open) { await advDetails.find('summary').trigger('click'); await flushPromises(); }
     expect(wrapper.find('[data-test="governance-summary"]').text()).toContain('读取能力');
 
-    await wrapper.find('[data-test="edit-kafka.topic.retention.set"]').trigger('click');
+    await wrapper.find('[data-test="back-to-list"]').trigger('click');
+    await wrapper.find('[data-test="edit-kafka.topic.retention.update"]').trigger('click');
+    const advDetailsG = wrapper.find('[data-test="confirm-card-advanced"]');
+    if (advDetailsG.exists() && !(advDetailsG.element as HTMLDetailsElement).open) { await advDetailsG.find('summary').trigger('click'); await flushPromises(); }
     expect(wrapper.find('[data-test="governance-summary"]').text()).toContain('写入能力');
     expect(wrapper.find('[data-test="governance-summary"]').text()).toContain('需执行计划');
   });
@@ -1554,7 +1602,7 @@ describe('Capability Console', () => {
   test('explains why published capabilities cannot be published again', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     const publishedRowAction = wrapper.find('[data-test="publish-glusterfs.volume.health.read"]');
     expect(publishedRowAction.text()).toContain('已发布');
@@ -1600,14 +1648,15 @@ describe('Capability Console', () => {
     }));
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     await wrapper.find('[data-test="publish-minio.bucket.capacity.read"]').trigger('click');
     await flushPromises();
 
     expect(wrapper.text()).not.toContain('Unexpected end of JSON input');
+    // 发布成功后进入 AI 试运行工单页（列表点发布 → 打开结果页）
     expect(wrapper.find('[data-test="workflow-ai"]').text()).toContain('minio.bucket.capacity.read');
-    expect(wrapper.find('[data-test="workflow-step-ai"]').attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('[data-test="workflow-step-ai"]').exists()).toBe(false);
   });
 
   test('blocks publishing a draft but allows AI preflight when the same capability is already published', async () => {
@@ -1655,7 +1704,7 @@ describe('Capability Console', () => {
     const fetchMock = vi.mocked(fetch);
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     const draftPublish = wrapper.find('[data-test="publish-minio.bucket.capacity.read"]');
     expect(draftPublish.text()).toContain('已有已发布版本');
@@ -1683,7 +1732,7 @@ describe('Capability Console', () => {
   test('prepares an AI preflight prompt and gates drafts from assistant calls', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     await wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').trigger('click');
     await wrapper.find('[data-test="test-param-cluster"]').setValue('m1');
@@ -1768,7 +1817,7 @@ describe('Capability Console', () => {
 
     expect(wrapper.find('[data-test="workflow-ai"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('redis.cluster.info.read');
-    expect(wrapper.find('[data-test="workflow-step-ai"]').attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('[data-test="workflow-step-ai"]').exists()).toBe(false);
   });
 
   test('shows an error when quick publish fails with a conflict', async () => {
@@ -1807,7 +1856,7 @@ describe('Capability Console', () => {
     const fetchMock = vi.mocked(fetch);
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     await wrapper.find('[data-test="edit-glusterfs.volume.health.read"]').trigger('click');
     await wrapper.find('[data-test="test-input"]').setValue('{"cluster":"g1","name":"data"}');
@@ -1827,7 +1876,7 @@ describe('Capability Console', () => {
   test('renders assistant clarification as an AI preflight result', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     await wrapper.find('[data-test="edit-glusterfs.volume.health.read"]').trigger('click');
     await wrapper.find('[data-test="ai-prompt"]').setValue('查询 glusterfs');
@@ -1841,7 +1890,7 @@ describe('Capability Console', () => {
   test('validates and previews normalized output', async () => {
     const wrapper = mountApp();
     await flushPromises();
-    await openReview(wrapper);
+    await openList(wrapper);
 
     await wrapper.find('[data-test="edit-minio.bucket.capacity.read"]').trigger('click');
     await wrapper.find('[data-test="test-input"]').setValue('{"cluster":"m1","bucket":"archive"}');
@@ -1868,7 +1917,7 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="audit-log-view"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="audit-row-audit-1"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="audit-row-audit-2"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="audit-log-view"]').text()).toContain('kafka.topic.retention.set');
+    expect(wrapper.find('[data-test="audit-log-view"]').text()).toContain('kafka.topic.retention.update');
     expect(wrapper.find('[data-test="audit-log-view"]').text()).toContain('plan_confirmed');
   });
 
@@ -1878,7 +1927,7 @@ describe('Capability Console', () => {
 
     await navigateTo(wrapper, '[data-test="nav-audit"]');
 
-    await wrapper.find('[data-test="audit-filter-tool"]').setValue('kafka.topic.retention.set');
+    await wrapper.find('[data-test="audit-filter-tool"]').setValue('kafka.topic.retention.update');
     await wrapper.find('[data-test="audit-filter-action"]').setValue('plan_confirmed');
     await wrapper.find('[data-test="audit-filter-limit"]').setValue('5');
     await wrapper.find('[data-test="audit-filter-apply"]').trigger('click');
@@ -1886,7 +1935,7 @@ describe('Capability Console', () => {
 
     const calls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
     expect(calls.some((path) => path.includes('/v1/audit-events?'))).toBe(true);
-    expect(calls.some((path) => path.includes('tool=kafka.topic.retention.set'))).toBe(true);
+    expect(calls.some((path) => path.includes('tool=kafka.topic.retention.update'))).toBe(true);
     expect(calls.some((path) => path.includes('action=plan_confirmed'))).toBe(true);
     expect(calls.some((path) => path.includes('limit=5'))).toBe(true);
   });
@@ -1943,7 +1992,7 @@ describe('Capability Console', () => {
               id: 'audit-3',
               plan_id: 'plan-2',
               subject: 'admin-1',
-              tool_name: 'kafka.topic.retention.set',
+              tool_name: 'kafka.topic.retention.update',
               action: 'plan_created',
               decision: 'permitted',
               metadata: {},
@@ -1996,7 +2045,7 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="audit-event-detail"]').exists()).toBe(true);
     const detail = wrapper.find('[data-test="audit-event-detail"]').text();
     expect(detail).toContain('audit-1');
-    expect(detail).toContain('kafka.topic.retention.set');
+    expect(detail).toContain('kafka.topic.retention.update');
     expect(detail).toContain('plan_created');
     expect(detail).toContain('source');
     expect(detail).toContain('assistant');

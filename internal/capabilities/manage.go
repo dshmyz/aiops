@@ -2,6 +2,7 @@ package capabilities
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,7 @@ var (
 	ErrOpenAPIFingerprintChanged   = errors.New("OpenAPI fingerprint changed")
 	ErrInvalidQuickPublishRequest  = errors.New("quick publish requires backend_base_url, path, and description")
 	ErrInvalidQuickPublishBaseURL  = errors.New("quick publish requires an absolute http or https backend_base_url")
+	ErrInvalidProbeGenerateRequest = errors.New("probe-generate requires a supported method, an absolute base_url, and a non-empty path")
 )
 
 type ManagedCapability struct {
@@ -331,13 +333,18 @@ type ProbeInferResponse struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// ProbeAndInfer 对一个读能力草稿做试调 + 输出映射推断：
-//  1. 用 input 实调一次后端（复用 Test 的治理边界：仅读 GET）；
-//  2. 拿真实响应样本让 LLM 推断 output 映射并逐路径校验（未配 LLM 或 LLM
-//     失败时回退规则推断 extractMappedFields 校验）；
-//  3. 返回可写回草稿的 OutputSpec。
-func (m *Manager) ProbeAndInfer(ctx context.Context, capability Capability, input map[string]any) (ProbeInferResponse, error) {
+// ProbeAndInfer 对一个能力草稿做试调探活 + 输出映射推断：
+//  读能力：用 input 实调一次后端（复用 Test 的治理边界），拿真实响应样本让
+//          LLM 推断输出映射并逐路径校验（未配 LLM 或失败时回退规则推断）；
+//  写能力：治理边界禁止试调，改用示例响应体(sample_body)离线推断，与
+//          ProbeAndGenerate 的写路径同一套逻辑——绝不发真实写请求。
+// 返回可写回草稿的 OutputSpec。
+func (m *Manager) ProbeAndInfer(ctx context.Context, capability Capability, input map[string]any, sampleBody string) (ProbeInferResponse, error) {
 	result := ProbeInferResponse{Warnings: []string{}}
+	if capability.Operation != tools.Read {
+		result.Inferred = m.inferWriteOutput(ctx, capability, sampleBody, &result)
+		return result, nil
+	}
 	probe, err := m.Test(ctx, capability, input)
 	if err != nil {
 		result.Warnings = append(result.Warnings, "试调失败: "+err.Error())
@@ -376,6 +383,108 @@ func (m *Manager) ProbeAndInfer(ctx context.Context, capability Capability, inpu
 	result.Inferred = &spec
 	result.InferredBy = "rules"
 	return result, nil
+}
+
+// ProbeGenerateRequest 是最小能力的接入描述：只给 method + path + base_url（可按需加
+// 描述），其余一律由 AutoInferQuickPublish 推断。后端复用 BackendSpec，不新建类型。
+type ProbeGenerateRequest struct {
+	Name        string         `json:"name,omitempty"`
+	Backend     BackendSpec    `json:"backend"`
+	Description string         `json:"description,omitempty"`
+	Input       map[string]any `json:"input,omitempty"`
+	SampleBody  string         `json:"sample_body,omitempty"`
+}
+
+// ProbeAndGenerate 把"一个后端接口地址"变成"可发布的能力草稿 + 三段真值"：
+//  读(GET)：真实探测一次后端并推断映射（复用 ProbeAndInfer）；
+//  写(非 GET)：绝不发真实写请求，仅用 sample_body 离线推断映射。
+// 能力命名/领域/风险由 AutoInferQuickPublish 推断；本方法不落库，是否保存由调用方决定。
+func (m *Manager) ProbeAndGenerate(ctx context.Context, req ProbeGenerateRequest) (Capability, ProbeInferResponse, error) {
+	if err := validateProbeGenerateRequest(req); err != nil {
+		return Capability{}, ProbeInferResponse{}, err
+	}
+	method := strings.ToUpper(req.Backend.Method)
+	if method == "" {
+		method = http.MethodGet
+	}
+	capability := buildQuickPublishCapability(QuickPublishRequest{
+		Name:           req.Name,
+		BackendBaseURL: req.Backend.BaseURL,
+		Method:         method,
+		Path:           req.Backend.Path,
+		Description:    req.Description,
+	})
+	capability.Status = StatusDiscovered
+
+	if isReadMethod(method) {
+		probe, err := m.ProbeAndInfer(ctx, capability, req.Input, req.SampleBody)
+		if probe.Inferred != nil {
+			capability.Output = *probe.Inferred
+		}
+		return capability, probe, err
+	}
+	probe := ProbeInferResponse{Warnings: []string{}}
+	probe.Inferred = m.inferWriteOutput(ctx, capability, req.SampleBody, &probe)
+	capability.Output = *probe.Inferred
+	return capability, probe, nil
+}
+
+// inferWriteOutput 为写能力做离线输出映射推断（治理边界禁止真实试调）：
+// 先按规则解析 sample_body 生成伪 NormalizedResult（probe.Probe，供验证卡/
+// 三段真值展示与"样例能否推断出映射"的判定），再在配置了 LLM 且给了样例时
+// 用 LLM 推断覆盖。返回最终 OutputSpec。
+func (m *Manager) inferWriteOutput(ctx context.Context, capability Capability, sampleBody string, probe *ProbeInferResponse) *OutputSpec {
+	spec := inferWriteOutputFromSample(probe, capability, sampleBody)
+	probe.InferredBy = "rules"
+	if sampleBody != "" && m.chat != nil {
+		if llmSpec, err := InferOutputFromSample(ctx, m.chat, capability, []byte(sampleBody)); err == nil {
+			probe.InferredBy = "llm_sample"
+			return &llmSpec
+		} else {
+			probe.Warnings = append(probe.Warnings, "LLM 样例推断失败，回退规则: "+err.Error())
+		}
+	}
+	return spec
+}
+
+// inferWriteOutputFromSample 为写能力做离线推断回退：从 sample_body 提取字段并推断
+// severity/summary，填成伪 NormalizedResult（供三段真值对比）与 OutputSpec。
+func inferWriteOutputFromSample(probe *ProbeInferResponse, capability Capability, sample string) *OutputSpec {
+	if strings.TrimSpace(sample) == "" {
+		probe.Warnings = append(probe.Warnings, "写操作需提供示例响应体(sample_body)以离线推断输出映射")
+		return &capability.Output
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(sample), &raw); err != nil {
+		probe.Warnings = append(probe.Warnings, "sample_body 不是合法 JSON，未能推断输出映射: "+err.Error())
+		return &capability.Output
+	}
+	fields := smartExtractFields(raw)
+	probe.Probe = &NormalizedResult{
+		Kind:     capability.Output.Kind,
+		Severity: inferSeverityFromData(fields),
+		Summary:  inferSummaryFromData(fields, capability.ResourceType),
+		Data:     fields,
+		Raw:      sample,
+	}
+	out := capability.Output
+	out.Fields = make(map[string]string, len(fields))
+	for key := range fields {
+		out.Fields[key] = "$." + key
+	}
+	return &out
+}
+
+func validateProbeGenerateRequest(req ProbeGenerateRequest) error {
+	switch strings.ToUpper(req.Backend.Method) {
+	case "", http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+	default:
+		return ErrInvalidProbeGenerateRequest
+	}
+	if strings.TrimSpace(req.Backend.Path) == "" {
+		return ErrInvalidProbeGenerateRequest
+	}
+	return validatePublishedBaseURL(req.Backend.BaseURL)
 }
 
 func (m *Manager) fetchOpenAPIFromURL(ctx context.Context, openAPIURL string) ([]byte, string, error) {
@@ -471,7 +580,7 @@ func (m *Manager) CommitOpenAPIFromURL(ctx context.Context, request OpenAPIURLCo
 	pending := make([]pendingDraft, 0, len(request.Selections))
 	for _, selection := range request.Selections {
 		if _, duplicate := selected[selection.CandidateID]; duplicate {
-			return OpenAPIURLCommitResult{}, fmt.Errorf("%w: candidate %q selected more than once in the same batch", ErrCapabilityNameConflict, selection.CandidateID)
+			return OpenAPIURLCommitResult{}, fmt.Errorf("%w: 候选 %q 在同一批中被选中多次，请检查导入勾选项", ErrCapabilityNameConflict, selection.CandidateID)
 		}
 		selected[selection.CandidateID] = struct{}{}
 		candidate, ok := candidates[selection.CandidateID]
@@ -483,7 +592,7 @@ func (m *Manager) CommitOpenAPIFromURL(ctx context.Context, request OpenAPIURLCo
 		normalizedName := strings.TrimSpace(capability.Name)
 		if normalizedName != "" {
 			if previous, exists := names[normalizedName]; exists && previous != selection.CandidateID {
-				return OpenAPIURLCommitResult{}, fmt.Errorf("%w: %q is used by multiple candidates in the same batch", ErrCapabilityNameConflict, normalizedName)
+				return OpenAPIURLCommitResult{}, fmt.Errorf("%w: 同一批中多个候选都改名为 %q，请调整重名后再提交", ErrCapabilityNameConflict, normalizedName)
 			}
 			names[normalizedName] = selection.CandidateID
 		}
@@ -544,7 +653,7 @@ func (m *Manager) DeleteDraft(ctx context.Context, name string) error {
 
 func (m *Manager) Publish(ctx context.Context, name string) (ManagedCapability, error) {
 	if _, exists := tools.Lookup(name); exists {
-		return ManagedCapability{}, fmt.Errorf("%w: %q conflicts with an existing tool", ErrCapabilityNameConflict, name)
+		return ManagedCapability{}, fmt.Errorf("%w: 能力 %q 与内置工具重名，发布会冲突，请在「调整」面板改名后再发布", ErrCapabilityNameConflict, name)
 	}
 	published, err := m.store.MoveDraftToPublished(ctx, name)
 	if err != nil {
@@ -559,12 +668,12 @@ func (m *Manager) QuickPublish(ctx context.Context, request QuickPublishRequest)
 	}
 	capability := buildQuickPublishCapability(request)
 	if _, exists := tools.Lookup(capability.Name); exists {
-		return ManagedCapability{}, fmt.Errorf("%w: %q conflicts with an existing tool", ErrCapabilityNameConflict, capability.Name)
+		return ManagedCapability{}, fmt.Errorf("%w: 能力 %q 与内置工具重名，发布会冲突，请更换能力名后重试", ErrCapabilityNameConflict, capability.Name)
 	}
 	if exists, err := m.store.Has(ctx, SourcePublished, capability.Name); err != nil {
 		return ManagedCapability{}, err
 	} else if exists {
-		return ManagedCapability{}, fmt.Errorf("%w: %q is already published, unpublish the old version first", ErrCapabilityNameConflict, capability.Name)
+		return ManagedCapability{}, fmt.Errorf("%w: 能力 %q 已有已发布版本，请先在能力台账下架旧版本，再发布新版本", ErrCapabilityNameConflict, capability.Name)
 	}
 	if err := Validate(capability); err != nil {
 		return ManagedCapability{}, err

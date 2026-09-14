@@ -20,9 +20,9 @@ output:
  severity_path: $.status
  summary_template: Bucket {name} usage is {usage_pct}%
  fields:
- limit_gb: $.data.limit_gb
- usage_pct: $.data.usage_pct
- used_gb: $.data.used_gb
+  limit_gb: $.data.limit_gb
+  usage_pct: $.data.usage_pct
+  used_gb: $.data.used_gb
 governance:
  requires_action_plan: false
  requires_approval: false

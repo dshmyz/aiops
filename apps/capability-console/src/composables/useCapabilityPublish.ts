@@ -1,8 +1,9 @@
 import { computed, ref, watch } from 'vue';
 import type { Ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { deleteDraftCapability, enrichCapabilities, enrichCapability, publishCapability, unpublishCapability } from '../api';
+import { deleteDraftCapability, enrichCapabilities, enrichCapability, publishCapability, saveDraft, unpublishCapability } from '../api';
 import { capabilityKey, upsert } from '../capabilityFormat';
+import { uiStateOf } from '../capabilityState';
 import type { ManagedCapability } from '../types';
 import type { ManagementPhase } from './useCapabilities';
 
@@ -34,6 +35,8 @@ export interface UseCapabilityPublishOptions {
   onQuickPublished: (message: string) => void;
   /** 批量发布完成后刷新列表。 */
   onRefresh: () => Promise<void>;
+  /** 发布成功后打开结果工单页（列表主界面：发布完成即展示 AI 验证页）。 */
+  onPublished?: () => void;
   /** 被忽略导入项的唯一键集合（import composable 提供）。 */
   ignoredKeys: Ref<Set<string>>;
 }
@@ -55,11 +58,15 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
     onQuickPublished,
     onRefresh,
     ignoredKeys,
+    onPublished,
   } = options;
 
   const searchText = ref('');
   const statusFilter = ref('all');
   const domainFilter = ref('all');
+  // 只看校验失败项：由台账统计卡「校验失败 N」点击切换，正交于 statusFilter
+  // （uiStateOf 把校验失败归入 draft，无法用现有状态值表达）。
+  const invalidOnly = ref(false);
   const pageSize = ref(20);
   const currentPage = ref(1);
 
@@ -80,14 +87,15 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
           .join(' ')
           .toLowerCase()
           .includes(query);
-      const matchesStatus = statusFilter.value === 'all' || item.source === statusFilter.value || item.status === statusFilter.value;
+      const matchesStatus = statusFilter.value === 'all' || uiStateOf(item, isPublishable) === statusFilter.value;
       const matchesDomain = domainFilter.value === 'all' || item.domain === domainFilter.value;
-      return matchesQuery && matchesStatus && matchesDomain;
+      const matchesValid = !invalidOnly.value || !item.validation.valid;
+      return matchesQuery && matchesStatus && matchesDomain && matchesValid;
     });
   });
 
   // 分页：过滤条件变化时重置页码
-  watch([searchText, statusFilter, domainFilter], () => {
+  watch([searchText, statusFilter, domainFilter, invalidOnly], () => {
     currentPage.value = 1;
   });
   const paginatedCapabilities = computed(() => {
@@ -100,20 +108,23 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
     () => new Set(capabilities.value.filter((item) => item.source === 'published').map((item) => item.name)),
   );
   const stats = computed(() => {
-    const published = capabilities.value.filter((item) => item.source === 'published').length;
-    const review = capabilities.value.filter((item) => item.status === 'needs_review' || item.source === 'discovered').length;
+    const published = capabilities.value.filter((item) => uiStateOf(item, isPublishable) === 'published').length;
+    const review = capabilities.value.filter((item) => uiStateOf(item, isPublishable) === 'needs_validation').length;
     const invalid = capabilities.value.filter((item) => !item.validation.valid).length;
-    const publishable = capabilities.value.filter((item) => isPublishable(item)).length;
+    const publishable = capabilities.value.filter((item) => uiStateOf(item, isPublishable) === 'publishable').length;
     return { published, review, invalid, publishable };
   });
 
-  // 状态分组统计
+  // 状态分组统计：与列表筛选和卡片状态共用同一套用户状态映射。
   const groupedStats = computed(() => {
-    const groups: Record<string, number> = { draft: 0, review: 0, published: 0, other: 0 };
+    const groups: Record<string, number> = {
+      draft: 0,
+      needs_validation: 0,
+      publishable: 0,
+      published: 0,
+    };
     for (const item of capabilities.value) {
-      if (item.source === 'published') groups.published++;
-      else if (item.status === 'needs_review' || item.source === 'discovered') groups.review++;
-      else groups.draft++;
+      groups[uiStateOf(item, isPublishable)]++;
     }
     return groups;
   });
@@ -127,11 +138,21 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
     }
     error.value = '';
     try {
+      // 改名/新建后未保存的草稿：直接发布会 404（服务端只有旧名字）。
+      // 先落一次草稿，再按保存后的名字发布。
+      const listEntry = capabilities.value.find((item) => capabilityKey(item) === capabilityKey(capability) && item.source === 'discovered');
+      const notYetSaved = !listEntry;
+      if (notYetSaved) {
+        const saved = await saveDraft(capability);
+        capabilities.value = [...capabilities.value.filter((item) => !(capabilityKey(item) === capabilityKey(saved) && item.source === 'discovered')), saved];
+        capability = saved;
+      }
       const published = await publishCapability(capability.name);
       capabilities.value = capabilities.value.filter((item) => item.name !== capability.name);
       capabilities.value.push(published);
       onSelect(published);
       managementPhase.value = 'ai';
+      onPublished?.();
       ElMessage.success(`已发布 ${published.name}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '发布 Capability 失败';
@@ -264,6 +285,7 @@ export function useCapabilityPublish(options: UseCapabilityPublishOptions) {
     searchText,
     statusFilter,
     domainFilter,
+    invalidOnly,
     pageSize,
     currentPage,
     availableDomains,

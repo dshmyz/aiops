@@ -126,9 +126,13 @@ type CapabilityManagementService interface {
 	SaveDraft(context.Context, capabilities.Capability) (capabilities.ManagedCapability, error)
 	ValidateCapability(capabilities.Capability) capabilities.ValidationResult
 	Test(context.Context, capabilities.Capability, map[string]any) (capabilities.NormalizedResult, error)
-	// ProbeAndInfer 试调探活：真实调用一次后端，并按真实响应推断输出映射
-	// （LLM 优先，规则回退）。把"导入后能不能达到预期"暴露在导入时。
-	ProbeAndInfer(context.Context, capabilities.Capability, map[string]any) (capabilities.ProbeInferResponse, error)
+	// ProbeAndInfer 试调探活：读能力真实调用一次后端，并按真实响应推断输出映射
+	// （LLM 优先，规则回退）；写能力禁止试调，用 sample_body 离线推断。
+	// 把"导入后能不能达到预期"暴露在导入时。
+	ProbeAndInfer(context.Context, capabilities.Capability, map[string]any, string) (capabilities.ProbeInferResponse, error)
+	// ProbeGenerate 把一个"后端接口地址"(method+path+base_url) 变成可发布的能力草稿
+	// 加三段真值：读操作真实探测、写操作用 sample_body 离线推断（绝不发真实写请求）。
+	ProbeAndGenerate(context.Context, capabilities.ProbeGenerateRequest) (capabilities.Capability, capabilities.ProbeInferResponse, error)
 	ImportOpenAPIFromURL(context.Context, capabilities.OpenAPIURLImportRequest) ([]capabilities.ManagedCapability, error)
 	PreviewOpenAPIFromURL(context.Context, capabilities.OpenAPIURLPreviewRequest) (capabilities.ImportPreview, error)
 	CommitOpenAPIFromURL(context.Context, capabilities.OpenAPIURLCommitRequest) (capabilities.OpenAPIURLCommitResult, error)
@@ -831,6 +835,7 @@ func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Req
 		var body struct {
 			Capability capabilities.Capability `json:"capability"`
 			Input      map[string]any          `json:"input"`
+			SampleBody string                  `json:"sample_body"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
 		decoder.UseNumber()
@@ -838,12 +843,26 @@ func (r *Router) serveCapabilities(writer http.ResponseWriter, request *http.Req
 			writeError(writer, http.StatusBadRequest, "invalid JSON input")
 			return
 		}
-		result, err := r.capability.ProbeAndInfer(ctx, body.Capability, body.Input)
+		result, err := r.capability.ProbeAndInfer(ctx, body.Capability, body.Input, body.SampleBody)
 		if err != nil {
 			writeCapabilityError(writer, err)
 			return
 		}
 		writeCapabilityJSON(writer, result)
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/capabilities/probe-generate":
+		var body capabilities.ProbeGenerateRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 10*1024))
+		decoder.UseNumber()
+		if err := decoder.Decode(&body); err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid JSON input")
+			return
+		}
+		capability, probe, err := r.capability.ProbeAndGenerate(ctx, body)
+		if err != nil {
+			writeCapabilityError(writer, err)
+			return
+		}
+		writeCapabilityJSON(writer, map[string]any{"capability": capability, "probe": probe})
 	case request.Method == http.MethodDelete && strings.HasPrefix(request.URL.Path, "/v1/capabilities/drafts/"):
 		name := strings.TrimPrefix(request.URL.Path, "/v1/capabilities/drafts/")
 		if strings.TrimSpace(name) == "" || strings.Contains(name, "/") {

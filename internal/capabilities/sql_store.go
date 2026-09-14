@@ -118,7 +118,7 @@ func (s *SQLCapabilityStore) MoveDraftToPublished(ctx context.Context, name stri
 	if exists, err := s.Has(ctx, SourcePublished, name); err != nil {
 		return ManagedCapability{}, err
 	} else if exists {
-		return ManagedCapability{}, fmt.Errorf("%w: %q is already published, unpublish the old version first", ErrCapabilityNameConflict, name)
+		return ManagedCapability{}, fmt.Errorf("%w: 能力 %q 已有已发布版本，请先在能力台账下架旧版本，再发布新版本", ErrCapabilityNameConflict, name)
 	}
 	// 写 published
 	cap := draft.Capability
@@ -147,7 +147,7 @@ func (s *SQLCapabilityStore) MovePublishedToDraft(ctx context.Context, name stri
 	if exists, err := s.Has(ctx, SourceDiscovered, name); err != nil {
 		return ManagedCapability{}, err
 	} else if exists {
-		return ManagedCapability{}, fmt.Errorf("%w: %q already exists as a draft, remove the draft first", ErrCapabilityNameConflict, name)
+		return ManagedCapability{}, fmt.Errorf("%w: 已存在同名草稿 %q（可能是之前导入留下的），请先在能力台账删除该草稿后再下架", ErrCapabilityNameConflict, name)
 	}
 	cap := pub.Capability
 	cap.Status = StatusNeedsReview

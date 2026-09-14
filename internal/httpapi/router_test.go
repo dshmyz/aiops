@@ -102,6 +102,46 @@ func TestCapabilityTestRequiresAdmin(t *testing.T) {
 	}
 }
 
+func TestCapabilityProbeGenerateRequiresAdmin(t *testing.T) {
+	t.Parallel()
+	router := httpapi.NewRouter(
+		httpapi.NewHMACAuthenticator([]byte("test-secret")),
+		execution.NewReadOnlyService(&readRunner{}, nil),
+		httpapi.WithCapabilities(&capabilityManagementService{}),
+	)
+	req := signedRequest(t, "/v1/capabilities/probe-generate",
+		`{"backend":{"method":"GET","base_url":"https://m.example.com","path":"/api/x"}}`,
+		"operator-1", []string{"operator"})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("status = %d body = %s, want 403", res.Code, res.Body.String())
+	}
+}
+
+func TestCapabilityProbeGenerateReturnsCapabilityAndProbe(t *testing.T) {
+	t.Parallel()
+	router := httpapi.NewRouter(
+		httpapi.NewHMACAuthenticator([]byte("test-secret")),
+		execution.NewReadOnlyService(&readRunner{}, nil),
+		httpapi.WithCapabilities(&capabilityManagementService{}),
+	)
+	body := `{"backend":{"method":"GET","base_url":"https://m.example.com","path":"/api/clusters/{cluster}/info"}}`
+	req := signedRequest(t, "/v1/capabilities/probe-generate", body, "admin-1", []string{"admin"})
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"probed.read"`) {
+		t.Fatalf("body = %s, want generated capability name", res.Body.String())
+	}
+}
+
 func TestCapabilityImportOpenAPIURLRequiresAdmin(t *testing.T) {
 	t.Parallel()
 	service := &capabilityManagementService{}
@@ -3190,8 +3230,12 @@ func (s *capabilityManagementService) Test(context.Context, capabilities.Capabil
 	return capabilities.NormalizedResult{Kind: "observation", Summary: "ok", Data: map[string]any{"status": "ok"}}, nil
 }
 
-func (s *capabilityManagementService) ProbeAndInfer(context.Context, capabilities.Capability, map[string]any) (capabilities.ProbeInferResponse, error) {
+func (s *capabilityManagementService) ProbeAndInfer(context.Context, capabilities.Capability, map[string]any, string) (capabilities.ProbeInferResponse, error) {
 	return capabilities.ProbeInferResponse{InferredBy: "rules"}, nil
+}
+
+func (s *capabilityManagementService) ProbeAndGenerate(context.Context, capabilities.ProbeGenerateRequest) (capabilities.Capability, capabilities.ProbeInferResponse, error) {
+	return capabilities.Capability{Name: "probed.read", Status: capabilities.StatusDiscovered}, capabilities.ProbeInferResponse{InferredBy: "rules"}, nil
 }
 
 func (s *capabilityManagementService) ImportOpenAPIFromURL(_ context.Context, request capabilities.OpenAPIURLImportRequest) ([]capabilities.ManagedCapability, error) {

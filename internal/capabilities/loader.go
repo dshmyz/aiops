@@ -43,7 +43,7 @@ func LoadPublished(root string) ([]Capability, error) {
 			return nil, fmt.Errorf("validate capability %s: %w", path, err)
 		}
 		if _, exists := tools.Lookup(capability.Name); exists {
-			return nil, fmt.Errorf("published capability %q conflicts with an existing tool", capability.Name)
+			return nil, fmt.Errorf("published capability %q conflicts with an existing tool: 与内置工具重名，请改名后再启动", capability.Name)
 		}
 		if previous, ok := seen[capability.Name]; ok {
 			return nil, fmt.Errorf("duplicate capability %q in %s and %s", capability.Name, previous, path)

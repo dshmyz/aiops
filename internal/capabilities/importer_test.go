@@ -948,7 +948,7 @@ func TestManagerProbeAndInferUsesLLMOnSample(t *testing.T) {
 	draft := probeDraft()
 	draft.Backend.BaseURL = server.URL
 
-	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"})
+	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"}, "")
 	if err != nil {
 		t.Fatalf("ProbeAndInfer returned %v", err)
 	}
@@ -979,7 +979,7 @@ func TestManagerProbeAndInferFallsBackToRules(t *testing.T) {
 	draft := probeDraft()
 	draft.Backend.BaseURL = server.URL
 
-	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"})
+	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"}, "")
 	if err != nil {
 		t.Fatalf("ProbeAndInfer returned %v", err)
 	}
@@ -998,7 +998,7 @@ func TestManagerProbeAndInferReportsBackendFailure(t *testing.T) {
 	draft := probeDraft()
 	draft.Backend.BaseURL = "http://127.0.0.1:1"
 
-	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"})
+	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"}, "")
 	if err != nil {
 		t.Fatalf("ProbeAndInfer returned %v", err)
 	}
@@ -1007,6 +1007,56 @@ func TestManagerProbeAndInferReportsBackendFailure(t *testing.T) {
 	}
 	if len(result.Warnings) == 0 {
 		t.Fatal("warnings empty, want backend failure reason")
+	}
+}
+
+// 写能力禁止试调（治理边界），probe-infer 走 sample_body 离线推断：
+// 后端地址不可达也必须成功（证明没有发真实请求），且 probe.Probe 用样例填充，
+// 供前端验证卡判定"样例能推断出可用映射"。
+func TestManagerProbeAndInferWriteUsesSampleBodyOnly(t *testing.T) {
+	manager := NewManagerForTest(t)
+	draft := probeDraft()
+	draft.Name = "kafka.topic.retention.set"
+	draft.Operation = tools.Write
+	draft.Risk = tools.Medium
+	draft.Backend.Method = "POST"
+	draft.Backend.BaseURL = "http://127.0.0.1:1" // 不可达：写能力推断不应对其发请求
+
+	sample := `{"code":0,"data":{"topic":"orders","retention_ms":7200000,"status":"ok"}}`
+	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"}, sample)
+	if err != nil {
+		t.Fatalf("ProbeAndInfer returned %v", err)
+	}
+	if result.Probe == nil {
+		t.Fatal("probe result missing, want sample-inferred pseudo result")
+	}
+	if result.InferredBy != "rules" {
+		t.Fatalf("inferred_by = %q, want rules", result.InferredBy)
+	}
+	if result.Inferred == nil || len(result.Inferred.Fields) == 0 {
+		t.Fatalf("inferred = %+v, want fields extracted from sample", result.Inferred)
+	}
+}
+
+// 写能力未提供 sample_body 时离线推断不出映射：probe 保持 nil、给出警告，
+// 前端验证卡据此阻断发布。
+func TestManagerProbeAndInferWriteRequiresSampleBody(t *testing.T) {
+	manager := NewManagerForTest(t)
+	draft := probeDraft()
+	draft.Name = "kafka.topic.retention.set"
+	draft.Operation = tools.Write
+	draft.Risk = tools.Medium
+	draft.Backend.Method = "POST"
+
+	result, err := manager.ProbeAndInfer(context.Background(), draft, map[string]any{"topic": "orders"}, "")
+	if err != nil {
+		t.Fatalf("ProbeAndInfer returned %v", err)
+	}
+	if result.Probe != nil {
+		t.Fatalf("probe = %+v, want nil without sample_body", result.Probe)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("warnings empty, want sample_body hint")
 	}
 }
 

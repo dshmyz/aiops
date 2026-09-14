@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { ElButton, ElMessage, ElMessageBox } from 'element-plus';
 import type { UseCapabilities } from '../../composables/useCapabilities';
 import type { ManagedCapability } from '../../types';
+import StatsGrid from './StatsGrid.vue';
 
 const props = defineProps<{ capabilities: UseCapabilities }>();
 
@@ -14,6 +15,27 @@ const publishableCount = computed(
 const draftCount = computed(
   () => props.capabilities.capabilities.value.filter((c) => c.source !== 'published').length,
 );
+
+function openDetail(item: ManagedCapability) {
+  props.capabilities.selectCapability(item);
+  props.capabilities.wizardOpen.value = true;
+}
+
+// 「校验失败」统计卡/筛选片点击：在「只看校验失败」与「全部」之间切换。
+// 与 statusFilter 正交（校验失败在 uiStateOf 里归入草稿），开启时把状态筛选
+// 复位为「全部」，避免两个筛选叠加造成困惑。
+function toggleInvalidOnly() {
+  const next = !props.capabilities.invalidOnly.value;
+  props.capabilities.invalidOnly.value = next;
+  if (next) {
+    props.capabilities.statusFilter.value = 'all';
+  }
+}
+
+function setStatusFilter(value: string) {
+  props.capabilities.statusFilter.value = value;
+  props.capabilities.invalidOnly.value = false;
+}
 
 async function handleEnrichDrafts() {
   try {
@@ -80,9 +102,15 @@ function escapeHtml(value: string): string {
 <template>
   <aside data-test="studio-ledger" class="review-list inventory" aria-label="能力清单">
     <div class="section-heading">
-      <h2>待处理能力</h2>
+      <h2>AI 工具库</h2>
       <span>{{ capabilities.filteredCapabilities.value.length }} / {{ capabilities.capabilities.value.length }} 项</span>
     </div>
+    <StatsGrid class="ledger-kpis" :items="[
+      { label: '已发布', value: capabilities.stats.value.published, testId: 'stat-published' },
+      { label: '待验证', value: capabilities.stats.value.review, testId: 'stat-review' },
+      { label: '校验失败', value: capabilities.stats.value.invalid, testId: 'stat-invalid', onClick: toggleInvalidOnly },
+      { label: '可发布', value: capabilities.stats.value.publishable, testId: 'stat-publishable' },
+    ]" />
     <details v-if="capabilities.importBatch.value" data-test="import-batch" class="import-batch-panel compact-batch" aria-label="本次 Swagger 导入">
       <summary class="import-batch-summary">
         <span>本次导入</span>
@@ -128,12 +156,12 @@ function escapeHtml(value: string): string {
     </details>
     <div class="filters">
       <input data-test="capability-search" v-model="capabilities.searchText.value" class="filter-input" placeholder="搜索名称、领域、接口路径" />
-      <select data-test="status-filter" v-model="capabilities.statusFilter.value" class="filter-select">
+      <select data-test="status-filter" v-model="capabilities.statusFilter.value" class="filter-select" @change="capabilities.invalidOnly.value = false">
         <option value="all">全部状态</option>
-        <option value="discovered">草稿</option>
+        <option value="draft">草稿</option>
+        <option value="needs_validation">待验证</option>
+        <option value="publishable">可发布</option>
         <option value="published">已发布</option>
-        <option value="needs_review">待评审</option>
-        <option value="deprecated">已废弃</option>
       </select>
       <select v-model="capabilities.domainFilter.value" class="filter-select">
         <option value="all">全部领域</option>
@@ -144,15 +172,17 @@ function escapeHtml(value: string): string {
     <div v-else class="capability-card-list" data-test="capability-table-body">
       <!-- 状态分组标签 -->
       <div class="status-tabs">
-        <button :class="{ active: capabilities.statusFilter.value === 'all' }" @click="capabilities.statusFilter.value = 'all'">全部 ({{ capabilities.capabilities.value.length }})</button>
-        <button :class="{ active: capabilities.statusFilter.value === 'discovered' }" @click="capabilities.statusFilter.value = 'discovered'">草稿 ({{ capabilities.groupedStats.value.draft }})</button>
-        <button :class="{ active: capabilities.statusFilter.value === 'needs_review' }" @click="capabilities.statusFilter.value = 'needs_review'">待评审 ({{ capabilities.groupedStats.value.review }})</button>
-        <button :class="{ active: capabilities.statusFilter.value === 'published' }" @click="capabilities.statusFilter.value = 'published'">已发布 ({{ capabilities.groupedStats.value.published }})</button>
+        <button :class="{ active: capabilities.statusFilter.value === 'all' && !capabilities.invalidOnly.value }" @click="setStatusFilter('all')">全部 ({{ capabilities.capabilities.value.length }})</button>
+        <button :class="{ active: capabilities.statusFilter.value === 'draft' }" @click="setStatusFilter('draft')">草稿 ({{ capabilities.groupedStats.value.draft }})</button>
+        <button :class="{ active: capabilities.statusFilter.value === 'needs_validation' }" @click="setStatusFilter('needs_validation')">待验证 ({{ capabilities.groupedStats.value.needs_validation }})</button>
+        <button :class="{ active: capabilities.statusFilter.value === 'publishable' }" @click="setStatusFilter('publishable')">可发布 ({{ capabilities.groupedStats.value.publishable }})</button>
+        <button :class="{ active: capabilities.statusFilter.value === 'published' }" @click="setStatusFilter('published')">已发布 ({{ capabilities.groupedStats.value.published }})</button>
+        <button :class="{ active: capabilities.invalidOnly.value }" data-test="filter-invalid" @click="toggleInvalidOnly">校验失败 ({{ capabilities.stats.value.invalid }})</button>
       </div>
 
       <!-- 批量操作栏 -->
       <div class="batch-actions">
-        <span>已选 {{ publishableCount }} 个可发布</span>
+        <span>当前可发布 {{ publishableCount }} 个</span>
         <el-button size="small" :disabled="draftCount === 0" :loading="capabilities.enrichAllLoading.value" data-test="enrich-all-drafts" @click="handleEnrichDrafts">
           AI 精修草稿{{ draftCount > 0 ? `（${draftCount} 个）` : '' }}
         </el-button>
@@ -167,14 +197,14 @@ function escapeHtml(value: string): string {
         class="capability-card"
         :class="{ selected: item.name === capabilities.selected.value.name }"
         :data-test="`capability-row-${item.name}`"
-        @click="capabilities.selectCapability(item)"
+        @click="openDetail(item)"
       >
         <div class="capability-card__head">
-          <button class="link-button capability-card__name" :data-test="`edit-${item.name}`" @click.stop="capabilities.selectCapability(item)">
+          <button class="link-button capability-card__name" :data-test="`edit-${item.name}`" @click.stop="openDetail(item)">
             {{ item.name }}
           </button>
           <div class="capability-card__chips">
-            <span class="status-chip" :class="`chip-source-${item.source}`">{{ capabilities.sourceLabel(item.source) }}</span>
+            <span class="status-chip" :class="`chip-state-${capabilities.capabilityStateLabel(item)}`">{{ capabilities.capabilityStateLabel(item) }}</span>
             <span class="status-chip" :class="`chip-op-risk`">{{ capabilities.operationLabel(item.operation) }} · 风险{{ capabilities.riskLabel(item.risk) }}</span>
           </div>
         </div>
