@@ -90,6 +90,26 @@ func (d *ChainDiagnoser) ExecuteChain(ctx context.Context, alert Alert, action A
 		input := step.RenderInput(alert)
 		log.Printf("[alert-chain] step %d/%d: tool=%s input=%v", i+1, len(action.ToolSequence), step.Tool, input)
 
+		// 写步骤不做只读执行（链没有写执行器）。此前会误走 readTool 报
+		// ErrWriteTool 打断整条链，处置 plan 建不出来；只有域诊断恰好成功
+		// （如单必填字段的 minio/glusterfs）才能碰巧建出 plan。这里把处置
+		// 语义显式化：最后一步且 ExecuteLastStep=false → 直接建待确认 plan，
+		// 其余情况 fail-closed 明确报错。
+		if tool, ok := tools.Lookup(step.Tool); ok && tool.Operation == tools.Write {
+			if isLast && !action.ExecuteLastStep {
+				if d.planExec != nil {
+					if err := d.planExec.CreatePlanForStep(ctx, alert, action, i, allResults); err != nil {
+						log.Printf("[alert-chain] create plan for step %d failed: %v", i+1, err)
+					}
+				}
+				allResults = append(allResults, StepResult{Step: i, Tool: step.Tool, Result: map[string]any{"summary": "处置步骤不直接执行，已创建待确认 plan"}})
+				continue
+			}
+			allResults = append(allResults, StepResult{Step: i, Tool: step.Tool, Err: fmt.Errorf("write step %q cannot be auto-executed by alert chain", step.Tool)})
+			log.Printf("[alert-chain] step %d failed: write step not auto-executable", i+1)
+			break
+		}
+
 		result := d.executeStep(ctx, user, step.Tool, input)
 		result.Step = i
 		allResults = append(allResults, result)
