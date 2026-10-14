@@ -60,3 +60,6 @@ validation-report.md
 scripts/cas-test/cas_server.log
 scripts/cas-test/cas_server.pid
 copilot-local.db*
+
+# 编辑器产物（Trae HTML 分享包）
+.trae-html-share-packages/
