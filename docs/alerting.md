@@ -9,7 +9,27 @@
 | `POST /v1/alerts/webhook` | 自定义 `WebhookPayload`：`external_id` / `source` / `title` / `severity` / `status` | 通用告警源直接推归一化后的告警 |
 | `POST /v1/alerts/alertmanager` | Prometheus **Alertmanager 原生 webhook v2** payload | 一条推送含多条 `alerts[]`，逐条转换后进入管线 |
 
-两者都由 `X-Webhook-Signature: HMAC-SHA256(body, secret)` 十六进制摘要门控（`COPILOT_ALERT_WEBHOOK_SECRET`，常量时间比较）。
+两个端点都由**共享密钥认证**门控（`COPILOT_ALERT_WEBHOOK_SECRET`），两种方式二选一：
+
+- `X-Webhook-Signature: HMAC-SHA256(body, secret)` 十六进制摘要（常量时间比较）——能算签名的调用方用这个，额外保证 body 完整性；
+- `Authorization: Bearer <secret>`——Alertmanager 原生 `webhook_config` 的 `http_config.authorization` 发的就是这个，**直连即可**。
+
+## Alertmanager 直连配置
+
+```yaml
+# alertmanager.yml
+route:
+  receiver: copilot
+receivers:
+  - name: copilot
+    webhook_configs:
+      - url: http://<copilot-host>:18080/v1/alerts/alertmanager
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: "<COPILOT_ALERT_WEBHOOK_SECRET 同值>"
+        send_resolved: true   # 恢复告警也推，incident 才能自动关闭
+```
 
 ## Alertmanager 原生 webhook
 

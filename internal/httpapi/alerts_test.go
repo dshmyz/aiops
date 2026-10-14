@@ -83,6 +83,43 @@ func TestAlertWebhookRejectsWrongSignature(t *testing.T) {
 	}
 }
 
+// Alertmanager 原生 http_config.authorization 发 Bearer <secret>，直连即可。
+func TestAlertWebhookAcceptsBearerToken(t *testing.T) {
+	t.Parallel()
+	router, alertStore := testAlertRouter(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/alerts/webhook", bytes.NewReader(validAlertBody()))
+	req.Header.Set("Authorization", "Bearer "+testWebhookSecret)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	records, err := alertStore.Query(context.Background(), store.AlertFilter{Domain: ""})
+	if err != nil || len(records) != 1 {
+		t.Fatalf("alerts = %d (err=%v), want 1", len(records), err)
+	}
+}
+
+func TestAlertWebhookRejectsWrongBearerToken(t *testing.T) {
+	t.Parallel()
+	router, _ := testAlertRouter(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/alerts/webhook", bytes.NewReader(validAlertBody()))
+	req.Header.Set("Authorization", "Bearer wrong-secret")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	// 非 Bearer 形式的 Authorization（如 JWT）不参与告警门认证。
+	req = httptest.NewRequest(http.MethodPost, "/v1/alerts/webhook", bytes.NewReader(validAlertBody()))
+	req.Header.Set("Authorization", "Bearer")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("bare Bearer status = %d, want 401", rec.Code)
+	}
+}
+
 func TestAlertWebhookAcceptsValidSignatureAndStores(t *testing.T) {
 	t.Parallel()
 	router, alertStore := testAlertRouter(t)

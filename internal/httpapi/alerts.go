@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,7 +30,7 @@ func (r *Router) serveAlertWebhook(writer http.ResponseWriter, request *http.Req
 		writeError(writer, http.StatusServiceUnavailable, "alert webhook is not configured")
 		return
 	}
-	if !r.verifyAlertWebhookSignature(request) {
+	if !r.verifyAlertWebhook(request) {
 		writeError(writer, http.StatusUnauthorized, "invalid webhook signature")
 		return
 	}
@@ -66,7 +68,7 @@ func (r *Router) serveAlertmanagerWebhook(writer http.ResponseWriter, request *h
 		writeError(writer, http.StatusServiceUnavailable, "alert webhook is not configured")
 		return
 	}
-	if !r.verifyAlertWebhookSignature(request) {
+	if !r.verifyAlertWebhook(request) {
 		writeError(writer, http.StatusUnauthorized, "invalid webhook signature")
 		return
 	}
@@ -105,12 +107,25 @@ func (r *Router) serveAlertmanagerWebhook(writer http.ResponseWriter, request *h
 	})
 }
 
-// verifyAlertWebhookSignature 校验 X-Webhook-Signature: HMAC-SHA256(body,
-// secret) 的 hex 摘要，用 hmac.Equal 做常量时间比较。校验前用 LimitReader
-// 预读 body 拒绝超限载荷，并把 body 重置以便后续 Decode 复用同一份字节。
-func (r *Router) verifyAlertWebhookSignature(request *http.Request) bool {
+// verifyAlertWebhook 校验告警推送的共享密钥认证，两种方式二选一：
+//  1. X-Webhook-Signature: HMAC-SHA256(body, secret) 的 hex 摘要——能算签名的
+//     调用方用这个，额外保证 body 完整性（hmac.Equal 常量时间比较，校验前用
+//     LimitReader 预读 body 拒绝超限载荷，并重置供后续 Decode 复用同一份字节）；
+//  2. Authorization: Bearer <secret>——Alertmanager 原生 webhook_config 的
+//     http_config.authorization 发的就是这个，直连即可，无需签名代理。
+// 密钥 r.alertWebhookSecret 为空时两者都不放行（fail-closed）。
+func (r *Router) verifyAlertWebhook(request *http.Request) bool {
+	if r.alertWebhookSecret == "" {
+		return false
+	}
+	if token := bearerToken(request.Header.Get("Authorization")); token != "" {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(r.alertWebhookSecret)) == 1 {
+			return true
+		}
+		// Bearer 不匹配继续尝试 HMAC，两个头都带时不因顺序误拒。
+	}
 	provided := request.Header.Get("X-Webhook-Signature")
-	if r.alertWebhookSecret == "" || provided == "" {
+	if provided == "" {
 		return false
 	}
 	body, err := io.ReadAll(io.LimitReader(request.Body, maxAlertWebhookBodyBytes+1))
@@ -123,6 +138,16 @@ func (r *Router) verifyAlertWebhookSignature(request *http.Request) bool {
 	// 重置 body 供后续 Decode 复用；hmac.Equal 提供常量时间比较。
 	request.Body = io.NopCloser(bytes.NewReader(body))
 	return hmac.Equal([]byte(provided), []byte(expected))
+}
+
+// bearerToken 从 Authorization 头取 Bearer 凭证（前缀大小写不敏感），
+// 非 Bearer 形式返回空串。
+func bearerToken(header string) string {
+	const prefix = "bearer "
+	if len(header) >= len(prefix) && strings.EqualFold(header[:len(prefix)], prefix) {
+		return strings.TrimSpace(header[len(prefix):])
+	}
+	return ""
 }
 
 // alertWebhookService 把 internal/alert.Service 与 audit.Service 组合：

@@ -193,7 +193,7 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（仅开发/联调）
 | `GET /v1/capabilities{/name}` | viewer/operator/admin（写=admin） |
 | `POST /v1/tools/{name}/read` | 任一登录用户（策略/read-runner 强制） |
 | `/v1/auth/config` · `/v1/auth/cas/*` | 无鉴权（登录/OAuth 流程） |
-| `POST /v1/alerts/webhook` · `/v1/alerts/alertmanager` | 无 JWT，HMAC `X-Webhook-Signature` 门 |
+| `POST /v1/alerts/webhook` · `/v1/alerts/alertmanager` | 无 JWT，共享密钥门：`X-Webhook-Signature`（HMAC）或 `Authorization: Bearer`（Alertmanager 直连） |
 | `GET/PUT /v1/admin/prompts*` | **admin** |
 | `GET/POST /v1/admin/knowledge*` · `GET /v1/admin/knowledge/status` | **admin** |
 | `GET/POST /v1/admin/runbook-drafts*` | **admin** |
