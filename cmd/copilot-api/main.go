@@ -279,7 +279,12 @@ func main() {
 			tools.IncidentView:       incidentRunner,
 			tools.QuerySystemPosture: postureReadRunner{alerts: alertSvc, probes: diagKnowledgeStore, capabilities: loadedCapabilities},
 			tools.ClusterStatusRead:  postureReadRunner{alerts: alertSvc, probes: diagKnowledgeStore, capabilities: loadedCapabilities},
-			tools.PrometheusQuery:    newPromReadRunner(os.Getenv("COPILOT_PROMETHEUS_URL")),
+			tools.PrometheusQuery: newPromReadRunner(
+				os.Getenv("COPILOT_PROMETHEUS_URL"),
+				os.Getenv("COPILOT_PROMETHEUS_USERNAME"),
+				os.Getenv("COPILOT_PROMETHEUS_PASSWORD"),
+				os.Getenv("COPILOT_PROMETHEUS_TOKEN"),
+			),
 		},
 	}
 	readService = execution.NewReadOnlyService(readRunner, auditService)

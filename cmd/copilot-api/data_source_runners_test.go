@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -128,12 +129,14 @@ func TestPostureReadRunnerStatusLadder(t *testing.T) {
 
 func TestPromReadRunnerQueriesPromQL(t *testing.T) {
 	var receivedQuery string
+	var receivedAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/query" {
 			http.NotFound(w, r)
 			return
 		}
 		receivedQuery = r.URL.Query().Get("query")
+		receivedAuth = r.Header.Get("Authorization")
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[
 			{"metric":{"__name__":"up","job":"kafka"},"value":[1756440000,"1"]},
 			{"metric":{"__name__":"up","job":"minio"},"value":[1756440000,"0"]}
@@ -141,7 +144,7 @@ func TestPromReadRunnerQueriesPromQL(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	runner := newPromReadRunner(srv.URL)
+	runner := newPromReadRunner(srv.URL, "", "", "")
 	tool, _ := tools.Lookup(tools.PrometheusQuery)
 	got, err := runner.Read(t.Context(), tool, map[string]any{"query": `up{job="kafka"}`})
 	if err != nil {
@@ -149,6 +152,9 @@ func TestPromReadRunnerQueriesPromQL(t *testing.T) {
 	}
 	if receivedQuery != `up{job="kafka"}` {
 		t.Fatalf("prometheus received query %q", receivedQuery)
+	}
+	if receivedAuth != "" {
+		t.Fatalf("anonymous runner sent Authorization %q", receivedAuth)
 	}
 	if got["result_type"] != "vector" || got["count"] != 2 {
 		t.Fatalf("result = %v", got)
@@ -159,7 +165,7 @@ func TestPromReadRunnerQueriesPromQL(t *testing.T) {
 	}
 
 	// 未配置 → 如实 unconfigured，不报错不伪造。
-	empty := newPromReadRunner("")
+	empty := newPromReadRunner("", "", "", "")
 	got, err = empty.Read(t.Context(), tool, map[string]any{"query": "up"})
 	if err != nil {
 		t.Fatalf("unconfigured Read: %v", err)
@@ -171,6 +177,34 @@ func TestPromReadRunnerQueriesPromQL(t *testing.T) {
 	// 缺 query → 报错。
 	if _, err := runner.Read(t.Context(), tool, nil); err == nil {
 		t.Fatalf("missing query: want error")
+	}
+}
+
+func TestPromReadRunnerSendsAuthHeaders(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	t.Cleanup(srv.Close)
+	tool, _ := tools.Lookup(tools.PrometheusQuery)
+
+	// bearer 优先。
+	bearer := newPromReadRunner(srv.URL, "ignored-user", "ignored-pass", "tok-123")
+	if _, err := bearer.Read(t.Context(), tool, map[string]any{"query": "up"}); err != nil {
+		t.Fatalf("bearer Read: %v", err)
+	}
+	if auth != "Bearer tok-123" {
+		t.Fatalf("bearer auth = %q, want Bearer tok-123", auth)
+	}
+
+	// 未配 bearer → Basic Auth。
+	basic := newPromReadRunner(srv.URL, "metrics", "s3cret", "")
+	if _, err := basic.Read(t.Context(), tool, map[string]any{"query": "up"}); err != nil {
+		t.Fatalf("basic Read: %v", err)
+	}
+	if want := "Basic " + base64.StdEncoding.EncodeToString([]byte("metrics:s3cret")); auth != want {
+		t.Fatalf("basic auth = %q, want %q", auth, want)
 	}
 }
 

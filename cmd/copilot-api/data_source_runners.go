@@ -165,15 +165,25 @@ func (r postureReadRunner) aggregate(ctx context.Context, toolName string) (map[
 // promReadRunner 对操作者配置的 Prometheus（COPILOT_PROMETHEUS_URL）执行
 // PromQL 即时查询。未配置时如实返回 unconfigured——不伪造、也不报错阻断
 // （工具可以被 LLM 看到，回答里说明缺配置比隐藏工具更诚实）。
+//
+// 认证（COPILOT_PROMETHEUS_TOKEN 优先，其次 COPILOT_PROMETHEUS_USERNAME/
+// PASSWORD 组成 Basic Auth）：生产 Prometheus 常挂在带鉴权的网关后，不带
+// 凭证只会拿到 401；两者都未配置则不发认证头（匿名查询）。
 type promReadRunner struct {
-	baseURL string
-	client  *http.Client
+	baseURL  string
+	username string
+	password string
+	bearer   string
+	client   *http.Client
 }
 
-func newPromReadRunner(baseURL string) promReadRunner {
+func newPromReadRunner(baseURL, username, password, bearer string) promReadRunner {
 	return promReadRunner{
-		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		client:  &http.Client{Timeout: 10 * time.Second},
+		baseURL:  strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		username: username,
+		password: password,
+		bearer:   bearer,
+		client:   &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -200,6 +210,13 @@ func (r promReadRunner) Read(ctx context.Context, tool tools.Tool, input map[str
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build prometheus request: %w", err)
+	}
+	// bearer 优先；否则 Basic Auth（仅配置了用户名/密码时）；都没有则匿名。
+	switch {
+	case r.bearer != "":
+		req.Header.Set("Authorization", "Bearer "+r.bearer)
+	case r.username != "" || r.password != "":
+		req.SetBasicAuth(r.username, r.password)
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
