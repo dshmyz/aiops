@@ -51,7 +51,7 @@ func (s *SQLNotificationChannelStore) List(ctx context.Context) ([]NotificationC
 	}
 	defer rows.Close()
 
-	var channels []NotificationChannelRecord
+	channels := []NotificationChannelRecord{}
 	for rows.Next() {
 		var c NotificationChannelRecord
 		if err := rows.Scan(&c.ID, &c.Type, &c.Name, &c.URL, &c.Secret, &c.Template, &c.Enabled, &c.CreatedAt, &c.UpdatedAt); err != nil {

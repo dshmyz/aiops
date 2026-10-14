@@ -105,7 +105,7 @@ func (m *MemoryRunbookStore) ListRunbooks(_ context.Context) ([]Runbook, error) 
 func (m *MemoryRunbookStore) ListEnabledRunbooks(_ context.Context) ([]Runbook, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	var out []Runbook
+	out := []Runbook{}
 	for _, rb := range m.runbooks {
 		if !rb.IsEnabled {
 			continue

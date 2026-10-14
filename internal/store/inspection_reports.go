@@ -196,7 +196,7 @@ func (s *SQLInspectionReportStore) ListReports(ctx context.Context, limit int) (
 		return nil, fmt.Errorf("list inspection reports: %w", err)
 	}
 	defer rows.Close()
-	var reports []InspectionReport
+	reports := []InspectionReport{}
 	for rows.Next() {
 		report, err := scanInspectionReport(rows)
 		if err != nil {

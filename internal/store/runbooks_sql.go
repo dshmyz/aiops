@@ -95,7 +95,7 @@ func (s *SQLRunbookStore) listRunbooks(ctx context.Context, where string) ([]Run
 	}
 	defer rows.Close()
 
-	var out []Runbook
+	out := []Runbook{}
 	for rows.Next() {
 		rb, err := scanRunbook(rows)
 		if err != nil {

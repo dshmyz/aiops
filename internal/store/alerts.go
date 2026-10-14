@@ -167,7 +167,7 @@ func (s *MemoryAlertStore) Query(ctx context.Context, f AlertFilter) ([]Alert, e
 	}
 	// 按 UpdatedAt 降序，保证结果确定性。
 	ids := sortedAlertIDs(s.byID)
-	var out []Alert
+	out := []Alert{}
 	for _, id := range ids {
 		a := s.byID[id]
 		if f.Status != "" && a.Status != f.Status {
@@ -197,7 +197,7 @@ func (s *MemoryAlertStore) ListActive(ctx context.Context, limit int) ([]Alert, 
 		limit = maxAlertLimit
 	}
 	ids := sortedAlertIDs(s.byID)
-	var out []Alert
+	out := []Alert{}
 	for _, id := range ids {
 		a := s.byID[id]
 		if a.Status != "firing" {

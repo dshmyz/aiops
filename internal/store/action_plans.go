@@ -473,7 +473,7 @@ func (s *MemoryActionPlanStore) ListAudit(_ context.Context, filter AuditFilter)
 			}
 			return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
 		})
-		kept := filtered[:0]
+		kept := make([]AuditEvent, 0, len(filtered))
 		for _, event := range filtered {
 			if !filter.CursorCreatedAt.IsZero() && filter.CursorID != "" {
 				if event.CreatedAt.After(filter.CursorCreatedAt) {
@@ -683,7 +683,7 @@ func (s *MySQLActionPlanStore) ListPlans(ctx context.Context, filter PlanFilter)
 		return PlanPage{}, err
 	}
 	defer func() { _ = rows.Close() }()
-	var plans []PlanRecord
+	plans := []PlanRecord{}
 	for rows.Next() {
 		plan, err := scanPlanRows(rows)
 		if err != nil {
@@ -891,7 +891,7 @@ func (s *MySQLActionPlanStore) ListExecutions(ctx context.Context, filter Execut
 		return ExecutionPage{}, err
 	}
 	defer func() { _ = rows.Close() }()
-	var records []ExecutionRecord
+	records := []ExecutionRecord{}
 	for rows.Next() {
 		record, err := scanExecutionRows(rows)
 		if err != nil {

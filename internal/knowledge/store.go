@@ -141,7 +141,7 @@ func (s *SQLStore) List(ctx context.Context) ([]Document, error) {
 		return nil, fmt.Errorf("list knowledge documents: %w", err)
 	}
 	defer rows.Close()
-	var docs []Document
+	docs := []Document{}
 	for rows.Next() {
 		var d Document
 		if err := rows.Scan(&d.ID, &d.Title, &d.Content, &d.Source, &d.CreatedAt); err != nil {
@@ -166,7 +166,7 @@ func (s *SQLStore) Retrieve(ctx context.Context, query string, topK int) ([]Docu
 		return nil, fmt.Errorf("retrieve knowledge documents: %w", err)
 	}
 	defer rows.Close()
-	var docs []Document
+	docs := []Document{}
 	for rows.Next() {
 		var d Document
 		if err := rows.Scan(&d.ID, &d.Title, &d.Content, &d.Source, &d.CreatedAt); err != nil {

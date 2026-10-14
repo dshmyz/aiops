@@ -69,7 +69,7 @@ func (s *SQLMCPServerStore) listWithFilter(ctx context.Context, where string) ([
 		return nil, fmt.Errorf("list MCP servers: %w", err)
 	}
 	defer rows.Close()
-	var servers []MCPServerRecord
+	servers := []MCPServerRecord{}
 	for rows.Next() {
 		server, err := scanMCPServer(rows)
 		if err != nil {

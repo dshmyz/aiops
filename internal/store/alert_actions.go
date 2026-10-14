@@ -49,7 +49,7 @@ func (s *SQLAlertActionRuleStore) List(ctx context.Context) ([]AlertActionRuleRe
 	}
 	defer rows.Close()
 
-	var rules []AlertActionRuleRecord
+	rules := []AlertActionRuleRecord{}
 	for rows.Next() {
 		var r AlertActionRuleRecord
 		if err := rows.Scan(&r.Name, &r.AlertMatch, &r.ToolSequence, &r.ExecuteLastStep, &r.Description, &r.Enabled, &r.CreatedAt, &r.UpdatedAt); err != nil {

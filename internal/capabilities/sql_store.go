@@ -43,7 +43,7 @@ func (s *SQLCapabilityStore) ListAll(ctx context.Context) ([]ManagedCapability, 
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ManagedCapability
+	items := []ManagedCapability{}
 	for rows.Next() {
 		item, err := scanCapability(rows)
 		if err != nil {

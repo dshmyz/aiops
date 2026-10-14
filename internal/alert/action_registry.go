@@ -37,7 +37,7 @@ func (r *AlertActionRegistry) Load(ctx context.Context) error {
 		return err
 	}
 
-	var actions []AlertAction
+	actions := []AlertAction{}
 	for _, rec := range records {
 		action, err := deserializeRule(rec)
 		if err != nil {
@@ -151,7 +151,7 @@ type RuleRunOverview struct {
 // Runs 返回一条规则的触发历史与统计。未配置 runStore 时返回空视图（stats 全 0）。
 func (r *AlertActionRegistry) Runs(ctx context.Context, name string, limit int) (RuleRunOverview, error) {
 	if r.runStore == nil {
-		return RuleRunOverview{}, nil
+		return RuleRunOverview{Recent: []store.AlertActionRunRecord{}}, nil
 	}
 	recent, err := r.runStore.RecentByRule(ctx, name, limit)
 	if err != nil {

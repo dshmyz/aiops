@@ -87,7 +87,7 @@ func (m *ChannelManager) Delete(ctx context.Context, id string) error {
 func (m *ChannelManager) List() []Channel {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]Channel(nil), m.channels...)
+	return append([]Channel{}, m.channels...)
 }
 
 // NotifyConfirmation 把确认请求扇出到当前所有 enabled 通道，日志通知恒兜底。

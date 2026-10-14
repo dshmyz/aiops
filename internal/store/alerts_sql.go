@@ -244,7 +244,7 @@ func (s *SQLAlertStore) Query(ctx context.Context, f AlertFilter) ([]Alert, erro
 		return nil, fmt.Errorf("query alerts: %w", err)
 	}
 	defer rows.Close()
-	var out []Alert
+	out := []Alert{}
 	for rows.Next() {
 		a, err := scanAlert(rows)
 		if err != nil {
@@ -273,7 +273,7 @@ func (s *SQLAlertStore) ListActive(ctx context.Context, limit int) ([]Alert, err
 		return nil, fmt.Errorf("list active alerts: %w", err)
 	}
 	defer rows.Close()
-	var out []Alert
+	out := []Alert{}
 	for rows.Next() {
 		a, err := scanAlert(rows)
 		if err != nil {

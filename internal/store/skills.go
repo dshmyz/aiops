@@ -118,7 +118,7 @@ func (m *MemorySkillStore) ListSkillsByAction(_ context.Context, actionCode stri
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var out []Skill
+	out := []Skill{}
 	for _, skill := range m.skills {
 		if !skill.IsEnabled {
 			continue

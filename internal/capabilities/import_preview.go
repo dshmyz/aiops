@@ -91,7 +91,8 @@ func ImportOpenAPICandidates(body []byte, existing []ManagedCapability) (ImportP
 		existingNames[item.Name] = struct{}{}
 	}
 	preview := ImportPreview{
-		Source: ImportPreviewSource{Fingerprint: OpenAPIFingerprint(body)},
+		Source:     ImportPreviewSource{Fingerprint: OpenAPIFingerprint(body)},
+		Candidates: []ImportCandidate{},
 	}
 	for _, operation := range operations {
 		candidate := ImportCandidate{

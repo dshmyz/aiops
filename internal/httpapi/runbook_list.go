@@ -42,7 +42,7 @@ func (r *Router) serveRunbooks(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	// 只暴露低风险模板（定时写安全边界）。
-	var low []store.Runbook
+	low := []store.Runbook{}
 	for _, rb := range items {
 		if rb.RiskLevel == "low" {
 			low = append(low, rb)

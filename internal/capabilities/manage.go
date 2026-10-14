@@ -183,7 +183,7 @@ func (m *Manager) EnrichDraft(ctx context.Context, name string) (ManagedCapabili
 // 描述与参数说明。名称冲突（批内重名/与已有能力冲突）时回退原名，绝不覆盖已有能力。
 func (m *Manager) EnrichDraftsBatch(ctx context.Context, names []string) ([]ManagedCapability, error) {
 	if len(names) == 0 {
-		return nil, nil
+		return []ManagedCapability{}, nil
 	}
 	if _, ok := m.enricher.(nopEnricher); ok {
 		return nil, errors.New("LLM enrichment is not configured (eino-openai mode required)")
@@ -570,7 +570,7 @@ func (m *Manager) CommitOpenAPIFromURL(ctx context.Context, request OpenAPIURLCo
 	for _, candidate := range preview.Candidates {
 		candidates[candidate.ID] = candidate
 	}
-	result := OpenAPIURLCommitResult{}
+	result := OpenAPIURLCommitResult{Capabilities: []ManagedCapability{}, Skipped: []OpenAPIURLCommitSkipped{}}
 	selected := make(map[string]struct{}, len(request.Selections))
 	names := make(map[string]string, len(request.Selections))
 	type pendingDraft struct {

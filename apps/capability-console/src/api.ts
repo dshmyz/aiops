@@ -337,7 +337,8 @@ export async function listConversations(filter: ConversationListFilter = {}): Pr
   if (filter.cursor) params.set('cursor', filter.cursor);
   const query = params.toString();
   const path = query ? `/v1/assistant/conversations?${query}` : '/v1/assistant/conversations';
-  return request<ConversationPage>(path);
+  const body = await request<ConversationPage>(path);
+  return { ...body, conversations: body.conversations ?? [] };
 }
 
 export async function getConversation(conversationID: string, filter: ConversationTurnsFilter = {}): Promise<ConversationDetail> {
@@ -541,13 +542,15 @@ export async function listAuditEvents(filter: AuditEventFilter = {}): Promise<Au
   if (filter.final_result_only) params.set('final_result_only', 'true');
   const query = params.toString();
   const path = query ? `/v1/audit-events?${query}` : '/v1/audit-events';
-  return await request<AuditEventPage>(path);
+  const body = await request<AuditEventPage>(path);
+  return { ...body, events: body.events ?? [] };
 }
 
 export async function searchAuditEvents(query: string): Promise<AuditEventPage> {
   const params = new URLSearchParams();
   params.set('q', query);
-  return request<AuditEventPage>(`/v1/audit-events/search?${params.toString()}`);
+  const body = await request<AuditEventPage>(`/v1/audit-events/search?${params.toString()}`);
+  return { ...body, events: body.events ?? [] };
 }
 
 // ===== Executions 执行历史 =====
@@ -567,7 +570,8 @@ export async function listExecutions(filter: ExecutionFilter = {}): Promise<Exec
   if (filter.cursor_id) params.set('cursor_id', filter.cursor_id);
   const query = params.toString();
   const path = query ? `/v1/executions?${query}` : '/v1/executions';
-  return request<ExecutionPage>(path);
+  const body = await request<ExecutionPage>(path);
+  return { ...body, executions: body.executions ?? [] };
 }
 
 // ===== Inspection Reports 巡检报告 =====
@@ -578,7 +582,8 @@ export async function listExecutions(filter: ExecutionFilter = {}): Promise<Exec
 export async function listInspectionReports(limit = 50): Promise<InspectionReport[]> {
   const params = new URLSearchParams();
   if (limit > 0) params.set('limit', String(limit));
-  return request<InspectionReport[]>(`/v1/inspection-reports?${params.toString()}`);
+  // 空库时后端可能回 JSON null（Go nil slice），不兜成 [] 会让模板取 .length 抛错白屏。
+  return (await request<InspectionReport[] | null>(`/v1/inspection-reports?${params.toString()}`)) ?? [];
 }
 
 export async function getInspectionReport(id: string): Promise<InspectionReport> {
@@ -596,15 +601,17 @@ export async function listIncidents(
   if (filter.status) params.set('status', filter.status);
   if (filter.domain) params.set('domain', filter.domain);
   if (filter.limit && filter.limit > 0) params.set('limit', String(filter.limit));
-  return request<{ incidents: AlertIncident[] }>(`/v1/incidents?${params.toString()}`);
+  const body = await request<{ incidents: AlertIncident[] }>(`/v1/incidents?${params.toString()}`);
+  return { incidents: body.incidents ?? [] };
 }
 
 export async function getIncident(
   id: string,
 ): Promise<{ incident: AlertIncident; alerts: IncidentMemberAlert[] }> {
-  return request<{ incident: AlertIncident; alerts: IncidentMemberAlert[] }>(
+  const body = await request<{ incident: AlertIncident; alerts: IncidentMemberAlert[] }>(
     `/v1/incidents/${encodeURIComponent(id)}`,
   );
+  return { ...body, alerts: body.alerts ?? [] };
 }
 
 // ===== Capability Marketplace 能力市场 =====
@@ -623,7 +630,8 @@ export async function marketplaceSearch(filter: MarketplaceSearchFilter = {}): P
   if (filter.offset !== undefined) params.set('offset', String(filter.offset));
   const query = params.toString();
   const path = query ? `/v1/marketplace/capabilities?${query}` : '/v1/marketplace/capabilities';
-  return request<MarketplaceSearchPage>(path);
+  const body = await request<MarketplaceSearchPage>(path);
+  return { ...body, capabilities: body.capabilities ?? [] };
 }
 
 // 语义搜索：自然语言查询召回能力。当后端未配置向量检索时返回 503。
@@ -631,7 +639,8 @@ export async function marketplaceSemanticSearch(query: string): Promise<Marketpl
   const params = new URLSearchParams();
   params.set('semantic', 'true');
   if (query.trim()) params.set('query', query.trim());
-  return request<MarketplaceSearchPage>(`/v1/marketplace/capabilities?${params.toString()}`);
+  const body = await request<MarketplaceSearchPage>(`/v1/marketplace/capabilities?${params.toString()}`);
+  return { ...body, capabilities: body.capabilities ?? [] };
 }
 
 export async function marketplaceGet(id: string): Promise<MarketplaceRegistry> {
@@ -874,7 +883,8 @@ export async function listFeedback(filter?: { limit?: number; offset?: number })
   if (filter?.offset !== undefined) params.set('offset', String(filter.offset));
   const query = params.toString();
   const path = query ? `/v1/assistant/feedback?${query}` : '/v1/assistant/feedback';
-  return request<FeedbackPage>(path);
+  const body = await request<FeedbackPage>(path);
+  return { ...body, items: body.items ?? [] };
 }
 
 // ===== Runbook 草稿（反馈 → 可确认启用的 runbook） =====
@@ -901,7 +911,8 @@ export async function inferRunbookDraft(payload: InferRunbookDraftPayload): Prom
 
 /** 列出全部 runbook 草稿（draft + 已启用记录）。 */
 export async function listRunbookDrafts(): Promise<RunbookDraftListResponse> {
-  return request<RunbookDraftListResponse>('/v1/admin/runbook-drafts');
+  const body = await request<RunbookDraftListResponse>('/v1/admin/runbook-drafts');
+  return { ...body, drafts: body.drafts ?? [] };
 }
 
 /** 确认启用：把草稿写入 runbook 注册表并即时生效，成功后草稿从列表移除。 */
@@ -916,7 +927,8 @@ export async function activateRunbookDraft(id: string): Promise<RunbookDraft> {
 
 /** 列出可调度的低风险 runbook 模板。 */
 export async function listRunbooks(): Promise<RunbookListResponse> {
-  return request<RunbookListResponse>('/v1/runbooks');
+  const body = await request<RunbookListResponse>('/v1/runbooks');
+  return { ...body, runbooks: body.runbooks ?? [] };
 }
 
 // ===== 文档（后台"使用手册"）=====
@@ -951,7 +963,8 @@ export async function getCurrentUser(): Promise<CurrentUser> {
 // 注意：list 返回直接数组（非 {servers: [...]} 包装）；update 用 PUT（非 PATCH）。
 
 export async function listMCPServers(): Promise<MCPServer[]> {
-  return request<MCPServer[]>('/v1/mcp/servers');
+  // 同 listInspectionReports：裸数组端点在空数据时可能回 null。
+  return (await request<MCPServer[] | null>('/v1/mcp/servers')) ?? [];
 }
 
 export async function createMCPServer(payload: SaveMCPServerPayload): Promise<MCPServer> {
@@ -1022,7 +1035,7 @@ export interface AlertActionsListResponse {
 
 export async function listAlertActions(): Promise<AlertActionsListResponse> {
   const data = await request<AlertActionsListResponse>('/v1/admin/alert-actions', {});
-  return data;
+  return { ...data, rules: data.rules ?? [] };
 }
 
 export async function saveAlertAction(action: AlertAction): Promise<{ status: string; name: string }> {
@@ -1054,7 +1067,7 @@ export async function deleteAlertAction(name: string): Promise<{ status: string;
 
 export async function listNotificationChannels(): Promise<NotificationChannelsListResponse> {
   const data = await request<NotificationChannelsListResponse>('/v1/admin/notification-channels', {});
-  return data;
+  return { ...data, channels: data.channels ?? [] };
 }
 
 export async function saveNotificationChannel(
@@ -1080,7 +1093,7 @@ export async function listAlertActionRuns(name: string): Promise<AlertActionRunO
     `/v1/admin/alert-actions/${encodeURIComponent(name)}/runs`,
     {},
   );
-  return data;
+  return { ...data, recent: data.recent ?? [] };
 }
 
 export interface AdminToolsResponse {

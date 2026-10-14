@@ -76,7 +76,7 @@ func (s *SQLSkillStore) ListSkills(ctx context.Context) ([]Skill, error) {
 	}
 	defer rows.Close()
 
-	var out []Skill
+	out := []Skill{}
 	for rows.Next() {
 		skill, err := scanSkill(rows)
 		if err != nil {
@@ -96,7 +96,7 @@ func (s *SQLSkillStore) ListSkillsByAction(ctx context.Context, actionCode strin
 	}
 	defer rows.Close()
 
-	var out []Skill
+	out := []Skill{}
 	for rows.Next() {
 		skill, err := scanSkill(rows)
 		if err != nil {

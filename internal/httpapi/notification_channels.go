@@ -67,6 +67,9 @@ func (r *Router) serveAdminNotificationChannels(writer http.ResponseWriter, requ
 	switch {
 	case request.Method == http.MethodGet && id == "":
 		channels := r.notifChannels.List()
+		if channels == nil {
+			channels = []notification.Channel{}
+		}
 		out := make([]notificationChannelAPI, 0, len(channels))
 		for _, c := range channels {
 			out = append(out, toChannelAPI(c))

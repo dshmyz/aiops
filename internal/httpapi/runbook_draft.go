@@ -324,9 +324,6 @@ func (r *Router) serveRunbookDrafts(writer http.ResponseWriter, request *http.Re
 			writeError(writer, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if drafts == nil {
-			drafts = []RunbookDraft{}
-		}
 		writeCappedJSON(writer, map[string]any{"drafts": drafts})
 
 	case request.Method == http.MethodPost && rest == "infer":

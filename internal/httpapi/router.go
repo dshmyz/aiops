@@ -2296,6 +2296,10 @@ func (r *Router) handleListInspectionReports(writer http.ResponseWriter, request
 		writeError(writer, http.StatusBadGateway, err.Error())
 		return
 	}
+	// nil slice 会编成 JSON null（而非 []），前端拿到 null 取 .length 直接白屏。
+	if reports == nil {
+		reports = []store.InspectionReport{}
+	}
 	writeCapabilityJSON(writer, reports)
 }
 
@@ -3278,13 +3282,20 @@ func (r *Router) serveAdminAlertActions(writer http.ResponseWriter, request *htt
 			writeError(writer, http.StatusInternalServerError, "list alert action runs: "+err.Error())
 			return
 		}
-		writeCappedJSON(writer, map[string]any{"rule": ruleName, "stats": overview.Stats, "recent": overview.Recent})
+		recent := overview.Recent
+		if recent == nil {
+			recent = []store.AlertActionRunRecord{}
+		}
+		writeCappedJSON(writer, map[string]any{"rule": ruleName, "stats": overview.Stats, "recent": recent})
 		return
 	}
 
 	switch {
 	case request.Method == http.MethodGet && name == "":
 		rules := r.alertActions.List()
+		if rules == nil {
+			rules = []alert.AlertAction{}
+		}
 		writeCappedJSON(writer, map[string]any{"rules": rules, "count": len(rules)})
 
 	case request.Method == http.MethodGet && name != "":
@@ -3442,6 +3453,9 @@ func (r *Router) serveAdminKnowledge(writer http.ResponseWriter, request *http.R
 		if err != nil {
 			writeError(writer, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if docs == nil {
+			docs = []knowledge.Document{}
 		}
 		writeCappedJSON(writer, map[string]any{"documents": docs})
 
