@@ -495,6 +495,41 @@ func logPrefix(ctx context.Context) string {
 // runWithCallbackRole 是 RunWithRoleCallbackStream 的实现（defer 指标在包装层处理）。
 // 流式请求（onDelta 非 nil）每轮走 streamRound：推理实时转发 onThinking、终轮
 // content flush 给 onDelta。非流式请求（onDelta 为 nil）每轮走一次性 Generate。
+// wrapupLLMMinTime 是"再发起一次 LLM 调用并等它完成"所需的最低剩余时间预算。
+// 观察值：OpenRouter deepseek 单轮 25-30s。请求 deadline 剩余低于该值时不再开
+// 新 LLM 调用，转入确定性收尾——此前 15 步工具工作全部完成后，最后综合在仅剩
+// 的 9.7s 里被饿死，整个请求 502。
+const wrapupLLMMinTime = 25 * time.Second
+
+// timeLeft 返回 ctx 剩余时间；无 deadline 时 ok=false（不受时间预算约束）。
+func timeLeft(ctx context.Context) (time.Duration, bool) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0, false
+	}
+	return time.Until(deadline), true
+}
+
+// digestResult 用工具结果拼确定性摘要（无 LLM）。时间预算耗尽时的兜底：证据
+// 都已采集，缺的只是综合——如实的"证据清单 + 未及综合"远好过 502。
+func digestResult(calls []ToolCallLog, reasoning []string, turns int) *AgentRunResult {
+	var b strings.Builder
+	b.WriteString("时间预算内完成了以下排查步骤，但未及综合分析。已采集的证据：\n\n")
+	for _, c := range calls {
+		if c.Error != "" {
+			fmt.Fprintf(&b, "- %s(%s)：失败 — %s\n", c.Tool, c.Input, c.Error)
+			continue
+		}
+		if s, ok := c.Output["summary"].(string); ok && s != "" {
+			fmt.Fprintf(&b, "- %s(%s)：%s\n", c.Tool, c.Input, s)
+			continue
+		}
+		out, _ := json.Marshal(c.Output)
+		fmt.Fprintf(&b, "- %s(%s)：%s\n", c.Tool, c.Input, string(out))
+	}
+	return &AgentRunResult{Answer: b.String(), ToolCalls: calls, Reasoning: reasoning, TurnCount: turns}
+}
+
 func (e *AgentExecutor) runWithCallbackRole(ctx context.Context, role AgentRole, message string, history []Turn, onStep func(AgentStepEvent), onDelta func(string), onThinking func(string)) *AgentRunResult {
 	// 缓存检查：相同问题直接返回缓存结果。流式请求（onDelta 非 nil）跳过缓存读，
 	// 因为缓存命中会绕过流式生成，前端整段"一波"显示——必须重新调 LLM 才能产出
@@ -607,11 +642,22 @@ loop:
 			return &AgentRunResult{Error: fmt.Errorf("agent disabled by operator"), ToolCalls: allToolCalls, TurnCount: step + 1}
 		}
 		if err := ctx.Err(); err != nil {
+			// 时间预算耗尽：已有工具证据时降级为确定性摘要，而不是把全部工作作废。
+			if len(allToolCalls) > 0 {
+				logWithCtx(ctx, "[agent] deadline exceeded mid-loop, digesting %d tool results", len(allToolCalls))
+				return digestResult(allToolCalls, reasoningTrail, step+1)
+			}
 			return &AgentRunResult{Error: err, ToolCalls: allToolCalls, TurnCount: step + 1}
 		}
 		// 连续失败熔断：同一工具连续失败 3 次则停止循环
 		if consecutiveErrors >= 3 {
 			logWithCtx(ctx, "[agent] stopping after %d consecutive tool failures", consecutiveErrors)
+			break
+		}
+		// 时间预算感知：剩余不足以再跑一轮完整 LLM 往返时，停止开新工具轮，
+		// 带着已有证据走收尾（loop 后的时间感知分支），而不是让最后一环被饿死。
+		if left, ok := timeLeft(ctx); ok && len(allToolCalls) > 0 && left < wrapupLLMMinTime {
+			logWithCtx(ctx, "[agent] time budget nearly exhausted (%s left), wrapping up after %d tool calls", left, len(allToolCalls))
 			break
 		}
 
@@ -692,16 +738,21 @@ loop:
 			// analyze 是又一次非流式 LLM 调用（深度报告），在 SSE 的 30s 预算内
 			// 会挤占最终答案的流式窗口。流式路径直接采用 agent 自己流式生成的
 			// 最终回答（streamRound 已 flush delta）。非流式请求保留 analyze 的
-			// 深度报告。
+			// 深度报告。时间预算感知：剩余不足以再调一次推理模型时跳过——这是
+			// 实测中"工具全部跑完、综合被饿死"的那一环，直接用 agent 自答收尾。
 			if len(allToolCalls) > 0 && onDelta == nil {
-				analysis := e.analyze(ctx, message, allToolCalls)
-				if analysis != "" {
-					e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
-					return &AgentRunResult{
-						Answer:    analysis,
-						ToolCalls: allToolCalls,
-						Reasoning: reasoningTrail,
-						TurnCount: step + 1,
+				if left, ok := timeLeft(ctx); ok && left < wrapupLLMMinTime {
+					logWithCtx(ctx, "[agent] skip in-loop analyze: %s left, below wrap-up budget", left)
+				} else {
+					analysis := e.analyze(ctx, message, allToolCalls)
+					if analysis != "" {
+						e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
+						return &AgentRunResult{
+							Answer:    analysis,
+							ToolCalls: allToolCalls,
+							Reasoning: reasoningTrail,
+							TurnCount: step + 1,
+						}
 					}
 				}
 			}
@@ -846,31 +897,47 @@ loop:
 	}
 
 	// 达到最大步数或 LLM 结束调用 → 进入分析层
-	// 收集所有工具结果，发给推理模型做深度分析
+	// 收集所有工具结果，发给推理模型做深度分析。时间预算感知：剩余不足以再调
+	// 一次推理模型时跳过 analyze——必死的调用只会烧光剩余时间，让收尾也无从谈起。
 	if len(allToolCalls) > 0 {
-		analysis := e.analyze(ctx, message, allToolCalls)
-		if analysis != "" {
-			e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
-			result := &AgentRunResult{
-				Answer:    analysis,
-				ToolCalls: allToolCalls,
-				Reasoning: reasoningTrail,
-				TurnCount: lastStep + 1,
+		if left, ok := timeLeft(ctx); ok && left < wrapupLLMMinTime {
+			logWithCtx(ctx, "[agent] skip analyze: %s left, below wrap-up budget", left)
+		} else {
+			analysis := e.analyze(ctx, message, allToolCalls)
+			if analysis != "" {
+				e.saveKnowledgeWithReasoning(ctx, message, allToolCalls, reasoningTrail)
+				result := &AgentRunResult{
+					Answer:    analysis,
+					ToolCalls: allToolCalls,
+					Reasoning: reasoningTrail,
+					TurnCount: lastStep + 1,
+				}
+				// 涉及写调用的执行结果不入缓存（见 cacheableResult）。
+				if e.cache != nil && cacheableResult(allToolCalls) {
+					e.cache.Set(ctx, message, result)
+				}
+				return result
 			}
-			// 涉及写调用的执行结果不入缓存（见 cacheableResult）。
-			if e.cache != nil && cacheableResult(allToolCalls) {
-				e.cache.Set(ctx, message, result)
-			}
-			return result
 		}
 	}
 
 	// 无工具调用或分析失败 → 让执行层 LLM 总结
 	toolInfos := e.toolInfosFiltered(allTools)
+	opts := []model.Option{model.WithTools(toolInfos)}
+	if left, ok := timeLeft(ctx); ok && left < wrapupLLMMinTime {
+		// 时间紧张：不带 tools 收尾——模型必须基于已有消息直接综合，不能再开工具轮。
+		logWithCtx(ctx, "[agent] final generate without tools (%s left)", left)
+		opts = nil
+	}
 	e.acquireLLM()
-	resp, err := e.chat.Generate(ctx, messages, model.WithTools(toolInfos))
+	resp, err := e.chat.Generate(ctx, messages, opts...)
 	e.releaseLLM()
 	if err != nil {
+		if ctx.Err() != nil {
+			// deadline 打断了收尾调用：降级确定性摘要，答案不归零。
+			logWithCtx(ctx, "[agent] final generate killed by deadline, digesting %d tool results", len(allToolCalls))
+			return digestResult(allToolCalls, reasoningTrail, e.maxSteps)
+		}
 		return &AgentRunResult{Error: fmt.Errorf("LLM final generate: %w", err), ToolCalls: allToolCalls, TurnCount: e.maxSteps}
 	}
 	result := &AgentRunResult{

@@ -1639,6 +1639,13 @@ func (s *Service) scheduleCompaction(conversationID string, existingSummary stor
 // The assistant turn's CreatedAt is nudged by 1ms after the user turn so the
 // strict-created-at ordering stays stable in the store.
 func (s *Service) persistTurns(ctx context.Context, conversationID, userMessage string, response Response) (string, error) {
+	// 持久化与请求 deadline 解耦：长 agent 循环耗尽请求预算（如同步端点 60s）后
+	// ctx 已死，但已算出的答案不能因为记账写库失败被整单丢弃——那是"15 步排查
+	// 全部完成却 502"的根源。WithoutCancel 摘掉 deadline/取消，保留追踪链路，
+	// 并自带上限超时防止持久化本身悬挂。
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	ctx = persistCtx
 	now := s.now()
 	if _, err := s.conversations.AppendTurn(ctx, store.Turn{
 		ConversationID: conversationID,
