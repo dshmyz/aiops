@@ -16,12 +16,12 @@ import type { ImportPreview, ManagedCapability, OutputSpec } from '../types';
 const mockedPreview = vi.mocked(previewOpenAPIURL);
 const mockedProbeGenerate = vi.mocked(probeGenerateCapability);
 
-const BUILTIN_OPENAPI_URL = 'http://127.0.0.1:19090/v3/api-docs';
-const BUILTIN_BASE_URL = 'http://127.0.0.1:19090';
+const MOCK_OPENAPI_URL = 'http://127.0.0.1:19090/v3/api-docs';
+const MOCK_BASE_URL = 'http://127.0.0.1:19090';
 
 function makePreview(overrides: Partial<ImportPreview> = {}): ImportPreview {
   return {
-    source: { openapi_url: BUILTIN_OPENAPI_URL, backend_base_url: BUILTIN_BASE_URL, fingerprint: 'fp-1' },
+    source: { openapi_url: MOCK_OPENAPI_URL, backend_base_url: MOCK_BASE_URL, fingerprint: 'fp-1' },
     stats: { total: 1, recommended: 1, needs_adjustment: 0, not_recommended: 0, read: 1, write: 0 },
     candidates: [
       {
@@ -36,7 +36,7 @@ function makePreview(overrides: Partial<ImportPreview> = {}): ImportPreview {
           operation: 'read',
           risk: 'low',
           source: 'discovered',
-          backend: { adapter: 'http', method: 'GET', path: '/api/minio/{cluster}/buckets/{bucket}/capacity', timeout_ms: 3000, base_url: BUILTIN_BASE_URL },
+          backend: { adapter: 'http', method: 'GET', path: '/api/minio/{cluster}/buckets/{bucket}/capacity', timeout_ms: 3000, base_url: MOCK_BASE_URL },
           input_schema: {
             cluster: { type: 'string', required: true },
           },
@@ -61,52 +61,12 @@ function setup() {
   return { capabilities, error, managementPhase, onSelect, wizard };
 }
 
-describe('useCapabilityImport / loadBuiltinExample', () => {
+describe('useCapabilityImport / Swagger 预览', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('载入内置示例：填充 mock 地址并触发预览', async () => {
-    mockedPreview.mockResolvedValue(makePreview());
-    const { error, managementPhase, wizard } = setup();
-
-    await wizard.loadBuiltinExample();
-
-    expect(wizard.importOpenAPIURLText.value).toBe(BUILTIN_OPENAPI_URL);
-    expect(wizard.importBackendBaseURL.value).toBe(BUILTIN_BASE_URL);
-    expect(mockedPreview).toHaveBeenCalledWith({
-      openapi_url: BUILTIN_OPENAPI_URL,
-      backend_base_url: BUILTIN_BASE_URL,
-    });
-    expect(wizard.importPreview.value?.candidates.length).toBe(1);
-    expect(wizard.importMessage.value).toContain('1 个候选 API');
-    // 预览完成后留在 source，让用户明确点击“查看并选择接口”再进入候选页。
-    expect(managementPhase.value).toBe('source');
-    expect(error.value).toBe('');
-  });
-
-  it('内置示例地址匹配时 builtinExampleActive 为 true，改掉后为 false', async () => {
-    const { wizard } = setup();
-    wizard.importOpenAPIURLText.value = BUILTIN_OPENAPI_URL;
-    wizard.importBackendBaseURL.value = BUILTIN_BASE_URL;
-    expect(wizard.builtinExampleActive.value).toBe(true);
-
-    wizard.importOpenAPIURLText.value = 'http://other/v3/api-docs';
-    expect(wizard.builtinExampleActive.value).toBe(false);
-  });
-
-  it('mock 未启动（预览失败）时给出启动命令提示', async () => {
-    mockedPreview.mockRejectedValue(new Error('Failed to fetch'));
-    const { error, wizard } = setup();
-
-    await wizard.loadBuiltinExample();
-
-    expect(error.value).toContain('mock 服务');
-    expect(error.value).toContain('node examples/mock-middleware-api.js');
-    expect(wizard.importPreview.value).toBeNull();
-  });
-
-  it('手动预览（previewSwaggerURL）失败时保留原始错误信息，不被内置示例提示覆盖', async () => {
+  it('手动预览（previewSwaggerURL）失败时保留原始错误信息', async () => {
     mockedPreview.mockRejectedValue(new Error('network down'));
     const { error, wizard } = setup();
 

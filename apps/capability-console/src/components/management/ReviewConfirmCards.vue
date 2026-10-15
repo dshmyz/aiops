@@ -108,7 +108,7 @@ async function publish() {
         </label>
         <label class="confirm-card__field">
           <span>AI 什么时候使用它（用途说明）</span>
-          <textarea data-test="confirm-card-tool-desc" v-model="toolDescription" rows="2" class="filter-input" placeholder="例如：当用户询问 MinIO 桶容量、使用率时使用" />
+          <textarea data-test="confirm-card-tool-desc" v-model="toolDescription" rows="2" class="filter-input" placeholder="例如：当用户询问 GlusterFS 卷健康状态时使用" />
         </label>
         <p class="confirm-card__meta">
           接口：{{ props.capabilities.selected.value.backend.method }} {{ props.capabilities.selected.value.backend.path }}

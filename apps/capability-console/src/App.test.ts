@@ -1278,7 +1278,7 @@ describe('Capability Console', () => {
     await flushPromises();
     await openList(wrapper);
 
-    expect(wrapper.text()).toContain('minio.bucket.capacity.read');
+    expect(wrapper.text()).toContain('kafka.consumer_group.lag.read');
     expect(wrapper.find('[data-test="stat-publishable"]').text()).toContain('2');
   });
 

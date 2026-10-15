@@ -38,10 +38,10 @@ function reset() {
         data-test="capability-goal-input"
         v-model="goal"
         rows="3"
-        placeholder="例如：查询 MinIO 桶容量，判断是否接近上限"
+        placeholder="例如：查询 GlusterFS 卷健康，判断是否异常"
       />
       <div class="creation-canvas__examples">
-        <button type="button" @click="goal = '查询 MinIO 桶容量，判断是否接近上限'">查询 MinIO 桶容量</button>
+        <button type="button" @click="goal = '查询 GlusterFS 卷健康，判断是否异常'">查询 GlusterFS 卷健康</button>
         <button type="button" @click="goal = '查看 Kafka 消费组延迟'">查看 Kafka 消费组延迟</button>
       </div>
       <button
@@ -104,7 +104,6 @@ function reset() {
           @update:base-url="capabilities.importBackendBaseURL.value = $event"
           @preview="capabilities.previewSwaggerURL"
           @clear-preview="capabilities.clearImportPreview"
-          @load-example="capabilities.loadBuiltinExample"
         />
         <div v-if="capabilities.importPreview.value" class="creation-canvas__preview-ready">
           <span>已识别 {{ capabilities.importPreview.value.candidates.length }} 个接口</span>

@@ -695,29 +695,29 @@ export async function marketplaceRate(
 function localPreviewCapabilities(): ManagedCapability[] {
   return [
     normalizeCapability({
-      name: 'minio.bucket.capacity.read',
+      name: 'kafka.consumer_group.lag.read',
       status: 'needs_review',
       source: 'discovered',
-      domain: 'minio',
-      resource_type: 'bucket',
+      domain: 'kafka',
+      resource_type: 'consumer_group',
       operation: 'read',
       risk: 'low',
       backend: {
         adapter: 'http',
         method: 'GET',
         base_url: 'https://middleware.example.com',
-        path: '/api/minio/{cluster}/buckets/{bucket}/capacity',
+        path: '/api/kafka/{cluster}/consumer-groups/{group}/lag',
         timeout_ms: 3000,
       },
       input_schema: {
         cluster: { type: 'string', required: true },
-        bucket: { type: 'string', required: true },
+        group: { type: 'string', required: true },
       },
       output: {
         kind: 'observation',
         severity_path: '$.status',
-        summary_template: 'Bucket {bucket} usage is {usage_pct}%',
-        fields: { usage_pct: '$.data.usage_pct' },
+        summary_template: 'Consumer group {group} lag is {lag}',
+        fields: { lag: '$.data.lag', members: '$.data.members' },
       },
       validation: { valid: true },
     }),

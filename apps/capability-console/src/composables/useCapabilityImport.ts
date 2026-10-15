@@ -93,10 +93,6 @@ export interface UseCapabilityImportOptions {
 export function useCapabilityImport(options: UseCapabilityImportOptions) {
   const { capabilities, error, managementPhase, onSelect, onOpenWorkbench } = options;
 
-  /** 内置示例：本地 mock 中间件（examples/mock-middleware-api.js），与 examples/README.md 保持一致。 */
-  const BUILTIN_EXAMPLE_OPENAPI_URL = 'http://127.0.0.1:19090/v3/api-docs';
-  const BUILTIN_EXAMPLE_BASE_URL = 'http://127.0.0.1:19090';
-
   const importOpenAPIURLText = ref('http://你的后台/v3/api-docs');
   const importBackendBaseURL = ref('https://middleware.example.com');
   const importMessage = ref('');
@@ -258,22 +254,6 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
     }
     onSelect(normalizeCapability({ ...result.capability, source: 'discovered', validation: { valid: false } }));
     managementPhase.value = 'review';
-  }
-
-  /** 当前 Swagger 地址是否正是内置示例地址。 */
-  const builtinExampleActive = computed(
-    () => importOpenAPIURLText.value === BUILTIN_EXAMPLE_OPENAPI_URL && importBackendBaseURL.value === BUILTIN_EXAMPLE_BASE_URL,
-  );
-
-  /** 载入内置示例：一键填充 mock 地址并触发预览。mock 未启动时给出启动命令提示。 */
-  async function loadBuiltinExample() {
-    importOpenAPIURLText.value = BUILTIN_EXAMPLE_OPENAPI_URL;
-    importBackendBaseURL.value = BUILTIN_EXAMPLE_BASE_URL;
-    try {
-      await runPreview(BUILTIN_EXAMPLE_OPENAPI_URL, BUILTIN_EXAMPLE_BASE_URL);
-    } catch {
-      error.value = '载入内置示例失败：请先启动 mock 服务（node examples/mock-middleware-api.js），或确认端口 19090 未被占用。';
-    }
   }
 
   async function commitSwaggerImport() {
@@ -551,8 +531,6 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
     problemProbedCandidates,
     previewSwaggerURL,
     clearImportPreview,
-    loadBuiltinExample,
-    builtinExampleActive,
     commitSwaggerImport,
     publishVerifiedDrafts,
     probeSelectedCandidates,

@@ -160,8 +160,6 @@ export interface UseCapabilities {
   commitUrlProbeGenerate: () => void;
   previewSwaggerURL: () => Promise<void>;
   clearImportPreview: () => void;
-  loadBuiltinExample: () => Promise<void>;
-  builtinExampleActive: ComputedRef<boolean>;
   commitSwaggerImport: () => Promise<void>;
   /** 发布已验证通过（✓ 低风险读取）的候选；仅在用户显式点击时调用。 */
   publishVerifiedDrafts: () => Promise<{ published: string[]; failed: { name: string; reason: string }[] }>;
@@ -487,8 +485,6 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     commitUrlProbeGenerate: importWizard.commitUrlProbeGenerate,
     previewSwaggerURL: importWizard.previewSwaggerURL,
     clearImportPreview: importWizard.clearImportPreview,
-    loadBuiltinExample: importWizard.loadBuiltinExample,
-    builtinExampleActive: importWizard.builtinExampleActive,
     commitSwaggerImport: importWizard.commitSwaggerImport,
     publishVerifiedDrafts: importWizard.publishVerifiedDrafts,
     updateCandidateOverride: importWizard.updateCandidateOverride,

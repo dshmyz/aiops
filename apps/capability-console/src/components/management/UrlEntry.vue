@@ -18,7 +18,7 @@ const loading = computed(() => props.capabilities.urlImportLoading.value);
           data-test="url-endpoint-input"
           :value="capabilities.urlEndpoint.value"
           class="filter-input"
-          placeholder="https://middleware.example.com/api/minio/m1/buckets/archive/capacity"
+          placeholder="https://middleware.example.com/api/glusterfs/m1/volumes/vol1/status"
           @input="capabilities.urlEndpoint.value = ($event.target as HTMLInputElement).value"
         />
       </label>
@@ -53,7 +53,7 @@ const loading = computed(() => props.capabilities.urlImportLoading.value);
           data-test="url-description-input"
           :value="capabilities.urlDescription.value"
           class="filter-input"
-          placeholder="如：查看桶容量"
+          placeholder="如：查看卷健康状态"
           @input="capabilities.urlDescription.value = ($event.target as HTMLInputElement).value"
         />
       </label>

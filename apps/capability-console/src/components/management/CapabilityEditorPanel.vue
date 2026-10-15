@@ -53,9 +53,9 @@ const authHeaderName = computed({
     <section class="editor-group">
       <div class="group-title"><h3>工具信息</h3><span>{{ capabilities.sourceLabel(capabilities.selected.value.source) }} / {{ capabilities.operationLabel(capabilities.selected.value.operation) }}</span></div>
       <div class="form-grid">
-        <label>名称<el-input data-test="capability-name" v-model="capabilities.selected.value.name" placeholder="minio.bucket.capacity.read" /></label>
-        <label>领域<el-input v-model="capabilities.selected.value.domain" placeholder="minio" /></label>
-        <label>资源类型<el-input v-model="capabilities.selected.value.resource_type" placeholder="bucket" /></label>
+        <label>名称<el-input data-test="capability-name" v-model="capabilities.selected.value.name" placeholder="glusterfs.volume.health.read" /></label>
+        <label>领域<el-input v-model="capabilities.selected.value.domain" placeholder="glusterfs" /></label>
+        <label>资源类型<el-input v-model="capabilities.selected.value.resource_type" placeholder="volume" /></label>
         <label>操作类型<el-select v-model="capabilities.selected.value.operation"><el-option label="读取" value="read" /><el-option label="写入" value="write" /></el-select></label>
         <label>风险等级<el-select v-model="capabilities.selected.value.risk"><el-option label="低" value="low" /><el-option label="中" value="medium" /><el-option label="高" value="high" /></el-select></label>
         <label class="wide">AI 描述
@@ -71,7 +71,7 @@ const authHeaderName = computed({
       <div class="form-grid">
         <label>后端 Base URL<el-input v-model="capabilities.selected.value.backend.base_url" placeholder="https://middleware.example.com" /></label>
         <label>请求方法<el-select v-model="capabilities.selected.value.backend.method"><el-option label="GET" value="GET" /><el-option label="POST" value="POST" /><el-option label="PUT" value="PUT" /><el-option label="PATCH" value="PATCH" /><el-option label="DELETE" value="DELETE" /></el-select></label>
-        <label class="wide">接口路径<el-input data-test="backend-path" v-model="capabilities.selected.value.backend.path" placeholder="/api/minio/{cluster}/buckets/{bucket}" /></label>
+        <label class="wide">接口路径<el-input data-test="backend-path" v-model="capabilities.selected.value.backend.path" placeholder="/api/glusterfs/{cluster}/volumes/{name}/status" /></label>
         <label>超时（毫秒）<el-input-number v-model="capabilities.selected.value.backend.timeout_ms" :min="500" :max="60000" :step="500" controls-position="right" /></label>
       </div>
       <div class="auth-config">

@@ -7,14 +7,12 @@ interface Props {
   loading?: boolean;
   buttonText?: string;
   buttonType?: 'primary' | 'default';
-  showExampleLink?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
   buttonText: '预览 API',
   buttonType: 'primary',
-  showExampleLink: true,
 });
 
 const emit = defineEmits<{
@@ -22,7 +20,6 @@ const emit = defineEmits<{
   'update:baseUrl': [value: string];
   'preview': [];
   'clear-preview': [];
-  'load-example': [];
 }>();
 
 function onUrlInput(event: Event) {
@@ -67,16 +64,6 @@ function onBaseUrlInput(event: Event) {
       >
         {{ props.buttonText }}
       </el-button>
-      <button
-        v-if="props.showExampleLink"
-        data-test="load-builtin-example"
-        class="example-link"
-        type="button"
-        :disabled="props.loading"
-        @click="emit('load-example')"
-      >
-        载入内置示例（MinIO / Kafka / GlusterFS）
-      </button>
     </div>
   </div>
 </template>
@@ -87,6 +74,4 @@ function onBaseUrlInput(event: Event) {
 .swagger-strip label span { color: var(--el-text-color-secondary, #909399); }
 .swagger-strip__actions { display: flex; align-items: center; gap: 12px; padding-top: 2px; }
 .swagger-strip__actions .el-button { height: 42px; padding: 0 22px; font-size: 14px; }
-.example-link { background: none; border: none; padding: 4px 0; font: inherit; font-size: 13px; color: var(--el-color-primary, #409eff); cursor: pointer; }
-.example-link:disabled { opacity: .5; cursor: not-allowed; }
 </style>

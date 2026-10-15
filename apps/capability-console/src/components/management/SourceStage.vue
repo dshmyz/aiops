@@ -47,7 +47,6 @@ defineProps<{ capabilities: UseCapabilities }>();
             @update:base-url="capabilities.importBackendBaseURL.value = $event"
             @preview="capabilities.previewSwaggerURL"
             @clear-preview="capabilities.clearImportPreview"
-            @load-example="capabilities.loadBuiltinExample"
           />
           <strong v-if="capabilities.importMessage.value" data-test="import-result" class="import-message">{{ capabilities.importMessage.value }}</strong>
           <div data-test="import-commit-summary" class="commit-summary commit-summary-empty">
