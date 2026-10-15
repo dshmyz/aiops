@@ -227,7 +227,7 @@ export async function previewOpenAPIURL(payload: OpenAPIURLImportPayload): Promi
 }
 
 export async function commitOpenAPIURLImport(payload: OpenAPIURLCommitPayload): Promise<OpenAPIURLCommitResult> {
-  const body = await request<{ capabilities?: Partial<ManagedCapability>[]; skipped?: OpenAPIURLCommitResult['skipped'] }>('/v1/capabilities/import/openapi-url/commit', {
+  const body = await requestObject<{ capabilities?: Partial<ManagedCapability>[]; skipped?: OpenAPIURLCommitResult['skipped'] }>('/v1/capabilities/import/openapi-url/commit', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -243,7 +243,7 @@ export async function commitOpenAPIURLImport(payload: OpenAPIURLCommitPayload): 
 // capabilities.OpenAPIURLImportRequest in the backend. Returns the imported
 // (draft) capabilities.
 export async function importOpenAPIURL(payload: OpenAPIURLImportPayload): Promise<ManagedCapability[]> {
-  const body = await request<{ capabilities?: Partial<ManagedCapability>[] }>('/v1/capabilities/import/openapi-url', {
+  const body = await requestObject<{ capabilities?: Partial<ManagedCapability>[] }>('/v1/capabilities/import/openapi-url', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -269,7 +269,7 @@ export async function validateCapability(capability: Capability): Promise<Valida
 }
 
 export async function testCapability(capability: Capability, input: Record<string, unknown>): Promise<NormalizedResult> {
-  const body = await request<{ result: NormalizedResult }>('/v1/capabilities/test', {
+  const body = await requestObject<{ result: NormalizedResult }>('/v1/capabilities/test', {
     method: 'POST',
     body: JSON.stringify({ capability, input }),
   });
@@ -356,7 +356,7 @@ export async function getConversation(conversationID: string, filter: Conversati
   const path = query
     ? `/v1/assistant/conversations/${encodeURIComponent(conversationID)}?${query}`
     : `/v1/assistant/conversations/${encodeURIComponent(conversationID)}`;
-  const body = await request<{
+  const body = await requestObject<{
     conversation: ConversationDetail;
     turns: ConversationDetail['turns'];
     next_cursor: string;
@@ -435,7 +435,7 @@ export async function enrichCapability(name: string): Promise<ManagedCapability>
 
 /** 批量精修：一次 LLM 调用优化多个草稿的名称+描述+参数，返回精修后的能力列表。 */
 export async function enrichCapabilities(names: string[]): Promise<ManagedCapability[]> {
-  const body = await request<{ capabilities?: Partial<ManagedCapability>[] }>('/v1/capabilities/enrich-batch', {
+  const body = await requestObject<{ capabilities?: Partial<ManagedCapability>[] }>('/v1/capabilities/enrich-batch', {
     method: 'POST',
     body: JSON.stringify({ names }),
   });
@@ -478,7 +478,7 @@ export async function inferQuickPublish(payload: QuickPublishPayload): Promise<Q
 }
 
 export async function listPendingPlans(): Promise<PendingPlanSummary[]> {
-  const body = await request<{ plans: PendingPlanSummary[] }>('/v1/action-plans?status=pending_confirmation');
+  const body = await requestObject<{ plans: PendingPlanSummary[] }>('/v1/action-plans?status=pending_confirmation');
   return body.plans ?? [];
 }
 
@@ -608,7 +608,7 @@ export async function listIncidents(
   if (filter.status) params.set('status', filter.status);
   if (filter.domain) params.set('domain', filter.domain);
   if (filter.limit && filter.limit > 0) params.set('limit', String(filter.limit));
-  const body = await request<{ incidents: AlertIncident[] }>(`/v1/incidents?${params.toString()}`);
+  const body = await requestObject<{ incidents: AlertIncident[] }>(`/v1/incidents?${params.toString()}`);
   return { incidents: body.incidents ?? [] };
 }
 
@@ -655,7 +655,7 @@ export async function marketplaceGet(id: string): Promise<MarketplaceRegistry> {
 }
 
 export async function marketplaceListVersions(id: string): Promise<MarketplaceVersion[]> {
-  const body = await request<{ versions: MarketplaceVersion[] }>(
+  const body = await requestObject<{ versions: MarketplaceVersion[] }>(
     `/v1/marketplace/capabilities/${encodeURIComponent(id)}/versions`,
   );
   return body.versions ?? [];
@@ -665,7 +665,7 @@ export async function marketplaceListRatings(id: string, limit = 20, offset = 0)
   const params = new URLSearchParams();
   params.set('limit', String(limit));
   params.set('offset', String(offset));
-  const body = await request<{ ratings: MarketplaceRating[]; total: number }>(
+  const body = await requestObject<{ ratings: MarketplaceRating[]; total: number }>(
     `/v1/marketplace/capabilities/${encodeURIComponent(id)}/ratings?${params.toString()}`,
   );
   return { ratings: body.ratings ?? [], total: body.total ?? 0 };
@@ -779,7 +779,7 @@ export async function listScheduledTasks(filter?: { enabled?: boolean }): Promis
   else if (filter?.enabled === false) params.set('enabled', 'false');
   const query = params.toString();
   const path = query ? `/v1/scheduled-tasks?${query}` : '/v1/scheduled-tasks';
-  const body = await request<{ tasks: ScheduledTask[] }>(path);
+  const body = await requestObject<{ tasks: ScheduledTask[] }>(path);
   return body.tasks ?? [];
 }
 
@@ -820,12 +820,12 @@ export async function listScheduledTaskRuns(id: string, limit?: number): Promise
   const path = query
     ? `/v1/scheduled-tasks/${encodeURIComponent(id)}/runs?${query}`
     : `/v1/scheduled-tasks/${encodeURIComponent(id)}/runs`;
-  const body = await request<{ runs: ScheduledTaskRun[] }>(path);
+  const body = await requestObject<{ runs: ScheduledTaskRun[] }>(path);
   return body.runs ?? [];
 }
 
 export async function countScheduledTaskFailures(): Promise<number> {
-  const body = await request<{ count: number }>('/v1/scheduled-tasks/failures/count');
+  const body = await requestObject<{ count: number }>('/v1/scheduled-tasks/failures/count');
   return body.count ?? 0;
 }
 
@@ -841,7 +841,7 @@ export async function updateAdminPrompt(name: string, payload: { content: string
 // ===== Admin: 知识库 =====
 
 export async function listKnowledgeDocuments(): Promise<KnowledgeDocument[]> {
-  const body = await request<KnowledgeListResponse>('/v1/admin/knowledge/documents');
+  const body = await requestObject<KnowledgeListResponse>('/v1/admin/knowledge/documents');
   return body.documents ?? [];
 }
 
@@ -1009,7 +1009,7 @@ export async function reloadMCPServers(): Promise<{ status: string }> {
 // 按 (domain, resource_type, resource_name) 软匹配各证据源，返回
 // { result: {...} }；此处解包 result。
 export async function viewIncident(pivot: IncidentViewPivot): Promise<IncidentViewResult> {
-  const data = await request<{ result: IncidentViewResult }>('/v1/tools/incident.view/read', {
+  const data = await requestObject<{ result: IncidentViewResult }>('/v1/tools/incident.view/read', {
     method: 'POST',
     body: JSON.stringify(pivot),
   });
@@ -1022,7 +1022,7 @@ export async function viewIncident(pivot: IncidentViewPivot): Promise<IncidentVi
  * 结果形态异构（能力读 / 静态元工具），返回宽松 unknown 由调用方格式化。
  */
 export async function executeRead(toolName: string, input: Record<string, unknown>): Promise<unknown> {
-  const data = await request<{ result: unknown }>(`/v1/tools/${toolName}/read`, {
+  const data = await requestObject<{ result: unknown }>(`/v1/tools/${toolName}/read`, {
     method: 'POST',
     body: JSON.stringify(input ?? {}),
   });
@@ -1046,7 +1046,7 @@ export async function listAlertActions(): Promise<AlertActionsListResponse> {
 }
 
 export async function saveAlertAction(action: AlertAction): Promise<{ status: string; name: string }> {
-  const data = await request<{ status: string; name: string }>('/v1/admin/alert-actions', {
+  const data = await requestObject<{ status: string; name: string }>('/v1/admin/alert-actions', {
     method: 'POST',
     body: JSON.stringify(action),
   });
@@ -1057,7 +1057,7 @@ export async function setAlertActionEnabled(
   name: string,
   enabled: boolean,
 ): Promise<{ status: string; name: string; enabled: boolean }> {
-  const data = await request<{ status: string; name: string; enabled: boolean }>(
+  const data = await requestObject<{ status: string; name: string; enabled: boolean }>(
     `/v1/admin/alert-actions/${encodeURIComponent(name)}`,
     { method: 'PATCH', body: JSON.stringify({ enabled }) },
   );
@@ -1065,7 +1065,7 @@ export async function setAlertActionEnabled(
 }
 
 export async function deleteAlertAction(name: string): Promise<{ status: string; name: string }> {
-  const data = await request<{ status: string; name: string }>(
+  const data = await requestObject<{ status: string; name: string }>(
     `/v1/admin/alert-actions/${encodeURIComponent(name)}`,
     { method: 'DELETE' },
   );
@@ -1080,7 +1080,7 @@ export async function listNotificationChannels(): Promise<NotificationChannelsLi
 export async function saveNotificationChannel(
   channel: NotificationChannel,
 ): Promise<{ status: string; id: string; name: string }> {
-  const data = await request<{ status: string; id: string; name: string }>(
+  const data = await requestObject<{ status: string; id: string; name: string }>(
     '/v1/admin/notification-channels',
     { method: 'POST', body: JSON.stringify(channel) },
   );
@@ -1088,7 +1088,7 @@ export async function saveNotificationChannel(
 }
 
 export async function deleteNotificationChannel(id: string): Promise<{ status: string; id: string }> {
-  const data = await request<{ status: string; id: string }>(
+  const data = await requestObject<{ status: string; id: string }>(
     `/v1/admin/notification-channels/${encodeURIComponent(id)}`,
     { method: 'DELETE' },
   );
@@ -1109,7 +1109,7 @@ export interface AdminToolsResponse {
 }
 
 export async function listAdminTools(): Promise<AdminTool[]> {
-  const data = await request<AdminToolsResponse>('/v1/admin/tools', {});
+  const data = await requestObject<AdminToolsResponse>('/v1/admin/tools', {});
   return data.tools ?? [];
 }
 
@@ -1133,7 +1133,7 @@ export interface SkillRecord {
 }
 
 export async function listSkills(): Promise<SkillRecord[]> {
-  const data = await request<{ skills?: SkillRecord[] }>('/v1/skills', {});
+  const data = await requestObject<{ skills?: SkillRecord[] }>('/v1/skills', {});
   return data.skills ?? [];
 }
 
