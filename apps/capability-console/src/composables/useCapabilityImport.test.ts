@@ -11,46 +11,10 @@ import { useCapabilityImport } from './useCapabilityImport';
 import type { ManagementPhase } from './useCapabilities';
 import { previewOpenAPIURL, probeGenerateCapability } from '../api';
 import { normalizeCapability } from '../capability';
-import type { ImportPreview, ManagedCapability, OutputSpec } from '../types';
+import type { ManagedCapability, OutputSpec } from '../types';
 
 const mockedPreview = vi.mocked(previewOpenAPIURL);
 const mockedProbeGenerate = vi.mocked(probeGenerateCapability);
-
-const MOCK_OPENAPI_URL = 'http://127.0.0.1:19090/v3/api-docs';
-const MOCK_BASE_URL = 'http://127.0.0.1:19090';
-
-function makePreview(overrides: Partial<ImportPreview> = {}): ImportPreview {
-  return {
-    source: { openapi_url: MOCK_OPENAPI_URL, backend_base_url: MOCK_BASE_URL, fingerprint: 'fp-1' },
-    stats: { total: 1, recommended: 1, needs_adjustment: 0, not_recommended: 0, read: 1, write: 0 },
-    candidates: [
-      {
-        id: 'c1',
-        method: 'GET',
-        path: '/api/minio/{cluster}/buckets/{bucket}/capacity',
-        operation_id: 'getCapacity',
-        capability: normalizeCapability({
-          name: 'minio.bucket.capacity.read',
-          domain: 'minio',
-          resource_type: 'bucket',
-          operation: 'read',
-          risk: 'low',
-          source: 'discovered',
-          backend: { adapter: 'http', method: 'GET', path: '/api/minio/{cluster}/buckets/{bucket}/capacity', timeout_ms: 3000, base_url: MOCK_BASE_URL },
-          input_schema: {
-            cluster: { type: 'string', required: true },
-          },
-          output: { kind: 'observation', severity_path: '', summary_template: '', fields: { usage_pct: '$.usage_pct' } },
-        }),
-        summary: { name: 'minio.bucket.capacity.read', domain: 'minio', resource_type: 'bucket', operation: 'read', risk: 'low' },
-        recommendation: 'recommended',
-        reasons: [],
-        warnings: [],
-      },
-    ],
-    ...overrides,
-  };
-}
 
 function setup() {
   const capabilities = ref<ManagedCapability[]>([]);

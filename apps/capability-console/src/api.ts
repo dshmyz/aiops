@@ -180,6 +180,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+// requestObject 包装 request：上述端点按约定恒返回 JSON 对象；万一某个端点
+// 退化成裸 JSON null（Go nil slice 的历史 bug 类），兜成空对象让调用方的
+// `key ?? []` 归一化继续生效，而不是在 body.key 上抛 TypeError。
+async function requestObject<T extends object>(path: string, init?: RequestInit): Promise<T> {
+  return ((await request<T | null>(path, init)) ?? {}) as T;
+}
+
 export interface CapabilityListResult {
   capabilities: ManagedCapability[];
   /** 能力存储是否已配置。false 表示后端未配置能力管理（无 DB 且无
@@ -337,7 +344,7 @@ export async function listConversations(filter: ConversationListFilter = {}): Pr
   if (filter.cursor) params.set('cursor', filter.cursor);
   const query = params.toString();
   const path = query ? `/v1/assistant/conversations?${query}` : '/v1/assistant/conversations';
-  const body = await request<ConversationPage>(path);
+  const body = await requestObject<ConversationPage>(path);
   return { ...body, conversations: body.conversations ?? [] };
 }
 
@@ -542,14 +549,14 @@ export async function listAuditEvents(filter: AuditEventFilter = {}): Promise<Au
   if (filter.final_result_only) params.set('final_result_only', 'true');
   const query = params.toString();
   const path = query ? `/v1/audit-events?${query}` : '/v1/audit-events';
-  const body = await request<AuditEventPage>(path);
+  const body = await requestObject<AuditEventPage>(path);
   return { ...body, events: body.events ?? [] };
 }
 
 export async function searchAuditEvents(query: string): Promise<AuditEventPage> {
   const params = new URLSearchParams();
   params.set('q', query);
-  const body = await request<AuditEventPage>(`/v1/audit-events/search?${params.toString()}`);
+  const body = await requestObject<AuditEventPage>(`/v1/audit-events/search?${params.toString()}`);
   return { ...body, events: body.events ?? [] };
 }
 
@@ -570,7 +577,7 @@ export async function listExecutions(filter: ExecutionFilter = {}): Promise<Exec
   if (filter.cursor_id) params.set('cursor_id', filter.cursor_id);
   const query = params.toString();
   const path = query ? `/v1/executions?${query}` : '/v1/executions';
-  const body = await request<ExecutionPage>(path);
+  const body = await requestObject<ExecutionPage>(path);
   return { ...body, executions: body.executions ?? [] };
 }
 
@@ -608,7 +615,7 @@ export async function listIncidents(
 export async function getIncident(
   id: string,
 ): Promise<{ incident: AlertIncident; alerts: IncidentMemberAlert[] }> {
-  const body = await request<{ incident: AlertIncident; alerts: IncidentMemberAlert[] }>(
+  const body = await requestObject<{ incident: AlertIncident; alerts: IncidentMemberAlert[] }>(
     `/v1/incidents/${encodeURIComponent(id)}`,
   );
   return { ...body, alerts: body.alerts ?? [] };
@@ -630,7 +637,7 @@ export async function marketplaceSearch(filter: MarketplaceSearchFilter = {}): P
   if (filter.offset !== undefined) params.set('offset', String(filter.offset));
   const query = params.toString();
   const path = query ? `/v1/marketplace/capabilities?${query}` : '/v1/marketplace/capabilities';
-  const body = await request<MarketplaceSearchPage>(path);
+  const body = await requestObject<MarketplaceSearchPage>(path);
   return { ...body, capabilities: body.capabilities ?? [] };
 }
 
@@ -639,7 +646,7 @@ export async function marketplaceSemanticSearch(query: string): Promise<Marketpl
   const params = new URLSearchParams();
   params.set('semantic', 'true');
   if (query.trim()) params.set('query', query.trim());
-  const body = await request<MarketplaceSearchPage>(`/v1/marketplace/capabilities?${params.toString()}`);
+  const body = await requestObject<MarketplaceSearchPage>(`/v1/marketplace/capabilities?${params.toString()}`);
   return { ...body, capabilities: body.capabilities ?? [] };
 }
 
@@ -883,7 +890,7 @@ export async function listFeedback(filter?: { limit?: number; offset?: number })
   if (filter?.offset !== undefined) params.set('offset', String(filter.offset));
   const query = params.toString();
   const path = query ? `/v1/assistant/feedback?${query}` : '/v1/assistant/feedback';
-  const body = await request<FeedbackPage>(path);
+  const body = await requestObject<FeedbackPage>(path);
   return { ...body, items: body.items ?? [] };
 }
 
@@ -911,7 +918,7 @@ export async function inferRunbookDraft(payload: InferRunbookDraftPayload): Prom
 
 /** 列出全部 runbook 草稿（draft + 已启用记录）。 */
 export async function listRunbookDrafts(): Promise<RunbookDraftListResponse> {
-  const body = await request<RunbookDraftListResponse>('/v1/admin/runbook-drafts');
+  const body = await requestObject<RunbookDraftListResponse>('/v1/admin/runbook-drafts');
   return { ...body, drafts: body.drafts ?? [] };
 }
 
@@ -927,7 +934,7 @@ export async function activateRunbookDraft(id: string): Promise<RunbookDraft> {
 
 /** 列出可调度的低风险 runbook 模板。 */
 export async function listRunbooks(): Promise<RunbookListResponse> {
-  const body = await request<RunbookListResponse>('/v1/runbooks');
+  const body = await requestObject<RunbookListResponse>('/v1/runbooks');
   return { ...body, runbooks: body.runbooks ?? [] };
 }
 
@@ -1034,7 +1041,7 @@ export interface AlertActionsListResponse {
 }
 
 export async function listAlertActions(): Promise<AlertActionsListResponse> {
-  const data = await request<AlertActionsListResponse>('/v1/admin/alert-actions', {});
+  const data = await requestObject<AlertActionsListResponse>('/v1/admin/alert-actions', {});
   return { ...data, rules: data.rules ?? [] };
 }
 
@@ -1066,7 +1073,7 @@ export async function deleteAlertAction(name: string): Promise<{ status: string;
 }
 
 export async function listNotificationChannels(): Promise<NotificationChannelsListResponse> {
-  const data = await request<NotificationChannelsListResponse>('/v1/admin/notification-channels', {});
+  const data = await requestObject<NotificationChannelsListResponse>('/v1/admin/notification-channels', {});
   return { ...data, channels: data.channels ?? [] };
 }
 
@@ -1089,7 +1096,7 @@ export async function deleteNotificationChannel(id: string): Promise<{ status: s
 }
 
 export async function listAlertActionRuns(name: string): Promise<AlertActionRunOverview> {
-  const data = await request<AlertActionRunOverview>(
+  const data = await requestObject<AlertActionRunOverview>(
     `/v1/admin/alert-actions/${encodeURIComponent(name)}/runs`,
     {},
   );
