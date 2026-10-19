@@ -174,13 +174,42 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
-// 从持久化的 response_payload 读取 blocks（BlockRenderer 渲染 risk_notice 等）
+// 从持久化的 response_payload 读取 blocks（BlockRenderer 渲染 risk_notice 等）。
+// tool_trace 不在此渲染：它记录的"调了什么工具 + 输入/事实"与上方工具调用追踪区
+// 完全重复，改为合并进该区（见 traceBlocks），避免答案底下多一截冗余尾巴。
 const turnBlocks = computed<Block[]>(() => {
   const payload = props.turn.response_payload;
   if (!payload || !Array.isArray(payload.blocks)) {
     return [];
   }
-  return payload.blocks as Block[];
+  return (payload.blocks as Block[]).filter((b) => b.type !== 'tool_trace');
+});
+
+// tool_trace block（后端 formatter 附带的一阶段取证记录）→ 转成与 tool_calls
+// 同构的条目，合并进上方工具调用追踪区展示。
+const traceBlocks = computed<Block[]>(() => {
+  const payload = props.turn.response_payload;
+  if (!payload || !Array.isArray(payload.blocks)) {
+    return [];
+  }
+  return (payload.blocks as Block[]).filter((b) => b.type === 'tool_trace');
+});
+
+const traceEntries = computed(() =>
+  traceBlocks.value.map((b) => {
+    const p = (b.payload ?? {}) as Record<string, unknown>;
+    return {
+      tool: (typeof b.content === 'string' && b.content) || (typeof p.tool === 'string' ? p.tool : ''),
+      input: isRecord(p.input) ? p.input : undefined,
+      answer: isRecord(p.answer) ? p.answer : undefined,
+    };
+  }),
+);
+
+// 去重：实时 tool_calls 已有的工具不再重复展示 tool_trace（同一次调用的两份记录）。
+const dedupedTraces = computed(() => {
+  const seen = new Set((props.turn.tool_calls ?? []).map((tc) => tc.tool));
+  return traceEntries.value.filter((t) => t.tool && !seen.has(t.tool));
 });
 
 // event.query / task.query 的结构化 answer（ToolAnswerView 渲染表格）
@@ -262,8 +291,117 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
           {{ relativeTime }}
         </time>
       </header>
+      <!-- 执行证据块（时序上先于答案，置于正文气泡上方）：思考过程 → 工具调用 →
+           进度时间线 → 已执行步骤。流式期间工具先于正文到达，天然呈现在回答上方；
+           回放时也保持"过程在上、结论在下"的阅读顺序。 -->
+      <!-- 思考过程折叠区：仅在 assistant turn 有 thinking 内容时显示 -->
+      <div
+        v-if="isAssistant && hasThinking"
+        data-test="conversation-turn-thinking"
+        class="thinking-section"
+      >
+        <button
+          type="button"
+          class="thinking-toggle"
+          :aria-expanded="thinkingExpanded"
+          @click="toggleThinking"
+        >
+          <SfSymbol name="sparkles" :size="16" />
+          <span>思考过程</span>
+          <span class="thinking-chevron" :class="{ expanded: thinkingExpanded }">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+            </svg>
+          </span>
+        </button>
+        <div v-show="thinkingExpanded" class="thinking-content">
+          {{ turn.thinking }}
+        </div>
+      </div>
+
+      <!-- 工具调用追踪区：实时显示工具调用进度；回放时吸收后端 tool_trace block
+           （已按工具名去重，不与实时记录重复） -->
+      <div
+        v-if="isAssistant && (hasToolCalls || dedupedTraces.length)"
+        data-test="conversation-turn-tool-calls"
+        class="tool-calls-section"
+      >
+        <button
+          type="button"
+          class="tool-calls-toggle"
+          :aria-expanded="toolCallsExpanded"
+          @click="toolCallsExpanded = !toolCallsExpanded"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+          </svg>
+          <span>已调用 {{ (turn.tool_calls?.length || 0) + dedupedTraces.length }} 个受控工具获取平台事实</span>
+          <span class="tool-calls-chevron" :class="{ expanded: toolCallsExpanded }">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+            </svg>
+          </span>
+        </button>
+        <div v-show="toolCallsExpanded" class="tool-calls-content">
+          <div
+            v-for="(tc, index) in turn.tool_calls"
+            :key="index"
+            class="tool-call-item"
+            :class="{ done: tc.done }"
+          >
+            <div class="tool-call-header">
+              <span class="tool-call-name">{{ tc.tool }}</span>
+              <span v-if="!tc.done" class="tool-call-status calling">调用中...</span>
+              <span v-else class="tool-call-status done">已完成</span>
+            </div>
+            <div v-if="tc.input" class="tool-call-input">
+              <div class="tool-call-label">输入:</div>
+              <pre class="tool-call-json">{{ JSON.stringify(tc.input, null, 2) }}</pre>
+            </div>
+            <div v-if="tc.done && tc.raw_response" class="tool-call-output">
+              <div class="tool-call-label">输出:</div>
+              <pre class="tool-call-json">{{ JSON.stringify(tc.raw_response, null, 2) }}</pre>
+            </div>
+          </div>
+
+          <!-- 后端 tool_trace block 合并进来：与实时调用记录同构展示 -->
+          <div
+            v-for="(t, i) in dedupedTraces"
+            :key="'trace-' + i"
+            class="tool-call-item done"
+          >
+            <div class="tool-call-header">
+              <span class="tool-call-name">{{ t.tool }}</span>
+              <span class="tool-call-status done">已完成</span>
+            </div>
+            <div v-if="t.input" class="tool-call-input">
+              <div class="tool-call-label">输入:</div>
+              <pre class="tool-call-json">{{ JSON.stringify(t.input, null, 2) }}</pre>
+            </div>
+            <div v-if="t.answer" class="tool-call-output">
+              <div class="tool-call-label">输出:</div>
+              <pre class="tool-call-json">{{ JSON.stringify(t.answer, null, 2) }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 执行进度流：阶段骨架 + 工具子项（参考 Trae 的实时工具调用流） -->
+      <ProgressTimeline
+        v-if="isAssistant && hasProgress"
+        :entries="progressEntries"
+        :streaming="streaming"
+      />
+
+      <!-- 已执行步骤区块：智能体自治循环多步执行（实时 SSE 或回放的 tool_step 持久化 turn） -->
+      <AssistantSteps
+        v-if="isAssistant && hasSteps"
+        :steps="turn.steps && turn.steps.length ? turn.steps : [persistedStep!]"
+        :streaming="streaming"
+      />
+
       <!-- 回放的 tool_step turn 没有正文：其步骤摘要以独立步骤区块呈现，这里完全
-           隐藏气泡外壳，避免在顶部渲染出一个空白的对话气泡。 -->
+           隐藏气泡外壳，避免渲染出一个空白的对话气泡。 -->
       <div
         v-if="!isReplayedToolStep"
         data-test="conversation-turn-content"
@@ -301,91 +439,6 @@ const recommendationStatuses = computed<RecommendationStatus[]>(() => {
           <span v-if="showStreamingCursor" class="streaming-cursor" aria-hidden="true">▌</span>
         </template>
       </div>
-
-      <!-- 思考过程折叠区：仅在 assistant turn 有 thinking 内容时显示 -->
-      <div
-        v-if="isAssistant && hasThinking"
-        data-test="conversation-turn-thinking"
-        class="thinking-section"
-      >
-        <button
-          type="button"
-          class="thinking-toggle"
-          :aria-expanded="thinkingExpanded"
-          @click="toggleThinking"
-        >
-          <SfSymbol name="sparkles" :size="16" />
-          <span>思考过程</span>
-          <span class="thinking-chevron" :class="{ expanded: thinkingExpanded }">
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-              <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
-            </svg>
-          </span>
-        </button>
-        <div v-show="thinkingExpanded" class="thinking-content">
-          {{ turn.thinking }}
-        </div>
-      </div>
-
-      <!-- 工具调用追踪区：实时显示工具调用进度 -->
-      <div
-        v-if="isAssistant && hasToolCalls"
-        data-test="conversation-turn-tool-calls"
-        class="tool-calls-section"
-      >
-        <button
-          type="button"
-          class="tool-calls-toggle"
-          :aria-expanded="toolCallsExpanded"
-          @click="toolCallsExpanded = !toolCallsExpanded"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-          </svg>
-          <span>已调用 {{ turn.tool_calls?.length || 0 }} 个受控工具获取平台事实</span>
-          <span class="tool-calls-chevron" :class="{ expanded: toolCallsExpanded }">
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-              <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
-            </svg>
-          </span>
-        </button>
-        <div v-show="toolCallsExpanded" class="tool-calls-content">
-          <div
-            v-for="(tc, index) in turn.tool_calls"
-            :key="index"
-            class="tool-call-item"
-            :class="{ done: tc.done }"
-          >
-            <div class="tool-call-header">
-              <span class="tool-call-name">{{ tc.tool }}</span>
-              <span v-if="!tc.done" class="tool-call-status calling">调用中...</span>
-              <span v-else class="tool-call-status done">已完成</span>
-            </div>
-            <div v-if="tc.input" class="tool-call-input">
-              <div class="tool-call-label">输入:</div>
-              <pre class="tool-call-json">{{ JSON.stringify(tc.input, null, 2) }}</pre>
-            </div>
-            <div v-if="tc.done && tc.raw_response" class="tool-call-output">
-              <div class="tool-call-label">输出:</div>
-              <pre class="tool-call-json">{{ JSON.stringify(tc.raw_response, null, 2) }}</pre>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 执行进度流：阶段骨架 + 工具子项（参考 Trae 的实时工具调用流） -->
-      <ProgressTimeline
-        v-if="isAssistant && hasProgress"
-        :entries="progressEntries"
-        :streaming="streaming"
-      />
-
-      <!-- 已执行步骤区块：智能体自治循环多步执行（实时 SSE 或回放的 tool_step 持久化 turn） -->
-      <AssistantSteps
-        v-if="isAssistant && hasSteps"
-        :steps="turn.steps && turn.steps.length ? turn.steps : [persistedStep!]"
-        :streaming="streaming"
-      />
 
       <!-- 结构化 blocks（如 Runbook 自动执行的 risk_notice）与 event/task 表格 -->
       <div v-if="isAssistant && turnBlocks.length" data-test="conversation-turn-blocks">
