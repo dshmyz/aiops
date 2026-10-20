@@ -36,7 +36,7 @@ function onBaseUrlInput(event: Event) {
 <template>
   <div data-test="import-step-source" class="swagger-strip">
     <label>
-      <span>Swagger / OpenAPI 地址</span>
+      <span>Swagger / OpenAPI 文档地址</span>
       <input
         data-test="openapi-url-input"
         :value="props.url"
@@ -46,12 +46,12 @@ function onBaseUrlInput(event: Event) {
       />
     </label>
     <label>
-      <span>中间件后台 Base URL</span>
+      <span>后端服务 Base URL（实际调用地址，文档里的接口路径会拼在它后面）</span>
       <input
         data-test="backend-base-url-input"
         :value="props.baseUrl"
         class="filter-input"
-        placeholder="https://middleware.example.com"
+        placeholder="https://backend.example.com"
         @input="onBaseUrlInput"
       />
     </label>

@@ -7,7 +7,7 @@ vi.mock('../api', () => ({
   probeGenerateCapability: vi.fn(),
 }));
 
-import { useCapabilityImport } from './useCapabilityImport';
+import { useCapabilityImport, classifyProbeError } from './useCapabilityImport';
 import type { ManagementPhase } from './useCapabilities';
 import { previewOpenAPIURL, probeGenerateCapability } from '../api';
 import { normalizeCapability } from '../capability';
@@ -98,15 +98,89 @@ describe('useCapabilityImport / 单接口接入（probe-generate）', () => {
     });
   });
 
-  it('runUrlProbeGenerate 失败时写入共享 error', async () => {
+  it('runUrlProbeGenerate 失败时写入分类后的共享 error', async () => {
     mockedProbeGenerate.mockRejectedValue(new Error('backend unreachable'));
     const { wizard, error } = setup();
     wizard.urlEndpoint.value = 'https://middleware.example.com/api/x';
 
     await wizard.runUrlProbeGenerate();
 
-    expect(error.value).toBe('backend unreachable');
+    expect(error.value).toContain('无法连接后端');
     expect(wizard.generatedUrlResult.value).toBeNull();
+  });
+
+  it('runUrlProbeGenerate：显式 {var} 模板保留变量并把参数值作为探测实参', async () => {
+    mockedProbeGenerate.mockResolvedValue({
+      capability: { name: 'app.instance.metrics.read' } as never,
+      probe: { raw_body: '{}', inferred_by: 'rules' },
+    });
+    const { wizard } = setup();
+    wizard.urlEndpoint.value = 'https://backend.example.com/api/instances/{instance_id}/metrics';
+    wizard.urlPathValues.value = { instance_id: 'i-123' };
+
+    await wizard.runUrlProbeGenerate();
+
+    expect(mockedProbeGenerate).toHaveBeenCalledWith({
+      backend: { adapter: 'http', method: 'GET', path: '/api/instances/{instance_id}/metrics', base_url: 'https://backend.example.com' },
+      description: undefined,
+      sample_body: undefined,
+      input: { instance_id: 'i-123' },
+    });
+    // 探测实参预填进 input examples
+    const draft = wizard.generatedUrlResult.value!.capability;
+    expect(draft.input_schema.instance_id.examples).toEqual(['i-123']);
+  });
+
+  it('runUrlProbeGenerate：查询参数行进 input_schema 标 in=query 并参与试调', async () => {
+    mockedProbeGenerate.mockResolvedValue({
+      capability: { name: 'app.instance.metrics.read' } as never,
+      probe: { raw_body: '{}', inferred_by: 'rules' },
+    });
+    const { wizard } = setup();
+    wizard.urlEndpoint.value = 'https://backend.example.com/api/instances';
+    wizard.urlQueryParams.value = [{ key: 'limit', value: '10', required: false }];
+
+    await wizard.runUrlProbeGenerate();
+
+    expect(mockedProbeGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      input: { limit: '10' },
+    }));
+    const draft = wizard.generatedUrlResult.value!.capability;
+    expect(draft.input_schema.limit).toMatchObject({ type: 'string', required: false, in: 'query', examples: ['10'] });
+  });
+
+  it('runUrlProbeGenerate：URL 自带的查询串自动并入参数行且地址栏还原成纯路径', async () => {
+    mockedProbeGenerate.mockResolvedValue({
+      capability: { name: 'app.list.read' } as never,
+      probe: { raw_body: '{}', inferred_by: 'rules' },
+    });
+    const { wizard } = setup();
+    wizard.urlEndpoint.value = 'https://backend.example.com/api/instances?status=ok';
+
+    await wizard.runUrlProbeGenerate();
+
+    expect(wizard.urlEndpoint.value).toBe('https://backend.example.com/api/instances');
+    expect(wizard.urlQueryParams.value).toEqual([{ key: 'status', value: 'ok', required: false }]);
+    expect(mockedProbeGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      backend: expect.objectContaining({ path: '/api/instances' }),
+      input: { status: 'ok' },
+    }));
+  });
+
+  it('runUrlProbeGenerate 失败时按错误类型给引导', async () => {
+    mockedProbeGenerate.mockRejectedValue(new Error('missing path value "instance_id"'));
+    const { wizard, error } = setup();
+    wizard.urlEndpoint.value = 'https://backend.example.com/api/instances/{instance_id}';
+
+    await wizard.runUrlProbeGenerate();
+
+    expect(error.value).toContain('路径参数 instance_id');
+    expect(error.value).toContain('参数值');
+  });
+
+  it('classifyProbeError：401/403 指引去评审页配鉴权，连接失败指引查地址', async () => {
+    expect(classifyProbeError('request failed: HTTP 401')).toContain('鉴权');
+    expect(classifyProbeError('dial tcp 10.0.0.1:8080: connect: connection refused')).toContain('Base URL');
   });
 
   it('commitUrlProbeGenerate：把生成能力写回评审区并切到 review', () => {

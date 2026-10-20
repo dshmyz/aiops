@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import type { Ref } from 'vue';
 import { commitOpenAPIURLImport, previewOpenAPIURL, probeGenerateCapability, probeInferCapability, publishCapability } from '../api';
 import { APIError } from '../api';
@@ -25,18 +25,47 @@ import type {
 import { capabilityKey, upsert } from '../capabilityFormat';
 import type { ManagementPhase } from './useCapabilities';
 
-/** 把"后端接口地址"拆成 base_url + path，透明化用户只填一个框的体验。 */
-function splitEndpoint(url: string): { base_url: string; path: string } {
+/** 把"后端接口地址"拆成 base_url + path + query，透明化用户只填一个框的体验。
+ *  URL.parse 会把 {var} 百分号编码成 %7Bvar%7D，这里还原，让用户可以直接写模板路径。 */
+function splitEndpoint(url: string): { base_url: string; path: string; query: Record<string, string> } {
   const trimmed = url.trim();
   if (!trimmed) {
-    return { base_url: '', path: '' };
+    return { base_url: '', path: '', query: {} };
   }
+  const decodeBraces = (value: string) => value.replace(/%7B/gi, '{').replace(/%7D/gi, '}');
   try {
     const parsed = new URL(trimmed);
-    return { base_url: parsed.origin, path: `${parsed.pathname}${parsed.search}` };
+    const query: Record<string, string> = {};
+    parsed.searchParams.forEach((value, key) => {
+      query[key] = value;
+    });
+    return { base_url: parsed.origin, path: decodeBraces(parsed.pathname), query };
   } catch {
-    return { base_url: trimmed, path: '' };
+    return { base_url: trimmed, path: '', query: {} };
   }
+}
+
+/** 提取路径里显式写的 {var} 模板变量名。 */
+function extractPathVariables(path: string): string[] {
+  return [...path.matchAll(/\{([^/{}]+)\}/g)].map((match) => match[1]);
+}
+
+/** 试调失败的错误分类：把后端/网络的原始报错翻译成下一步该做什么的引导。 */
+export function classifyProbeError(message: string): string {
+  const missingPath = message.match(/missing path value "([^"]+)"/);
+  if (missingPath) {
+    return `路径参数 ${missingPath[1]} 缺少试调值：在「参数值」里填入该参数的真实值后重新验证`;
+  }
+  if (message.includes('missing required input')) {
+    return '试调缺少必填参数：请在参数行里补全参数值后重新验证';
+  }
+  if (/401|403|unauthorized|forbidden/i.test(message)) {
+    return '接口返回 401/403：该接口需要鉴权，继续后可在评审页配置 Bearer Token 或 API Key';
+  }
+  if (/connect|refused|timeout|deadline|dial tcp|no such host|network|unreachable/i.test(message)) {
+    return '无法连接后端：请检查接口地址（Base URL）是否可达、网络是否连通';
+  }
+  return message;
 }
 
 /**
@@ -160,7 +189,9 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
       candidateOverrides.value = createCandidateOverrides(previewResult);
       candidateFilters.value = { recommendation: 'all', domain: 'all', search: '' };
       importWizardStep.value = previewResult.candidates.length === 0 ? 'source' : 'candidates';
-      importMessage.value = previewResult.candidates.length === 0 ? '没有识别到可接入 API' : `已预览 ${previewResult.candidates.length} 个候选 API`;
+      importMessage.value = previewResult.candidates.length === 0
+        ? '没有识别到可接入 API：请确认地址指向 OpenAPI v2/v3 文档（如 /v3/api-docs 或 /swagger.json）且可访问'
+        : `已预览 ${previewResult.candidates.length} 个候选 API`;
     } catch (err) {
       if (generation !== importPreviewGeneration.value) {
         return;
@@ -202,41 +233,101 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
   const urlSampleBody = ref('');
   const urlImportLoading = ref(false);
   const generatedUrlResult = ref<ProbeGenerateResult | null>(null);
+  /** 显式 {var} 路径参数的试调值：变量名 → 值（成功后预填进 input examples）。 */
+  const urlPathValues = ref<Record<string, string>>({});
+  /** 查询参数行：进 input_schema 标 in:"query"，试调时携带实际值。 */
+  const urlQueryParams = ref<Array<{ key: string; value: string; required: boolean }>>([]);
+  /** URL 路径里声明的 {var}（含已知模板还原出的），驱动 UrlEntry 的参数值行。 */
+  const urlPathVariables = computed(() => {
+    const { path } = splitEndpoint(urlEndpoint.value);
+    const explicit = extractPathVariables(path);
+    if (explicit.length > 0) {
+      return explicit;
+    }
+    for (const known of KNOWN_PATH_TEMPLATES) {
+      if (known.pattern.test(path)) {
+        return known.vars;
+      }
+    }
+    return [];
+  });
 
   async function runUrlProbeGenerate() {
     urlImportLoading.value = true;
     error.value = '';
     generatedUrlResult.value = null;
     try {
-      const split = splitEndpoint(urlEndpoint.value);
-      const { base_url, path: rawPath } = split;
-      // 字面量 URL 还原成模板路径：后端靠 {var} 生成 input_schema，
-      // 并把实际值作为探测实参传入，探测记录的资源值得以贯穿全流程。
-      const { template, values } = templatizePath(rawPath);
-      const hasVars = Object.keys(values).length > 0;
-      const path = hasVars ? template : rawPath;
+      const { base_url, path: rawPath, query: urlQuery } = splitEndpoint(urlEndpoint.value);
+      // URL 里直接带 ?a=b 的查询参数：自动并入参数行（手动行优先），地址栏还原成纯路径。
+      if (Object.keys(urlQuery).length > 0) {
+        const manualKeys = new Set(urlQueryParams.value.map((row) => row.key.trim()).filter(Boolean));
+        for (const [key, value] of Object.entries(urlQuery)) {
+          if (!manualKeys.has(key)) {
+            urlQueryParams.value = [...urlQueryParams.value, { key, value, required: false }];
+          }
+        }
+        urlEndpoint.value = `${base_url}${rawPath}`;
+      }
+      const rows = urlQueryParams.value.filter((row) => row.key.trim());
+      // 显式 {var} 模板优先；其次是已知路径模板还原；都没有按字面量处理。
+      const explicitVars = extractPathVariables(rawPath);
+      const known = templatizePath(rawPath);
+      const path = explicitVars.length > 0 ? rawPath : known.template;
+      const pathValues: Record<string, string> = {};
+      for (const name of explicitVars) {
+        pathValues[name] = urlPathValues.value[name] ?? '';
+      }
+      if (explicitVars.length === 0) {
+        Object.assign(pathValues, known.values);
+      }
+      const hasInput = Object.keys(pathValues).length > 0 || rows.length > 0;
+      const input: Record<string, unknown> = {};
+      for (const [name, value] of Object.entries(pathValues)) {
+        if (value) {
+          input[name] = value;
+        }
+      }
+      for (const row of rows) {
+        input[row.key.trim()] = row.value;
+      }
       const result = await probeGenerateCapability({
         backend: { adapter: 'http', method: urlMethod.value || 'GET', path, base_url },
         description: urlDescription.value.trim() || undefined,
         sample_body: urlSampleBody.value.trim() || undefined,
-        input: hasVars ? values : undefined,
+        input: hasInput ? input : undefined,
       });
-      // 把探测 URL 里的真实资源值写进 input examples（cluster=demo、
-      // bucket=archive），评审页测试参数据此预填，不用再猜一遍。
-      if (hasVars) {
-        const seededSchema: Record<string, (typeof result.capability.input_schema)[string]> = {};
-        for (const [name, field] of Object.entries(result.capability.input_schema ?? {})) {
-          const value = values[name];
-          seededSchema[name] = value && !(field.examples?.length)
-            ? { ...field, examples: [value] }
-            : field;
+      // 把试调实参写回 input_schema：路径参数进 examples（评审页/发布后 AI 有实参
+      // 可参考），查询参数作为 in:"query" 字段落进 schema——后端
+      // buildQuickPublishCapability 只解析路径变量，query 字段由前端补齐。
+      const seededSchema: Record<string, (typeof result.capability.input_schema)[string]> = {
+        ...(result.capability.input_schema ?? {}),
+      };
+      for (const [name, value] of Object.entries(pathValues)) {
+        const field = seededSchema[name];
+        if (value && field && !(field.examples?.length)) {
+          seededSchema[name] = { ...field, examples: [value] };
+        } else if (value && !field) {
+          seededSchema[name] = { type: 'string', required: true, examples: [value] };
         }
-        result.capability.input_schema = seededSchema;
       }
+      for (const row of rows) {
+        const key = row.key.trim();
+        const existing = seededSchema[key];
+        const field: (typeof result.capability.input_schema)[string] = {
+          type: existing?.type ?? 'string',
+          required: row.required,
+          in: 'query',
+        };
+        if (row.value && !(existing?.examples?.length)) {
+          field.examples = [row.value];
+        }
+        seededSchema[key] = field;
+      }
+      result.capability.input_schema = seededSchema;
       generatedUrlResult.value = result;
       onSelect(normalizeCapability({ ...result.capability, source: 'discovered', validation: { valid: false } }));
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '接入后端接口失败';
+      error.value = err instanceof Error ? classifyProbeError(err.message) : '接入后端接口失败';
     } finally {
       urlImportLoading.value = false;
     }
@@ -246,7 +337,18 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
     generatedUrlResult.value = null;
   }
 
-  /** 把 probe-generate 生成的能力草稿写回评审区：选中草稿并切到 review 阶段。 */
+  /** 单接口试调后的非阻断提示（LLM 回退类不算）：连接失败、映射 miss 等给用户看的建议。 */
+  const urlProbeWarnings = computed(() => {
+    const result = generatedUrlResult.value;
+    if (!result) {
+      return [];
+    }
+    return (result.probe?.warnings ?? [])
+      .filter((warning) => !warning.includes('LLM 推断失败'))
+      .map(classifyProbeError);
+  });
+
+  /** 把 probe-generate 生成的能力草稿写回评审区：选中草稿并打开工单评审页。 */
   function commitUrlProbeGenerate() {
     const result = generatedUrlResult.value;
     if (!result) {
@@ -254,6 +356,9 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
     }
     onSelect(normalizeCapability({ ...result.capability, source: 'discovered', validation: { valid: false } }));
     managementPhase.value = 'review';
+    // useCapabilities 的 watch 会在 source→review 时收起工单页（批量导入回列表
+    // 的设计）；单接口提交的意图是直接进工单评审，等 watch 跑完再打开。
+    void nextTick(() => onOpenWorkbench?.());
   }
 
   async function commitSwaggerImport() {
@@ -544,6 +649,10 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
     urlSampleBody,
     urlImportLoading,
     generatedUrlResult,
+    urlPathValues,
+    urlPathVariables,
+    urlQueryParams,
+    urlProbeWarnings,
     runUrlProbeGenerate,
     clearUrlProbeGenerate,
     commitUrlProbeGenerate,

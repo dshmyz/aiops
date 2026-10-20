@@ -9,13 +9,15 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const rootEnv = loadEnv(mode, resolve(process.cwd(), '../..'), '');
   const devAdminToken = rootEnv.VITE_DEV_ADMIN_TOKEN || env.VITE_DEV_ADMIN_TOKEN || process.env.VITE_DEV_ADMIN_TOKEN || 'dev-admin-token-fallback';
+  // 18080 被占用时可用 COPILOT_API_TARGET 指到别的端口（如 :18099）。
+  const apiTarget = rootEnv.COPILOT_API_TARGET || env.COPILOT_API_TARGET || process.env.COPILOT_API_TARGET || 'http://127.0.0.1:18080';
 
   return {
     plugins: [vue()],
     server: {
       proxy: {
         '/v1': {
-          target: 'http://127.0.0.1:18080',
+          target: apiTarget,
           changeOrigin: true,
           headers: {
             Authorization: `Bearer ${devAdminToken}`,

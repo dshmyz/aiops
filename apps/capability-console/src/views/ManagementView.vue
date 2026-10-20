@@ -2,7 +2,6 @@
 import { ElButton, ElAlert } from 'element-plus';
 import WorkflowRail from '../components/management/WorkflowRail.vue';
 import CapabilityLedgerPanel from '../components/management/CapabilityLedgerPanel.vue';
-import SourceStage from '../components/management/SourceStage.vue';
 import CapabilityCreationCanvas from '../components/management/CapabilityCreationCanvas.vue';
 import WorkOrderHeader from '../components/management/WorkOrderHeader.vue';
 import WorkflowSpine from '../components/management/WorkflowSpine.vue';

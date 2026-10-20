@@ -119,8 +119,14 @@ all-checks: vet lint test web-check
 	@echo "all checks passed"
 
 # === Local full-stack dev environment ===
-# Starts mock middleware API (19090), Copilot API (18080, dev tokens on) and
-# the Vue console (5173) in the background. Use `make dev-down` to stop.
+# Starts mock middleware API (19090), Copilot API and the Vue console (5173)
+# in the background. Use `make dev-down` to stop.
+# API 端口读 .env 的 COPILOT_HTTP_ADDR（本机 18080 常被其它服务占用，dev 固定 :18099）；
+# 前端 vite 代理经 apps/capability-console/.env.development.local 的 COPILOT_API_TARGET 对齐。
+COPILOT_DEV_ADDR := $(shell awk -F= '/^COPILOT_HTTP_ADDR=/{v=$$2; gsub(/^[: ]+|[: ]+$$/, "", v); if (v != "") print v}' .env 2>/dev/null)
+ifeq ($(strip $(COPILOT_DEV_ADDR)),)
+COPILOT_DEV_ADDR := 18080
+endif
 DEV_ADMIN_TOKEN ?= dev-admin-fallback-token
 DEV_PID_DIR := /tmp/copilot-dev-pids
 
@@ -133,9 +139,9 @@ dev-up:
 	@if [ -f $(DEV_PID_DIR)/api.pid ] && kill -0 $$(cat $(DEV_PID_DIR)/api.pid) 2>/dev/null; then echo "copilot-api already running"; else \
 		if [ -f .env ]; then set -a; . ./.env; set +a; else echo "WARN: no ./.env — copy .env.example to .env or set env vars manually"; fi; \
 		nohup go run ./cmd/copilot-api > $(DEV_PID_DIR)/api.log 2>&1 < /dev/null & echo $$! > $(DEV_PID_DIR)/api.pid; \
-		echo "copilot-api starting on http://127.0.0.1:18080 (pid $$(cat $(DEV_PID_DIR)/api.pid))"; fi
+		echo "copilot-api starting on http://127.0.0.1:$(COPILOT_DEV_ADDR) (pid $$(cat $(DEV_PID_DIR)/api.pid))"; fi
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
-		curl --noproxy '*' -sf -o /dev/null http://127.0.0.1:18080/v1/capabilities -H "Authorization: Bearer $(shell awk -F= '/^VITE_DEV_ADMIN_TOKEN=/{print $$2}' .env 2>/dev/null)" && break; \
+		curl --noproxy '*' -sf -o /dev/null http://127.0.0.1:$(COPILOT_DEV_ADDR)/v1/capabilities -H "Authorization: Bearer $(shell awk -F= '/^VITE_DEV_ADMIN_TOKEN=/{print $$2}' .env 2>/dev/null)" && break; \
 		echo "waiting for copilot-api... ($$i)"; sleep 1; done
 	@if [ -f $(DEV_PID_DIR)/web.pid ] && kill -0 $$(cat $(DEV_PID_DIR)/web.pid) 2>/dev/null; then echo "console already running"; else \
 		cd apps/capability-console && nohup npm run dev -- --port 5173 > $(DEV_PID_DIR)/web.log 2>&1 < /dev/null & echo $$! > $(DEV_PID_DIR)/web.pid; \
@@ -143,7 +149,7 @@ dev-up:
 	@echo ""
 	@echo "=== 全栈已启动 ==="
 	@echo "  Vue 控制台:    http://127.0.0.1:5173"
-	@echo "  Copilot API:   http://127.0.0.1:18080"
+	@echo "  Copilot API:   http://127.0.0.1:$(COPILOT_DEV_ADDR)"
 	@echo "  Mock 中间件:    http://127.0.0.1:19090"
 	@echo "  日志目录:       $(DEV_PID_DIR)/{mock,api,web}.log"
 	@echo "  停止:           make dev-down"
@@ -166,19 +172,19 @@ dev-logs:
 # AI 调用链透明化 without opening the browser.
 dev-verify-trace:
 	@echo "--- 1) Read 场景 (cluster.status.read) ---"
-	@curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/v1/assistant/messages \
+	@curl --noproxy '*' -sS -X POST http://127.0.0.1:$(COPILOT_DEV_ADDR)/v1/assistant/messages \
 		-H "Authorization: Bearer $(DEV_ADMIN_TOKEN)" \
 		-H "Content-Type: application/json" \
 		-d '{"message":"prod 集群状态"}' | jq '.trace'
 	@echo ""
 	@echo "--- 2) Write 场景 (topic.retention.set) ---"
-	@curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/v1/assistant/messages \
+	@curl --noproxy '*' -sS -X POST http://127.0.0.1:$(COPILOT_DEV_ADDR)/v1/assistant/messages \
 		-H "Authorization: Bearer $(DEV_ADMIN_TOKEN)" \
 		-H "Content-Type: application/json" \
 		-d '{"message":"prod topic orders retention 48 hours"}' | jq '{type, tool, plan_id, summary, trace}'
 	@echo ""
 	@echo "--- 3) Clarification 场景 (缺少 environment) ---"
-	@curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/v1/assistant/messages \
+	@curl --noproxy '*' -sS -X POST http://127.0.0.1:$(COPILOT_DEV_ADDR)/v1/assistant/messages \
 		-H "Authorization: Bearer $(DEV_ADMIN_TOKEN)" \
 		-H "Content-Type: application/json" \
 		-d '{"message":"hello"}' | jq '{type, message, trace}'
@@ -189,7 +195,7 @@ dev-verify-trace:
 # 3) the response surfaces the verification field so you can confirm
 #    the read-back capability ran and matched the applied value.
 dev-verify-verification:
-	@response=$$(curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/v1/assistant/messages \
+	@response=$$(curl --noproxy '*' -sS -X POST http://127.0.0.1:$(COPILOT_DEV_ADDR)/v1/assistant/messages \
 		-H "Authorization: Bearer $(DEV_ADMIN_TOKEN)" \
 		-H "Content-Type: application/json" \
 		-d '{"message":"set prod k1 orders topic retention_hours=72"}'); \
@@ -202,7 +208,7 @@ dev-verify-verification:
 	echo "plan_id=$$plan_id"; \
 	echo ""; \
 	echo "--- 2) 确认并执行 plan (期望 verification.status=success) ---"; \
-	curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/v1/action-plans/$$plan_id/confirm \
+	curl --noproxy '*' -sS -X POST http://127.0.0.1:$(COPILOT_DEV_ADDR)/v1/action-plans/$$plan_id/confirm \
 		-H "Authorization: Bearer $(DEV_ADMIN_TOKEN)" \
 		-H "Content-Type: application/json" \
 		-d "{\"expected_version\":1,\"confirmation_token\":\"$$token\"}" | jq '{type, plan_id, execution_id, status, verification}'

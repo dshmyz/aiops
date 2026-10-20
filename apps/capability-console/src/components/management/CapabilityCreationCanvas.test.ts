@@ -11,35 +11,17 @@ describe('CapabilityCreationCanvas', () => {
     resetCreationCanvasState();
   });
 
-  test('starts from the AI task instead of technical connection fields', () => {
+  test('直接展示来源选择，不再有前置任务描述步骤', () => {
     const wrapper = mount(CapabilityCreationCanvas, {
       props: { capabilities: makeCapabilities() },
       global: { plugins: [ElementPlus] },
     });
 
-    expect(wrapper.find('[data-test="capability-goal-input"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain('用一句话描述任务');
-    expect(wrapper.find('[data-test="url-endpoint-input"]').exists()).toBe(false);
-    expect(wrapper.find('[data-test="preview-openapi-url"]').exists()).toBe(false);
-    expect(wrapper.text()).not.toContain('HTTP 方法');
-  });
-
-  test('reveals source choices only after a goal is confirmed', async () => {
-    const capabilities = makeCapabilities();
-    const wrapper = mount(CapabilityCreationCanvas, {
-      props: { capabilities },
-      global: { plugins: [ElementPlus] },
-    });
-
-    const continueButton = wrapper.find('[data-test="confirm-capability-goal"]');
-    expect((continueButton.element as HTMLButtonElement).disabled).toBe(true);
-
-    await wrapper.find('[data-test="capability-goal-input"]').setValue('查询 MinIO 桶容量');
-    await continueButton.trigger('click');
-
     expect(wrapper.find('[data-test="source-single-api"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="source-openapi"]').exists()).toBe(true);
-    expect(capabilities.urlDescription.value).toBe('查询 MinIO 桶容量');
+    expect(wrapper.find('[data-test="url-endpoint-input"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="preview-openapi-url"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('从一个接口开始');
   });
 
   test('shows one API connection only after choosing the single API source', async () => {
@@ -48,12 +30,24 @@ describe('CapabilityCreationCanvas', () => {
       global: { plugins: [ElementPlus] },
     });
 
-    await wrapper.find('[data-test="capability-goal-input"]').setValue('查询 MinIO 桶容量');
-    await wrapper.find('[data-test="confirm-capability-goal"]').trigger('click');
     await wrapper.find('[data-test="source-single-api"]').trigger('click');
 
     expect(wrapper.find('[data-test="url-endpoint-input"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="preview-openapi-url"]').exists()).toBe(false);
     expect(wrapper.text()).toContain('连接这个工具的数据来源');
+  });
+
+  test('接口地址支持 {var} 路径参数：出现参数值行与查询参数行', async () => {
+    const capabilities = makeCapabilities();
+    const wrapper = mount(CapabilityCreationCanvas, {
+      props: { capabilities },
+      global: { plugins: [ElementPlus] },
+    });
+
+    await wrapper.find('[data-test="source-single-api"]').trigger('click');
+    await wrapper.find('[data-test="url-endpoint-input"]').setValue('https://backend.example.com/api/instances/{instance_id}/metrics?limit=10');
+
+    expect(wrapper.find('[data-test="url-path-value-instance_id"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="url-add-query"]').exists()).toBe(true);
   });
 });

@@ -88,6 +88,11 @@ export interface UseCapabilities {
   urlSampleBody: Ref<string>;
   urlImportLoading: Ref<boolean>;
   generatedUrlResult: Ref<ProbeGenerateResult | null>;
+  /** 显式 {var} 路径参数的试调值；urlPathVariables 驱动 UrlEntry 参数行。 */
+  urlPathValues: Ref<Record<string, string>>;
+  urlPathVariables: ComputedRef<string[]>;
+  urlQueryParams: Ref<Array<{ key: string; value: string; required: boolean }>>;
+  urlProbeWarnings: ComputedRef<string[]>;
   aiPromptOverride: Ref<string | null>;
   aiResponse: Ref<AssistantConsoleResponse | null>;
   aiError: Ref<string>;
@@ -420,6 +425,10 @@ export function useCapabilities(options: UseCapabilitiesOptions = {}): UseCapabi
     urlSampleBody: importWizard.urlSampleBody,
     urlImportLoading: importWizard.urlImportLoading,
     generatedUrlResult: importWizard.generatedUrlResult,
+    urlPathValues: importWizard.urlPathValues,
+    urlPathVariables: importWizard.urlPathVariables,
+    urlQueryParams: importWizard.urlQueryParams,
+    urlProbeWarnings: importWizard.urlProbeWarnings,
     aiPromptOverride: editor.aiPromptOverride,
     aiResponse: editor.aiResponse,
     aiError: editor.aiError,

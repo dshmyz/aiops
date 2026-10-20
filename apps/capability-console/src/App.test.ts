@@ -85,8 +85,6 @@ async function openSource(wrapper: ReturnType<typeof mountApp>) {
     await wrapper.find('[data-test="toggle-wizard"]').trigger('click');
     await flushPromises();
   }
-  await wrapper.find('[data-test="capability-goal-input"]').setValue('查询 MinIO 桶容量');
-  await wrapper.find('[data-test="confirm-capability-goal"]').trigger('click');
   await wrapper.find('[data-test="source-openapi"]').trigger('click');
   await flushPromises();
 }
@@ -810,15 +808,13 @@ describe('Capability Console', () => {
     expect(wrapper.find('[data-test="studio-ledger"]').exists()).toBe(true);
     expect(wrapper.find('.wo-spine').exists()).toBe(false);
 
-    // 「+ 接入 AI 工具」进入画布；画布首屏不含技术连接字段
+    // 「+ 接入 AI 工具」进入画布；画布首屏直接给来源选择
     await wrapper.find('[data-test="toggle-wizard"]').trigger('click');
     await flushPromises();
     expect(wrapper.find('[data-test="creation-canvas"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain('用一句话描述任务');
+    expect(wrapper.find('[data-test="source-openapi"]').exists()).toBe(true);
 
     // 选择导入 API 文档后，Swagger 链路仍可用
-    await wrapper.find('[data-test="capability-goal-input"]').setValue('查询 MinIO 桶容量');
-    await wrapper.find('[data-test="confirm-capability-goal"]').trigger('click');
     await wrapper.find('[data-test="source-openapi"]').trigger('click');
     await wrapper.find('[data-test="preview-openapi-url"]').trigger('click');
     await flushPromises();

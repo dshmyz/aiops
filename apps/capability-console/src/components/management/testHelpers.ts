@@ -49,6 +49,10 @@ export function makeCapabilities(overrides: Partial<UseCapabilities> = {}): UseC
     publishable: 0,
   }));
 
+  // urlPathVariables 与 useCapabilityImport 同规则：从地址里解析显式 {var}。
+  const urlEndpoint = ref('');
+  const urlPathVariables = computed(() => [...urlEndpoint.value.matchAll(/\{([^/{}]+)\}/g)].map((m) => m[1]));
+
   const filteredCapabilities = computed(() => capabilities.value);
 
   return {
@@ -82,12 +86,16 @@ export function makeCapabilities(overrides: Partial<UseCapabilities> = {}): UseC
     candidateFilters: ref({ search: '', recommendation: 'all', domain: 'all' }),
     importBatch,
     importDomainFilter: ref('all'),
-    urlEndpoint: ref(''),
+    urlEndpoint,
     urlMethod: ref('GET'),
     urlDescription: ref(''),
     urlSampleBody: ref(''),
     urlImportLoading: ref(false),
     generatedUrlResult: ref(null),
+    urlPathValues: ref<Record<string, string>>({}),
+    urlPathVariables,
+    urlQueryParams: ref<Array<{ key: string; value: string; required: boolean }>>([]),
+    urlProbeWarnings: computed(() => []),
     aiPromptOverride: ref<string | null>(null),
     aiResponse: ref<AssistantConsoleResponse | null>(null),
     aiError: ref(''),
