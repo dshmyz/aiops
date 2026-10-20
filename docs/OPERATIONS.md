@@ -135,7 +135,14 @@ curl -s http://127.0.0.1:18080/metrics   # Prometheus 指标
 | 文档 | `COPILOT_DOCS_DIR` | 「使用手册」markdown 目录；留空取工作目录 `docs/`，生产可挂到只读卷设绝对路径 |
 | 能力市场 | （迁移自动建表） | `/v1/marketplace/capabilities` 团队共享注册表 |
 | MCP | `COPILOT_MCP_SERVERS` | JSON 数组，启动发现外部 MCP 工具 |
+| MCP | `COPILOT_MCP_SERVER_ENABLED` / `_PORT` / `_TOKEN` | 内置 MCP server 模式（把平台能力暴露为 MCP 服务） |
 | 告警 | `COPILOT_ALERT_WEBHOOK_SECRET` | webhook HMAC 密钥；**未设则 webhook 路由 503 fail-closed** |
+| 告警 | `COPILOT_ALERT_CORRELATION_WINDOW` | 同资源重复告警归并为 incident 的时间窗 |
+| 告警 | `COPILOT_ALERT_LLM_DIAGNOSE` / `_AUTO_DIAGNOSE` / `_AUTO_PLAN` | 告警 LLM 研判 / 自动诊断 / 自动建处置 plan |
+| 告警 | `COPILOT_ALERT_ACTIONS_JSON` | 响应编排规则初始 JSON（运行期经「告警响应编排」视图/`/v1/admin/alert-actions` 管理） |
+| Agent | `COPILOT_ASSISTANT_MAX_STEPS` | 对话 agent loop 最大步数（多步自治循环上限） |
+| Agent | `COPILOT_AGENT_MAX_CONTROL_STEPS` / `COPILOT_AGENT_TRUST_LEVEL` | 渐进自治控制步数与信任等级（readonly/confirm） |
+| LLM | `COPILOT_INTENT_*` / `COPILOT_REASONING_*` / `COPILOT_FALLBACK_*` | 分模型配置：意图解析 / 推理 / 主模型失败降级（各含 BASE_URL/_API_KEY/_MODEL） |
 | 通知 | `COPILOT_FEISHU_WEBHOOK_URL` | 飞书机器人；留空仅日志 |
 | 审计 | `COPILOT_AUDIT_FALLBACK_ENABLED` / `_DIR` | DB 写入失败本地落盘+重放，默认开启 |
 | 知识库 | `COPILOT_KNOWLEDGE_EMBEDDER_BASE_URL` / `_API_KEY` / `_MODEL` | RAG 向量化；配好则执行结果自动入库 |
@@ -189,11 +196,18 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（仅开发/联调）
 | `GET /v1/scheduled-tasks*` | 任一登录用户（写/触发=admin） |
 | `GET /v1/runbooks` | 任一登录用户（仅返回已启用且低风险的 runbook 模板，供定时表单下拉） |
 | `GET /v1/inspection-reports*` | 任一登录用户 |
-| `GET/POST /v1/marketplace/capabilities*` | 读=任一；发布/评分写=admin |
+| `GET /v1/incidents` · `GET /v1/incidents/{id}` | 任一登录用户（告警关联 incident 列表/详情） |
+| `GET /v1/skills*` | 读=任一登录用户；写=operator/admin（内置技能不可删） |
+| `GET /v1/system/agent/metrics` · `GET /v1/system/health-checks` | viewer/operator/admin（agent 自身指标/最近巡检结果） |
+| `GET/POST/PUT/DELETE /v1/marketplace/capabilities*` | 读=任一；发布/评分写=admin |
 | `GET /v1/capabilities{/name}` | viewer/operator/admin（写=admin） |
+| `POST /v1/capabilities/import/openapi-url*` · `/v1/capabilities/probe-*` · `/v1/capabilities/quick-publish*` | **admin**（URL 参数化导入/LLM 富化/probe 生成与推断/快速发布） |
 | `POST /v1/tools/{name}/read` | 任一登录用户（策略/read-runner 强制） |
 | `/v1/auth/config` · `/v1/auth/cas/*` | 无鉴权（登录/OAuth 流程） |
 | `POST /v1/alerts/webhook` · `/v1/alerts/alertmanager` | 无 JWT，共享密钥门：`X-Webhook-Signature`（HMAC）或 `Authorization: Bearer`（Alertmanager 直连） |
+| `GET/PUT/DELETE /v1/admin/alert-actions*` | **admin**（告警响应编排规则） |
+| `GET/POST/PUT/DELETE /v1/admin/notification-channels*` | **admin**（通知通道，热生效） |
+| `GET /v1/admin/assistant/status` | **admin**（assistant 状态与压缩失败指标） |
 | `GET/PUT /v1/admin/prompts*` | **admin** |
 | `GET/POST /v1/admin/knowledge*` · `GET /v1/admin/knowledge/status` | **admin** |
 | `GET/POST /v1/admin/runbook-drafts*` | **admin** |
@@ -201,7 +215,7 @@ go run gen_token.go       # 生成 24h 有效的 admin JWT（仅开发/联调）
 | `GET/POST/PUT/DELETE /v1/mcp/servers*` · `POST .../reload` | **admin** |
 
 未匹配 → `404`。部分 admin 端点未配置时返回 `{configured:false}`（prompts / runbook-drafts /
-knowledge/status），其余（feedback/knowledge/MCP/marketplace/webhook）返回 **503**。
+knowledge/status），其余（feedback/knowledge/skills/MCP/marketplace/webhook）返回 **503**。
 
 ### 4.2 运维与生产端点（非 /v1）
 
@@ -213,30 +227,44 @@ knowledge/status），其余（feedback/knowledge/MCP/marketplace/webhook）返�
 
 ## 5. Web 控制台（capability-console）
 
-单页应用（无路由库，`ref<ActiveView>` 切换），共 **15 个视图**，除 `management` 外均懒加载。
+单页应用（无路由库，`ref<ActiveView>` 切换），共 **19 个视图**，除 `management` 外均懒加载。
 
 **侧栏「运维」**：
 
 | 视图 | 快捷键 | 说明 |
 |------|--------|------|
-| AI 运维助手 | Cmd+1 | 与 copilot 对话（SSE 流式 + 自治 agent loop 步骤时间线） |
-| 能力接入管理 | Cmd+2 | 能力 YAML 草稿/校验/测试/发布/下架 |
-| 运维总览 | Cmd+3 | 运维态势聚合：待确认计划/活动告警/定时巡检/今日执行 + 一键拒绝（`GET /v1/overview`） |
+| AI 运维助手 | Cmd+1 | 与 copilot 对话（SSE 流式；执行证据区在答案上方：思考过程 → 工具调用追踪 → 进度时间线 → 已执行步骤；支持引用追问/取消/失败落库回放） |
+| 能力接入管理 | Cmd+2 | 工单式能力接入：URL（含 `{var}`/query 参数化）或 Swagger 导入 → AI 提炼候选能力（LLM 富化参数说明/示例/枚举）→ 评审 + probe 验证 → 发布/下架 |
+| 运维总览 | — | 运维态势聚合：待确认计划/活动告警/定时巡检/今日执行 + 一键拒绝（`GET /v1/overview`） |
 | 待确认计划 | Cmd+4 | 待人工确认的写 action plan（带未决角标） |
-| 定时巡检 | Cmd+5 | 定时任务 CRUD/触发/运行历史（带失败数角标） |
+| 定时巡检 | Cmd+5 | 定时任务 CRUD/触发/运行历史（带失败数角标），支持 `read`/`runbook` 两类任务 |
 | 巡检报告 | — | 巡检报告列表/详情 |
 
-**侧栏「管理配置」**：
+**侧栏「管理配置」→「告警」**：
+
+| 视图 | 说明 |
+|------|------|
+| 告警全景 | incident 只读全景（5 条证据源软匹配 join） |
+| 告警关联 | 同一资源在时间窗内的重复告警归并为 incident：一次故障一条记录，首条触发自动研判，恢复后自动关闭 |
+| 告警响应编排 | 配置告警→动作自动响应规则：告警到达时自动执行工具序列（诊断+处置） |
+| 通知通道 | 处置确认通知外发通道（飞书/通用 Webhook），热 CRUD 即时生效 |
+
+**侧栏「管理配置」→「助手内容」**：
+
+| 视图 | 快捷键 | 说明 |
+|------|--------|------|
+| 知识库 | Cmd+8 | RAG 文档列表/摄入/状态 |
+| 技能 | — | 运维 SOP 技能管理：命中消息主题的技能正文（相关性 top-3）注入提示词；内置技能不可删，独立于知识库开关 |
+| 用户反馈 | Cmd+9 | 评分/纠正 + 改进建议聚合 + **runbook 草稿生成/启用** |
+
+**侧栏「管理配置」→「系统」**：
 
 | 视图 | 快捷键 | 说明 |
 |------|--------|------|
 | 审计记录 | Cmd+6 | 审计事件过滤 + 自然语言搜索 |
 | 执行历史 | — | **admin**，含敏感输入/错误、plan→审计跳转 |
-| 告警全景 | — | incident 只读全景（5 条证据源软匹配 join） |
-| 能力市场 | — | 团队共享能力注册表：发布/版本/评分/下载 |
+| 能力市场 | — | 跨团队共享能力注册表：发布/版本/评分/下载。**单实例部署可整页跳过**——AI 可用能力只来自能力接入管理，市场只是分发层 |
 | Prompt 管理 | Cmd+7 | prompt 模板 hot-reload |
-| 知识库 | Cmd+8 | RAG 文档列表/摄入/状态 |
-| 用户反馈 | Cmd+9 | 评分/纠正 + 改进建议聚合 + **runbook 草稿生成/启用** |
 | MCP 服务器 | — | MCP 服务器 热 CRUD/reload |
 | 使用手册 | — | 渲染 docs/OPERATIONS.md（admin 只读，`GET /v1/docs/OPERATIONS.md`） |
 
@@ -291,14 +319,24 @@ SQL 注册表，`RunbookRouter` **即时命中**——无需改代码。
 
 外部监控（Prometheus Alertmanager 原生 payload + 通用 webhook）经 HMAC 签名推入 →
 归一化 → 去重（source+external_id）→ 落 `copilot_alerts` → 供 `alert.query` / incident 全景读取。
-详见 [alerting.md](alerting.md)。
+
+- **告警关联闭环**：同一资源在时间窗内的重复告警由 Ingest 归并为一个 incident（一次故障一条记录），
+  仅首条触发自动研判；恢复按极性 fail-closed 校验后自动关闭，升级时重研判。Web 端在「告警关联」视图查看。
+- **响应编排**：「告警响应编排」视图配置告警→动作规则，告警到达时自动执行工具序列（诊断+处置），
+  处置确认经「通知通道」（飞书/通用 Webhook）外发。
+- 详见 [alerting.md](alerting.md)。
 
 ### 6.4 能力接入与发布
 
-- **能力**（YAML）：草稿 → 校验/测试（走 HTTPAdapter，只返回归一化结果）→ `publish` → 运行时按
-  `status: published` 加载。写能力默认不自动执行，走确认 executor。
-- **能力市场**：团队共享的**版本化**注册表，支持发布/版本回溯/下载/评分/依赖管理与 CI 校验。
+- **能力**（YAML）：工单式接入（URL 参数化 / Swagger 导入）→ AI 提炼候选（LLM 自动补参数中文说明/
+  示例/枚举）→ 评审 + probe 验证（写能力按 `sample_body` 离线推断，不试调）→ `publish` →
+  运行时按 `status: published` 加载。写能力默认不自动执行，走确认 executor。
+- **能力市场**：跨团队共享的**版本化**注册表（发布/版本回溯/下载/评分/依赖管理与 CI 校验）。
+  注意市场是**分发层**：发布的 YAML 不会自动进入本实例运行时，需下载后放入 `published/` 或
+  经接入管理导入；单实例部署可整页跳过。
   详见 [capability-marketplace.md](capability-marketplace.md)、[capability-ci.md](capability-ci.md)。
+- **技能注入**：「助手内容 → 技能」维护运维 SOP；对话时按消息主题做相关性召回，top-3 技能正文
+  注入提示词，指导排障步骤与输出约束。
 
 ---
 

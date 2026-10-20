@@ -24,6 +24,15 @@ import ViewShell from '../components/ViewShell.vue';
 type Mode = 'browse' | 'publish';
 const mode = ref<Mode>('browse');
 
+// 入口降权提示：市场面向跨团队共享/复用，单实例部署用不上。用户点「知道了」后
+// 记入 localStorage，不再打扰（能力本身保留，多团队场景再放开）。
+const SHARE_HINT_KEY = 'marketplace-share-hint-dismissed';
+const showShareHint = ref(localStorage.getItem(SHARE_HINT_KEY) !== '1');
+function dismissShareHint() {
+  localStorage.setItem(SHARE_HINT_KEY, '1');
+  showShareHint.value = false;
+}
+
 // ===== Browse / search state =====
 const capabilities = ref<MarketplaceRegistry[]>([]);
 const total = ref(0);
@@ -245,7 +254,19 @@ async function submitPublish() {
     </template>
 
     <!-- ================= Browse ================= -->
-    <div v-if="mode === 'browse'">
+    <!-- market-pane：浏览模式整体包在一个 div 里，view-shell-body 的 gap 进不来，
+         内部区块（语义搜索条 / 筛选卡 / 结果网格）的纵向间距在此层自管 -->
+    <div v-if="mode === 'browse'" class="market-pane">
+      <!-- 入口降权提示：说明市场定位与单实例场景的替代路径 -->
+      <div v-if="showShareHint" class="usage-hint" data-test="marketplace-usage-hint">
+        <span>
+          能力市场用于<b>跨团队共享与复用</b>能力（版本化、评分、下载）。单实例部署时，
+          AI 可用的能力只来自「能力接入管理」，这里可以整页跳过。
+        </span>
+        <button class="mini-button" type="button" data-test="marketplace-usage-hint-dismiss" @click="dismissShareHint">
+          知道了
+        </button>
+      </div>
       <div class="semantic-search">
         <input
           v-model="searchForm.naturalLanguage"
@@ -454,6 +475,26 @@ async function submitPublish() {
 .mode-tab.active {
   background: var(--color-accent);
   color: #fff;
+}
+
+.market-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.usage-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
 }
 
 .semantic-search {

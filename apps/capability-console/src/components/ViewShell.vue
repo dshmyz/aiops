@@ -35,7 +35,9 @@ defineProps<{
         <slot name="actions" />
       </div>
     </header>
-    <slot />
+    <div class="view-shell-body">
+      <slot />
+    </div>
   </section>
 </template>
 
@@ -49,6 +51,17 @@ defineProps<{
   flex-direction: column;
   gap: 0;
   height: 100%;
+  min-height: 0;
+}
+
+.view-shell-body {
+  /* 正文统一容器：筛选条、结果区等 slot 兄弟块之间给固定纵向间距。
+     之前 gap:0 时"搜索/筛选条"和"结果区"两个视觉上独立的区域贴死，
+     全部视图都出现同样的生硬拼接；此处统一收口，视图不必各自补 margin。 */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
   min-height: 0;
 }
 </style>

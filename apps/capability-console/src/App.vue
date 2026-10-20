@@ -1041,7 +1041,7 @@ onUnmounted(() => {
               data-view="marketplace"
               class="nav-item"
               :class="{ active: activeView === 'marketplace' }"
-              :title="'能力市场：浏览/搜索/发布能力'"
+              :title="'能力市场：跨团队共享/复用能力（单实例部署可跳过，AI 可用能力来自能力接入管理）'"
               @click="activeView = 'marketplace'"
             >
               <NavIcon name="marketplace" />
