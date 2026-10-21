@@ -240,15 +240,6 @@ func toolDomain(toolName string) string {
 	return ""
 }
 
-func inputStr(input map[string]any, key string) string {
-	if v, ok := input[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
-}
-
 // buildSummary 把序列执行结果拼成可读摘要。
 func (d *ChainDiagnoser) buildSummary(alert Alert, action AlertAction, results []StepResult) string {
 	var sections []sections

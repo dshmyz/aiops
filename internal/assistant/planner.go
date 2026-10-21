@@ -268,10 +268,6 @@ func extractResourceName(text, domain string) string {
 	return domain + "-" + defaultResourceType(domain)
 }
 
-func tokenExists(text, token string) bool {
-	return regexp.MustCompile(`(^|[^a-z0-9_-])` + regexp.QuoteMeta(token) + `([^a-z0-9_-]|$)`).MatchString(text)
-}
-
 // isMultiDomainDiagnostic reports whether the user message names multiple
 // middleware diagnostic domains (e.g. "检查 glusterfs、minio、kafka").
 func isMultiDomainDiagnostic(message string) bool {

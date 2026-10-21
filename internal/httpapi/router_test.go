@@ -2977,36 +2977,6 @@ func testRouterWithPlans(t *testing.T, runner *readRunner) (http.Handler, *store
 	), repository, planService
 }
 
-// capabilityTestRouter builds a router whose assistant uses the full
-// CapabilityAwarePlanner chain, so write intents (e.g. topic.retention.set)
-// route through dynamic capability resolution. The default testRouter uses the
-// plain DeterministicPlanner, which keeps middleware diagnostic reads on the
-// in-process diagnostic path; write intent resolution only exists in the
-// capability-aware chain (mirroring production wiring).
-func capabilityTestRouter(t *testing.T, runner *readRunner) (http.Handler, *store.MemoryActionPlanStore) {
-	t.Helper()
-	ensureMiddlewareTools(t)
-	repository := store.NewMemoryActionPlanStore()
-	auditService := audit.NewService(repository)
-	readService := execution.NewReadOnlyService(runner, auditService)
-	planService := plans.NewService(repository, plans.ClockFunc(func() time.Time {
-		return time.Date(2026, time.July, 21, 11, 0, 0, 0, time.UTC)
-	}))
-	assistantService := assistant.NewService(assistant.DeterministicPlanner{}, readService, planService, nil)
-	executionService := execution.NewServiceWithClock(repository, writeExecutor{}, func() time.Time {
-		return time.Date(2026, time.July, 21, 11, 1, 0, 0, time.UTC)
-	})
-	router := httpapi.NewRouter(
-		httpapi.NewHMACAuthenticator([]byte("test-secret")),
-		readService,
-		httpapi.WithAssistant(assistantService),
-		httpapi.WithActionPlans(repository),
-		httpapi.WithActionPlanConfirmation(planService, executionService),
-		httpapi.WithAuditEvents(auditService),
-	)
-	return router, repository
-}
-
 func createPendingPlan(t *testing.T, service *plans.Service) plans.Plan {
 	t.Helper()
 	decision := policy.Evaluate(admin(), tool(t, "topic.retention.set"), retentionInput())

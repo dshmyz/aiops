@@ -212,7 +212,9 @@ func normalizeSwagger2Operation(operation *yaml.Node) {
 	if len(rest) != len(parameters.Content) {
 		parameters.Content = rest
 	}
-	media := yamlMapping(yamlNode("schema"), yamlMapping())
+	// bodySchema 非空走 schema 顶层；否则 formData 平铺。两个分支都会赋值，
+	// 初值省去（lint ineffassign）。
+	var media *yaml.Node
 	if bodySchema != nil {
 		// body 参数：schema 顶层是 body 结构；in:body 时参数自身的 name 没有意义
 		media = yamlMapping(yamlNode("schema"), bodySchema)

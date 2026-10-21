@@ -39,7 +39,7 @@ func newKeyValueEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 func (e *keyValueEncoder) Clone() zapcore.Encoder {
 	nc := *e
 	nc.buf = kvBufferPool.Get()
-	nc.buf.Write(e.buf.Bytes())
+	_, _ = nc.buf.Write(e.buf.Bytes()) // bytes 级 buffer 写入不会失败（与 zapcore 上游一致）
 	return &nc
 }
 

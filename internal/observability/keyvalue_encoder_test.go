@@ -65,7 +65,6 @@ func TestKeyValueEncoderScalarFieldsFlat(t *testing.T) {
 }
 
 func TestKeyValueEncoderKeepsComplexFields(t *testing.T) {
-	type inner struct{ Name string `json:"name"` }
 	out := captureConsole(t, func(l *zap.Logger) {
 		l.Info("msg",
 			zap.Object("cap", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
