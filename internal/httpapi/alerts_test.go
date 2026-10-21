@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -342,12 +343,24 @@ func TestAlertmanagerWebhookRejectsOversizedBody(t *testing.T) {
 }
 
 // captureChainDiagnoser 记录被触发执行的规则名，验证 webhook→registry→链式研判链路。
+// 生产侧 Ingest 以 go goroutine 异步执行链路，读取侧与写入侧并发，必须加锁
+// （否则 go test -race 报 data race）。
 type captureChainDiagnoser struct {
+	mu        sync.Mutex
 	triggered []string
 }
 
 func (c *captureChainDiagnoser) ExecuteChain(_ context.Context, _ alert.Alert, action alert.AlertAction) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.triggered = append(c.triggered, action.Name)
+}
+
+// snapshot 返回当前已触发规则名的副本，供主测试 goroutine 安全读取。
+func (c *captureChainDiagnoser) snapshot() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.triggered...)
 }
 
 // httpapiRuleStore 是 AlertActionRuleStore 的内存实现，供 webhook 链路测试用。
@@ -439,13 +452,13 @@ func TestAlertWebhookDrivesRegistryChain(t *testing.T) {
 	// 异步 goroutine，等待执行完成。
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(chain.triggered) > 0 {
+		if len(chain.snapshot()) > 0 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if len(chain.triggered) != 1 || chain.triggered[0] != "kafka-lag" {
-		t.Fatalf("triggered = %v, want exactly [kafka-lag]", chain.triggered)
+	if got := chain.snapshot(); len(got) != 1 || got[0] != "kafka-lag" {
+		t.Fatalf("triggered = %v, want exactly [kafka-lag]", got)
 	}
 }
 
@@ -491,7 +504,7 @@ func TestAlertWebhookRegistryDisabledRuleNotTriggered(t *testing.T) {
 	}
 	// 停用规则不应触发执行。
 	time.Sleep(300 * time.Millisecond)
-	if len(chain.triggered) != 0 {
-		t.Fatalf("triggered = %v, want none (disabled rule)", chain.triggered)
+	if got := chain.snapshot(); len(got) != 0 {
+		t.Fatalf("triggered = %v, want none (disabled rule)", got)
 	}
 }
