@@ -237,6 +237,8 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
   const urlPathValues = ref<Record<string, string>>({});
   /** 查询参数行：进 input_schema 标 in:"query"，试调时携带实际值。 */
   const urlQueryParams = ref<Array<{ key: string; value: string; required: boolean }>>([]);
+  /** 本次试调的本地提示（如查询参数与路径参数同名），与后端 probe warnings 合并展示。 */
+  const urlLocalWarnings = ref<string[]>([]);
   /** URL 路径里声明的 {var}（含已知模板还原出的），驱动 UrlEntry 的参数值行。 */
   const urlPathVariables = computed(() => {
     const { path } = splitEndpoint(urlEndpoint.value);
@@ -268,7 +270,7 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
         }
         urlEndpoint.value = `${base_url}${rawPath}`;
       }
-      const rows = urlQueryParams.value.filter((row) => row.key.trim());
+      const allRows = urlQueryParams.value.filter((row) => row.key.trim());
       // 显式 {var} 模板优先；其次是已知路径模板还原；都没有按字面量处理。
       const explicitVars = extractPathVariables(rawPath);
       const known = templatizePath(rawPath);
@@ -279,7 +281,25 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
       }
       if (explicitVars.length === 0) {
         Object.assign(pathValues, known.values);
+        // 已知模板同样有可编辑的参数行：用户改过的值优先于 URL 字面量，
+        // 否则「参数行里改值」会被静默忽略（探测仍用 URL 里的旧值）。
+        for (const name of Object.keys(known.values)) {
+          const edited = urlPathValues.value[name];
+          if (edited) {
+            pathValues[name] = edited;
+          }
+        }
       }
+      // 查询参数行与路径变量同名会互相覆盖：路径参数已在模板里，查询行按同名
+      // 处理会劫持路径取值并把 schema 字段改成 in:"query"。路径优先 + 显式提示。
+      const pathVarNames = new Set(Object.keys(pathValues));
+      const conflictingKeys = [...new Set(
+        allRows.map((row) => row.key.trim()).filter((key) => pathVarNames.has(key)),
+      )];
+      urlLocalWarnings.value = conflictingKeys.map(
+        (key) => `查询参数 ${key} 与路径参数同名，本次试调按路径参数处理：请重命名或删除该查询参数行`,
+      );
+      const rows = allRows.filter((row) => !pathVarNames.has(row.key.trim()));
       const hasInput = Object.keys(pathValues).length > 0 || rows.length > 0;
       const input: Record<string, unknown> = {};
       for (const [name, value] of Object.entries(pathValues)) {
@@ -343,9 +363,12 @@ export function useCapabilityImport(options: UseCapabilityImportOptions) {
     if (!result) {
       return [];
     }
-    return (result.probe?.warnings ?? [])
-      .filter((warning) => !warning.includes('LLM 推断失败'))
-      .map(classifyProbeError);
+    return [
+      ...urlLocalWarnings.value,
+      ...(result.probe?.warnings ?? [])
+        .filter((warning) => !warning.includes('LLM 推断失败'))
+        .map(classifyProbeError),
+    ];
   });
 
   /** 把 probe-generate 生成的能力草稿写回评审区：选中草稿并打开工单评审页。 */

@@ -167,6 +167,45 @@ describe('useCapabilityImport / 单接口接入（probe-generate）', () => {
     }));
   });
 
+  it('runUrlProbeGenerate：已知模板路径的参数行编辑优先于 URL 字面量', async () => {
+    mockedProbeGenerate.mockResolvedValue({
+      capability: { name: 'minio.bucket.capacity.read' } as never,
+      probe: { raw_body: '{}', inferred_by: 'rules' },
+    });
+    const { wizard } = setup();
+    wizard.urlEndpoint.value = 'https://backend.example.com/api/minio/demo/buckets/archive/capacity';
+    wizard.urlPathValues.value = { cluster: 'demo', bucket: 'logs' };
+
+    await wizard.runUrlProbeGenerate();
+
+    expect(mockedProbeGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      backend: expect.objectContaining({ path: '/api/minio/{cluster}/buckets/{bucket}/capacity' }),
+      input: { cluster: 'demo', bucket: 'logs' },
+    }));
+  });
+
+  it('runUrlProbeGenerate：查询参数行与路径变量同名时路径优先并给出提示', async () => {
+    mockedProbeGenerate.mockResolvedValue({
+      capability: { name: 'app.instance.metrics.read' } as never,
+      probe: { raw_body: '{}', inferred_by: 'rules' },
+    });
+    const { wizard } = setup();
+    wizard.urlEndpoint.value = 'https://backend.example.com/api/instances/{instance_id}/metrics';
+    wizard.urlPathValues.value = { instance_id: 'i-123' };
+    wizard.urlQueryParams.value = [{ key: 'instance_id', value: 'hijack', required: false }];
+
+    await wizard.runUrlProbeGenerate();
+
+    // 路径取值不被查询行劫持；schema 中该字段仍按路径变量处理（不标 in=query）。
+    expect(mockedProbeGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      input: { instance_id: 'i-123' },
+    }));
+    const draft = wizard.generatedUrlResult.value!.capability;
+    expect(draft.input_schema.instance_id).not.toMatchObject({ in: 'query' });
+    expect(draft.input_schema.instance_id.examples).toEqual(['i-123']);
+    expect(wizard.urlProbeWarnings.value.some((warning) => warning.includes('instance_id'))).toBe(true);
+  });
+
   it('runUrlProbeGenerate 失败时按错误类型给引导', async () => {
     mockedProbeGenerate.mockRejectedValue(new Error('missing path value "instance_id"'));
     const { wizard, error } = setup();

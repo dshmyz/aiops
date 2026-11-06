@@ -128,7 +128,7 @@ function removeQueryParam(index: number) {
 
     <div v-if="result && capabilities.managementPhase.value === 'source'" data-test="url-generate-result" class="url-entry__result">
       <ul v-if="capabilities.urlProbeWarnings.value.length > 0" data-test="url-probe-warnings" class="url-entry__warnings">
-        <li v-for="warning in capabilities.urlProbeWarnings.value" :key="warning">{{ warning }}</li>
+        <li v-for="(warning, index) in capabilities.urlProbeWarnings.value" :key="`${index}-${warning}`">{{ warning }}</li>
       </ul>
       <details data-test="url-three-way" class="url-entry__three-way">
         <summary>查看验证详情</summary>
